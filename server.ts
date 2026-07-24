@@ -21,11 +21,13 @@ import { animatorRouter } from "./server/animator/routes.ts";
 import { assetsRouter } from "./server/assets/routes";
 import { referenceSessionsRouter } from "./server/reference-sessions/routes";
 import { modelBuildsRouter, modelBuildService } from "./server/model-builds/routes";
+import { spatialGeneratorRouter } from "./server/spatial-generator/routes";
 import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
 import { isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
+import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
 import { planWagsBox, getPriorBoxHistory } from "./server/wags/planner";
 import { deliverBox, getOwnedWardrobeItems } from "./server/wags/delivery";
@@ -1048,6 +1050,7 @@ async function startServer() {
   app.use("/api/assets", requireCanonicalAssetsEnabled, requireAuth, assetsRouter);
   app.use("/api/reference-sessions", requireAuth, referenceSessionsRouter);
   app.use("/api/model-builds", requireAuth, modelBuildsRouter);
+  app.use("/api/spatial-generator", requireAuth, spatialGeneratorRouter);
   app.use("/api/rig-pipeline", requireAuth, createRigPipelineRouter(getPool));
   app.use("/api/fur-bin", createFurBinRouter(getPool, { isAdmin: isUserAdmin }));
   if (isModelBuildV3Enabled()) {
@@ -1059,6 +1062,9 @@ async function startServer() {
     void new RigPipelineService(getPool).recoverStaleRigJobs().catch((error) => {
       console.error("[rig-pipeline recovery] Startup recovery failed:", error.message);
     });
+  }
+  if (isInhouseSpatialGeneratorEnabled()) {
+    console.log("[spatial-generator] Feature enabled - health check available at /api/spatial-generator/health");
   }
 
   app.post("/api/bim/import-ifc", requireAuth, async (req: AuthedRequest, res) => {
