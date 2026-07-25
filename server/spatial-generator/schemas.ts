@@ -141,7 +141,7 @@ export const NormalizedPrimitiveSchema = z.object({
     .optional(),
   curveSweep: z
     .object({
-      controlPoints: z.array(z.tuple([z.number(), z.number(), z.number()])).min(2).max(16),
+      controlPoints: z.array(z.array(z.number()).length(3)).min(2).max(16),
       segments: z.number().int().positive().max(128),
     })
     .optional(),
@@ -248,8 +248,8 @@ export const SpatialObserveOutputSchema = z.object({
     name: z.string().max(128),
     confidence: z.number().min(0).max(1),
     normalizedBounds: z.object({
-      min: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]),
-      max: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1), z.number().min(0).max(1)]),
+      min: z.array(z.number()).length(3),
+      max: z.array(z.number()).length(3),
     }),
     viewIndices: z.array(z.number().int().min(0).max(3)).min(1).max(4),
   })).max(50),

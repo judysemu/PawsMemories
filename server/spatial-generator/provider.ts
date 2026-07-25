@@ -115,17 +115,6 @@ export async function generatePlan(
   return result;
 }
 
-// ─── spatial.math.v1 ──────────────────────────────────────────────────────────
-
-export async function executeMath(input: SpatialMathInput): Promise<SpatialMathOutput> {
-  const result = await layer8Request(
-    "/v1/spatial/math",
-    input,
-    SpatialMathOutputSchema,
-  );
-  return result;
-}
-
 // ─── spatial.verify.v1 ────────────────────────────────────────────────────────
 
 export async function verifyDraft(

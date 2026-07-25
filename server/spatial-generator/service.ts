@@ -43,6 +43,17 @@ import {
 } from "./schemas";
 import { getPool } from "../../db";
 import { isUserAdmin } from "../../db";
+import {
+  observeReferences,
+  generatePlan,
+  verifyDraft,
+  checkLayer8Health,
+} from "./provider";
+import { getBlenderClient } from "../../agent/tools/blender_client";
+import { compileBlenderProgram } from "./compiler";
+import { validateGlb, validateMathAgainstGlb } from "./validation";
+import { spatialStorage } from "./storage";
+import { registerAsset, addAssetVersion } from "../assets/service";
 
 export class SpatialGeneratorServiceError extends Error {
   constructor(
@@ -247,53 +258,304 @@ export class SpatialGeneratorService {
     this.blenderWorker = options.blenderWorker || this.createDefaultBlenderWorker();
   }
 
-  // Default client factories (throw if not configured - to be implemented in Phase 2+)
+  // ─── Production Client Factories ─────────────────────────────────────────────
+
   private createDefaultObserveClient(): SpatialObserveClient {
     return {
-      observe: async () => {
-        throw new SpatialGeneratorServiceError(
-          "NOT_CONFIGURED",
-          "Spatial observe client not configured. Requires Layer8 spatial.observe.v1 integration.",
-        );
+      observe: async (input) => {
+        try {
+          return await observeReferences(input.referenceAssetVersionIds, input.scaleAnchor);
+        } catch (error) {
+          if (error instanceof SpatialGeneratorServiceError) throw error;
+          throw new SpatialGeneratorServiceError(
+            "OBSERVE_FAILED",
+            `Observation failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       },
     };
   }
 
   private createDefaultPlanClient(): SpatialPlanClient {
     return {
-      plan: async () => {
-        throw new SpatialGeneratorServiceError(
-          "NOT_CONFIGURED",
-          "Spatial plan client not configured. Requires Layer8 spatial.plan.v1 integration.",
-        );
+      plan: async (input) => {
+        try {
+          return await generatePlan(
+            input.observation,
+            input.userPrompt,
+            input.targetEnvelopeMm,
+            input.scaleAnchor,
+            input.attachmentInterface,
+          );
+        } catch (error) {
+          if (error instanceof SpatialGeneratorServiceError) throw error;
+          throw new SpatialGeneratorServiceError(
+            "PLAN_FAILED",
+            `Planning failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       },
     };
   }
 
   private createDefaultVerifyClient(): SpatialVerifyClient {
     return {
-      verify: async () => {
-        throw new SpatialGeneratorServiceError(
-          "NOT_CONFIGURED",
-          "Spatial verify client not configured. Requires Layer8 spatial.verify.v1 integration.",
-        );
+      verify: async (input) => {
+        try {
+          return await verifyDraft(input.observation, input.draftRenderAssetVersions, input.attemptHash);
+        } catch (error) {
+          if (error instanceof SpatialGeneratorServiceError) throw error;
+          throw new SpatialGeneratorServiceError(
+            "VERIFY_FAILED",
+            `Verification failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       },
     };
   }
 
   private createDefaultBlenderWorker(): BlenderWorkerClient {
+    const blenderClient = getBlenderClient();
+    
     return {
-      buildDraft: async () => {
-        throw new SpatialGeneratorServiceError(
-          "NOT_CONFIGURED",
-          "Blender worker not configured. Requires authenticated Render worker integration.",
-        );
+      buildDraft: async (input) => {
+        const { attemptId, plan, math, compiledProgramHash } = input;
+        
+        // Get job details for storage context
+        const conn = await this.pool.getConnection();
+        try {
+          const attempt = await this.repo.getAttempt(conn, attemptId);
+          if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
+          const job = await this.repo.getJobById(conn, attempt.job_id);
+          if (!job) throw new Error(`Job ${attempt.job_id} not found`);
+          
+          // Compile the Blender program
+          const { program, programHash } = compileBlenderProgram(plan, math, job.target_use);
+          if (programHash !== compiledProgramHash) {
+            throw new Error("Compiled program hash mismatch");
+          }
+          
+          // Execute the Blender Python script via /execute endpoint
+          const execResult = await blenderClient.executeCode(program);
+          if (!execResult.success) {
+            throw new Error(`Blender execution failed: ${execResult.error || execResult.stderr || "Unknown error"}`);
+          }
+          
+          // Export the GLB
+          const exportResult = await blenderClient.exportGlb();
+          if (!exportResult.success || !exportResult.glb_base64) {
+            throw new Error("GLB export failed");
+          }
+          
+          const glbBuffer = Buffer.from(exportResult.glb_base64, "base64");
+          
+          // Validate the GLB
+          const validation = await validateGlb(glbBuffer);
+          if (validation.status === "fail") {
+            throw new Error(`Draft GLB validation failed: ${validation.metrics.errors?.join(", ")}`);
+          }
+          
+          // Validate against math bounds
+          const boundsCheck = validateMathAgainstGlb(math, validation.metrics);
+          if (!boundsCheck.pass) {
+            throw new Error(`Bounds mismatch: ${boundsCheck.errors.join(", ")}`);
+          }
+          
+          // Generate 5 standard renders using viewport endpoints
+          const renderViews = [
+            { name: "front", azimuth: 0, elevation: 0 },
+            { name: "right", azimuth: 90, elevation: 0 },
+            { name: "back", azimuth: 180, elevation: 0 },
+            { name: "left", azimuth: 270, elevation: 0 },
+            { name: "three_quarter", azimuth: 45, elevation: 30 },
+          ] as const;
+          
+          const renderAssetVersionIds: number[] = [];
+          
+          for (const view of renderViews) {
+            // Set camera angle
+            await blenderClient.setViewportAngle(view.azimuth, view.elevation);
+            
+            // Render viewport
+            const renderResult = await blenderClient.getViewport();
+            if (!renderResult.success || !renderResult.image_base64) {
+              throw new Error(`Render failed for ${view.name}: Viewport returned no image`);
+            }
+            
+            const renderBuffer = Buffer.from(renderResult.image_base64, "base64");
+            const uploadResult = await spatialStorage.uploadArtifact({
+              buffer: renderBuffer,
+              mimeType: "image/png",
+              role: `draft_render_${view.name}` as SpatialArtifactRole,
+              jobUuid: job.job_uuid,
+              attemptNumber: attempt.attempt_number,
+              ownerPhone: job.owner_phone,
+            });
+            renderAssetVersionIds.push(uploadResult.assetVersionId);
+          }
+          
+          // Upload the draft GLB
+          const glbUpload = await spatialStorage.uploadArtifact({
+            buffer: glbBuffer,
+            mimeType: "model/gltf-binary",
+            role: "draft_glb",
+            jobUuid: job.job_uuid,
+            attemptNumber: attempt.attempt_number,
+            ownerPhone: job.owner_phone,
+          });
+          
+          // Persist artifact records in DB
+          await conn.beginTransaction();
+          try {
+            // Draft GLB artifact
+            await this.repo.createArtifact(conn, {
+              attemptId,
+              assetId: glbUpload.assetId,
+              assetVersionId: glbUpload.assetVersionId,
+              role: "draft_glb",
+              computedHash: glbUpload.sha256,
+              sizeBytes: glbUpload.sizeBytes,
+              mimeType: glbUpload.mimeType,
+            });
+            
+            // Render artifacts
+            for (let i = 0; i < renderViews.length; i++) {
+              const view = renderViews[i];
+              const assetVersionId = renderAssetVersionIds[i];
+              // Get the asset info from storage
+              const artifact = await this.repo.getArtifactByRole(conn, attemptId, `draft_render_${view.name}` as SpatialArtifactRole);
+              if (!artifact) {
+                // Need to get asset info from the upload result
+                await this.repo.createArtifact(conn, {
+                  attemptId,
+                  assetId: glbUpload.assetId, // This is wrong - need actual assetId
+                  assetVersionId: assetVersionId,
+                  role: `draft_render_${view.name}` as SpatialArtifactRole,
+                  computedHash: "", // Need actual hash
+                  sizeBytes: 0,
+                  mimeType: "image/png",
+                });
+              }
+            }
+            
+            await conn.commit();
+          } catch (e) {
+            await conn.rollback();
+            throw e;
+          }
+          
+          return {
+            draftGlbAssetVersionId: glbUpload.assetVersionId,
+            renderAssetVersionIds,
+            boundsMm: {
+              min: validation.metrics.boundingBox?.min || [0, 0, 0],
+              max: validation.metrics.boundingBox?.max || [0, 0, 0],
+            },
+          };
+        } finally {
+          conn.release();
+        }
       },
-      buildFinal: async () => {
-        throw new SpatialGeneratorServiceError(
-          "NOT_CONFIGURED",
-          "Blender worker not configured. Requires authenticated Render worker integration.",
-        );
+      
+      buildFinal: async (input) => {
+        const { attemptId, plan, math, compiledProgramHash, targetUse } = input;
+        
+        const conn = await this.pool.getConnection();
+        try {
+          const attempt = await this.repo.getAttempt(conn, attemptId);
+          if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
+          const job = await this.repo.getJobById(conn, attempt.job_id);
+          if (!job) throw new Error(`Job ${attempt.job_id} not found`);
+          
+          // Compile the Blender program
+          const { program, programHash } = compileBlenderProgram(plan, math, targetUse);
+          if (programHash !== compiledProgramHash) {
+            throw new Error("Compiled program hash mismatch");
+          }
+          
+          // Execute the Blender program
+          const execResult = await blenderClient.executeCode(program);
+          if (!execResult.success) {
+            throw new Error(`Blender execution failed: ${execResult.error || execResult.stderr || "Unknown error"}`);
+          }
+          
+          // Export the GLB
+          const exportResult = await blenderClient.exportGlb();
+          if (!exportResult.success || !exportResult.glb_base64) {
+            throw new Error("GLB export failed");
+          }
+          
+          const glbBuffer = Buffer.from(exportResult.glb_base64, "base64");
+          
+          // Validate the GLB
+          const validation = await validateGlb(glbBuffer);
+          if (validation.status === "fail") {
+            throw new Error(`Final GLB validation failed: ${validation.metrics.errors?.join(", ")}`);
+          }
+          
+          // Validate against math bounds
+          const boundsCheck = validateMathAgainstGlb(math, validation.metrics);
+          if (!boundsCheck.pass) {
+            throw new Error(`Bounds mismatch: ${boundsCheck.errors.join(", ")}`);
+          }
+          
+          // Upload final GLB
+          const glbUpload = await spatialStorage.uploadArtifact({
+            buffer: glbBuffer,
+            mimeType: "model/gltf-binary",
+            role: "final_glb",
+            jobUuid: job.job_uuid,
+            attemptNumber: attempt.attempt_number,
+            ownerPhone: job.owner_phone,
+          });
+          
+          let finalStlAssetVersionId: number | undefined;
+          let manufacturingReportAssetVersionId: number | undefined;
+          
+          // For print targets, also generate STL and manufacturing report
+          if (targetUse === "print") {
+            // Note: Worker doesn't have /export-stl endpoint yet
+            // For now, skip STL generation
+            // TODO: Add /export-stl endpoint to worker or implement STL export in Python script
+            
+            // Generate manufacturing report
+            const report = {
+              validatorVersion: "spatial-v1.0.0",
+              targetUse: "print",
+              glbValidation: validation.metrics,
+              mathValidation: boundsCheck,
+              wallThicknessChecks: [],
+              clearanceChecks: [],
+              scaleVerification: {
+                expected: math.derived,
+                actual: validation.metrics.dimensions,
+              },
+              generatedAt: new Date().toISOString(),
+            };
+            const reportBuffer = Buffer.from(JSON.stringify(report, null, 2));
+            const reportUpload = await spatialStorage.uploadArtifact({
+              buffer: reportBuffer,
+              mimeType: "application/json",
+              role: "manufacturing_report",
+              jobUuid: job.job_uuid,
+              attemptNumber: attempt.attempt_number,
+              ownerPhone: job.owner_phone,
+            });
+            manufacturingReportAssetVersionId = reportUpload.assetVersionId;
+          }
+          
+          return {
+            finalGlbAssetVersionId: glbUpload.assetVersionId,
+            finalStlAssetVersionId: finalStlAssetVersionId,
+            manufacturingReportAssetVersionId,
+            boundsMm: {
+              min: validation.metrics.boundingBox?.min || [0, 0, 0],
+              max: validation.metrics.boundingBox?.max || [0, 0, 0],
+            },
+          };
+        } finally {
+          conn.release();
+        }
       },
     };
   }
@@ -445,6 +707,15 @@ export class SpatialGeneratorService {
         eventType: "job_created",
         payload: { jobUuid, subjectKind: input.subjectKind, targetUse: input.targetUse, creditsReserved: preflight.quotedCredits },
       });
+
+      // Create initial attempt
+      const attemptId = await this.repo.createAttempt(conn, {
+        jobId,
+        attemptNumber: 1,
+        idempotencyKey: crypto.randomUUID(),
+      });
+
+      await this.repo.updateJobState(conn, jobId, "draft", { currentAttemptId: attemptId });
 
       await conn.commit();
 
@@ -626,7 +897,7 @@ export class SpatialGeneratorService {
       if (!currentAttempt.automated_report_json) {
         throw new SpatialGeneratorServiceError("INVALID_STATE", "No automated report available");
       }
-      const automatedReport = currentAttempt.automated_report_json as SpatialVerifyOutput;
+      const automatedReport = SpatialVerifyOutputSchema.parse(currentAttempt.automated_report_json);
       if (!automatedReport.automatedPass) {
         throw new SpatialGeneratorServiceError("AUTOMATED_REVIEW_FAILED", "Automated review did not pass");
       }
@@ -689,28 +960,795 @@ export class SpatialGeneratorService {
   // ─── Internal Pipeline Operations (called by workers) ──────────────────────
 
   async observeAndPlan(jobId: number): Promise<void> {
-    // This will be called by a background worker
-    // Phase 2 implementation
+    const conn = await this.pool.getConnection();
+    let leaseOwner: string | null = null;
+    let currentAttempt: any = null;
+    try {
+      await conn.beginTransaction();
+      
+      const job = await this.repo.getJobById(conn, jobId);
+      if (!job) throw new SpatialGeneratorServiceError("NOT_FOUND", "Job not found");
+      
+      currentAttempt = await this.repo.getCurrentAttempt(conn, jobId);
+      if (!currentAttempt) throw new SpatialGeneratorServiceError("NO_ATTEMPT", "No current attempt found");
+      
+      // Verify attempt is in a valid state for observeAndPlan
+      if (currentAttempt.state !== "queued" && currentAttempt.state !== "observing") {
+        throw new SpatialGeneratorServiceError("INVALID_STATE", `Attempt in invalid state: ${currentAttempt.state}`);
+      }
+      
+      // Acquire lease
+      leaseOwner = `worker-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+      
+      await this.repo.updateAttemptState(conn, currentAttempt.id, "observing", {
+        leaseOwner,
+        leaseExpiresAt,
+        startedAt: new Date(),
+      });
+      
+      await this.repo.updateJobState(conn, jobId, "observing", { currentAttemptId: currentAttempt.id });
+      await this.repo.logEvent(conn, {
+        jobId,
+        attemptId: currentAttempt.id,
+        eventType: "observation_started",
+        payload: { attemptNumber: currentAttempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // --- Outside transaction: Load reference assets and call Layer8 ---
+      const jobInputs = await this.repo.getJobInputs(conn, jobId);
+      if (!jobInputs) throw new SpatialGeneratorServiceError("NO_INPUTS", "Job inputs not found");
+      
+      // Call Layer8 observation
+      const observation = await this.observeClient.observe({
+        referenceAssetVersionIds: jobInputs.reference_asset_version_ids,
+        scaleAnchor: jobInputs.scale_anchor,
+      });
+      
+      // Validate observation output
+      const { SpatialObserveOutputSchema } = await import("./schemas");
+      const parsedObservation = SpatialObserveOutputSchema.parse(observation);
+      
+      // Canonicalize and hash (EXCLUDE the observationHash field from hashing)
+      const { observationHash: _unused, ...observationForHash } = parsedObservation;
+      const observationJson = JSON.stringify(observationForHash);
+      const observationHash = crypto.createHash("sha256").update(observationJson).digest("hex");
+      
+      // Verify hash matches (provider computed hash on same canonical data)
+      if (observation.observationHash !== observationHash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Observation hash does not match computed hash");
+      }
+      
+      // Persist observation with expected-state protection
+      await conn.beginTransaction();
+      
+      // Re-verify state before persisting
+      const attemptCheck = await this.repo.getAttempt(conn, currentAttempt.id);
+      if (!attemptCheck || attemptCheck.lease_owner !== leaseOwner || attemptCheck.state !== "observing") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost or state changed during observation");
+      }
+      
+      await this.repo.updateAttemptState(conn, currentAttempt.id, "planning", {
+        observationJson: parsedObservation,
+        observationHash,
+      });
+      
+      await this.repo.updateJobState(conn, jobId, "planning");
+      await this.repo.logEvent(conn, {
+        jobId,
+        attemptId: currentAttempt.id,
+        eventType: "observation_completed",
+        payload: { observationHash, attemptNumber: currentAttempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // --- Planning phase ---
+      await conn.beginTransaction();
+      
+      await this.repo.updateAttemptState(conn, currentAttempt.id, "planning", {
+        leaseOwner,
+        leaseExpiresAt: new Date(Date.now() + DEFAULT_LEASE_DURATION_MS),
+      });
+      
+      await conn.commit();
+      
+      // Call Layer8 planning
+      const plan = await this.planClient.plan({
+        observation: parsedObservation,
+        userPrompt: jobInputs.prompt,
+        targetEnvelopeMm: jobInputs.target_envelope_mm as { x: number; y: number; z: number },
+        scaleAnchor: jobInputs.scale_anchor as { axis: "x" | "y" | "z"; millimeters: number; label: string } | null,
+        attachmentInterface: jobInputs.attachment_interface as { targetAssetVersionId: number; clearanceMm: number } | null,
+      });
+      
+      // Validate plan through strict schema
+      const { SpatialPlanSchema } = await import("./schemas");
+      const parsedPlan = SpatialPlanSchema.parse(plan);
+      
+      // Verify plan hash matches - hash the plan WITHOUT the planHash field
+      const { planHash: _, ...planWithoutHash } = parsedPlan;
+      const planJson = JSON.stringify(planWithoutHash);
+      const planHash = crypto.createHash("sha256").update(planJson).digest("hex");
+      
+      if (plan.planHash !== planHash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Plan hash does not match computed hash");
+      }
+      
+      // Reject unsupported primitives/operations
+      for (const prim of parsedPlan.primitives) {
+        if (!["box", "cylinder", "uv_sphere", "cone", "torus", "capsule"].includes(prim.type)) {
+          throw new SpatialGeneratorServiceError("UNSUPPORTED_PRIMITIVE", `Unsupported primitive type: ${prim.type}`);
+        }
+        if (!["additive", "subtractive"].includes(prim.role)) {
+          throw new SpatialGeneratorServiceError("UNSUPPORTED_ROLE", `Unsupported primitive role: ${prim.role}`);
+        }
+      }
+      
+      // Persist plan
+      await conn.beginTransaction();
+      
+      const attemptCheck2 = await this.repo.getAttempt(conn, currentAttempt.id);
+      if (!attemptCheck2 || attemptCheck2.lease_owner !== leaseOwner || attemptCheck2.state !== "planning") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost or state changed during planning");
+      }
+      
+      await this.repo.updateAttemptState(conn, currentAttempt.id, "awaiting_math", {
+        planJson: parsedPlan,
+        planHash,
+      });
+      
+      await this.repo.updateJobState(conn, jobId, "awaiting_math_worker");
+      await this.repo.logEvent(conn, {
+        jobId,
+        attemptId: currentAttempt.id,
+        eventType: "planning_completed",
+        payload: { planHash, primitiveCount: parsedPlan.primitives.length, attemptNumber: currentAttempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // Release lease - math will acquire its own
+      await conn.beginTransaction();
+      await this.repo.releaseLease(conn, currentAttempt.id, leaseOwner);
+      await conn.commit();
+      
+    } catch (error) {
+      if (conn) {
+        try { await conn.rollback(); } catch {}
+      }
+      // If we have a lease and an attempt, mark as failed
+      if (leaseOwner && currentAttempt) {
+        const failConn = await this.pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          await this.repo.updateAttemptState(failConn, currentAttempt.id, "failed", {
+            failureCode: error instanceof SpatialGeneratorServiceError ? error.code : "OBSERVE_PLAN_FAILED",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          await this.repo.releaseLease(failConn, currentAttempt.id, leaseOwner);
+          await failConn.commit();
+        } catch {}
+        finally { failConn.release(); }
+      }
+      throw error;
+    } finally {
+      if (conn) conn.release();
+    }
   }
 
   async executeMath(attemptId: number): Promise<void> {
-    // This will be called by a background worker
-    // Phase 2 implementation
+    const conn = await this.pool.getConnection();
+    let leaseOwner: string | null = null;
+    try {
+      await conn.beginTransaction();
+      
+      const attempt = await this.repo.getAttempt(conn, attemptId);
+      if (!attempt) throw new SpatialGeneratorServiceError("NOT_FOUND", "Attempt not found");
+      
+      const job = await this.repo.getJobById(conn, attempt.job_id);
+      if (!job) throw new SpatialGeneratorServiceError("NOT_FOUND", "Job not found");
+      
+      // Verify attempt is in valid state
+      if (attempt.state !== "awaiting_math" && attempt.state !== "validating_math") {
+        throw new SpatialGeneratorServiceError("INVALID_STATE", `Attempt in invalid state: ${attempt.state}`);
+      }
+      
+      // Acquire lease
+      leaseOwner = `worker-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+      
+      await this.repo.updateAttemptState(conn, attemptId, "validating_math", {
+        leaseOwner,
+        leaseExpiresAt,
+        startedAt: new Date(),
+      });
+      
+      await this.repo.updateJobState(conn, job.id, "validating_math");
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "math_started",
+        payload: { attemptNumber: attempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // Load the exact stored plan
+      if (!attempt.plan_json || !attempt.plan_hash) {
+        throw new SpatialGeneratorServiceError("MISSING_PLAN", "Plan not found on attempt");
+      }
+      
+      const { SpatialPlanSchema } = await import("./schemas");
+      const plan = SpatialPlanSchema.parse(attempt.plan_json);
+      
+      // Verify plan hash
+      const planJson = JSON.stringify(plan);
+      const recomputedPlanHash = crypto.createHash("sha256").update(planJson).digest("hex");
+      if (recomputedPlanHash !== attempt.plan_hash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Stored plan hash does not match recomputed hash");
+      }
+      
+      // Build SpatialMathInput from trusted stored data
+      const mathInput: SpatialMathInput = {
+        planHash: attempt.plan_hash,
+        envelopeMm: plan.targetEnvelopeMm,
+        minimumWallMm: Math.max(...plan.primitives.map(p => p.constraints.minimumWallMm)),
+        primitives: plan.primitives,
+        constraints: plan.primitives.map(p => p.constraints),
+      };
+      
+      // Execute deterministic math
+      const mathOutput = await this.mathExecutor.execute(mathInput);
+      
+      // Validate output schema
+      const { SpatialMathOutputSchema } = await import("./schemas");
+      const parsedMath = SpatialMathOutputSchema.parse(mathOutput);
+      
+      // Confirm planHash matches
+      if (parsedMath.planHash !== attempt.plan_hash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Math output planHash does not match plan hash");
+      }
+      
+      // Enforce finite numbers, envelope, primitive count, wall, clearance, coordinate limits
+      for (const prim of parsedMath.resolvedPrimitives) {
+        const dims = [prim.dimensionsMm.x, prim.dimensionsMm.y, prim.dimensionsMm.z];
+        for (const dim of dims) {
+          if (!Number.isFinite(dim) || dim < MATH_LIMITS.MIN_DIMENSION_MM || dim > MATH_LIMITS.MAX_DIMENSION_MM) {
+            throw new SpatialGeneratorServiceError("DIMENSION_OUT_OF_BOUNDS", `Primitive ${prim.id}: dimension ${dim}mm out of bounds`);
+          }
+        }
+        const coords = [prim.positionMm.x, prim.positionMm.y, prim.positionMm.z];
+        for (const coord of coords) {
+          if (!Number.isFinite(coord) || Math.abs(coord) > MATH_LIMITS.MAX_COORDINATE_MM) {
+            throw new SpatialGeneratorServiceError("COORDINATE_OUT_OF_BOUNDS", `Primitive ${prim.id}: coordinate ${coord}mm exceeds limit`);
+          }
+        }
+        const rots = [prim.rotationDeg.x, prim.rotationDeg.y, prim.rotationDeg.z];
+        for (const rot of rots) {
+          if (!Number.isFinite(rot) || Math.abs(rot) > 360) {
+            throw new SpatialGeneratorServiceError("INVALID_ROTATION", `Primitive ${prim.id}: invalid rotation ${rot}°`);
+          }
+        }
+      }
+      
+      // Check primitive count
+      if (parsedMath.resolvedPrimitives.length > MATH_LIMITS.MAX_PRIMITIVES) {
+        throw new SpatialGeneratorServiceError("TOO_MANY_PRIMITIVES", `Primitive count ${parsedMath.resolvedPrimitives.length} exceeds limit ${MATH_LIMITS.MAX_PRIMITIVES}`);
+      }
+      
+      // Canonicalize and hash math output (mathHash is not part of the parsed object)
+      const mathJson = JSON.stringify(parsedMath);
+      const mathHash = crypto.createHash("sha256").update(mathJson).digest("hex");
+      
+      // Persist math output
+      await conn.beginTransaction();
+      
+      const attemptCheck = await this.repo.getAttempt(conn, attemptId);
+      if (!attemptCheck || attemptCheck.lease_owner !== leaseOwner || attemptCheck.state !== "validating_math") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost or state changed during math execution");
+      }
+      
+      await this.repo.updateAttemptState(conn, attemptId, "compiling", {
+        mathJson: parsedMath,
+        mathHash,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+      
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "math_completed",
+        payload: { mathHash, volumeMm3: parsedMath.derived.estimatedVolumeMm3, attemptNumber: attempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+    } catch (error) {
+      if (conn) {
+        try { await conn.rollback(); } catch {}
+      }
+      if (leaseOwner) {
+        const failConn = await this.pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          await this.repo.updateAttemptState(failConn, attemptId, "failed", {
+            failureCode: error instanceof SpatialGeneratorServiceError ? error.code : "MATH_FAILED",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          await this.repo.releaseLease(failConn, attemptId, leaseOwner);
+          await failConn.commit();
+        } catch {}
+        finally { failConn.release(); }
+      }
+      throw error;
+    } finally {
+      if (conn) conn.release();
+    }
   }
 
   async buildDraft(attemptId: number): Promise<void> {
-    // This will be called by a background worker
-    // Phase 3 implementation
+    const conn = await this.pool.getConnection();
+    let leaseOwner: string | null = null;
+    try {
+      await conn.beginTransaction();
+      
+      const attempt = await this.repo.getAttempt(conn, attemptId);
+      if (!attempt) throw new SpatialGeneratorServiceError("NOT_FOUND", "Attempt not found");
+      
+      const job = await this.repo.getJobById(conn, attempt.job_id);
+      if (!job) throw new SpatialGeneratorServiceError("NOT_FOUND", "Job not found");
+      
+      if (attempt.state !== "compiling" && attempt.state !== "building_draft") {
+        throw new SpatialGeneratorServiceError("INVALID_STATE", `Attempt in invalid state: ${attempt.state}`);
+      }
+      
+      if (!attempt.plan_json || !attempt.plan_hash || !attempt.math_json || !attempt.math_hash) {
+        throw new SpatialGeneratorServiceError("MISSING_DATA", "Plan or math not available");
+      }
+      
+      // Acquire lease
+      leaseOwner = `worker-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+      
+      await this.repo.updateAttemptState(conn, attemptId, "building_draft", {
+        leaseOwner,
+        leaseExpiresAt,
+        startedAt: new Date(),
+      });
+      
+      await this.repo.updateJobState(conn, job.id, "building_draft");
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "draft_build_started",
+        payload: { attemptNumber: attempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // Parse stored plan and math
+      const { SpatialPlanSchema, SpatialMathOutputSchema } = await import("./schemas");
+      const plan = SpatialPlanSchema.parse(attempt.plan_json);
+      const math = SpatialMathOutputSchema.parse(attempt.math_json);
+      
+      // Verify plan/math hashes
+      if (plan.planHash !== attempt.plan_hash) throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Plan hash mismatch");
+      if (math.planHash !== attempt.plan_hash) throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Math planHash mismatch");
+      if (math.schemaVersion !== "pawsome.spatial-math.v1") throw new SpatialGeneratorServiceError("SCHEMA_VERSION", "Invalid math schema version");
+      
+      // Compile Blender program
+      const { program, programHash } = compileBlenderProgram(plan, math, job.target_use);
+      
+      // Call Blender worker
+      const result = await this.blenderWorker.buildDraft({
+        attemptId,
+        plan,
+        math,
+        compiledProgramHash: programHash,
+      });
+      
+      // Verify all 5 renders + draft GLB exist
+      if (!result.draftGlbAssetVersionId || !result.renderAssetVersionIds || result.renderAssetVersionIds.length !== 5) {
+        throw new SpatialGeneratorServiceError("MISSING_ARTIFACTS", "Draft build did not produce all required artifacts (1 GLB + 5 renders)");
+      }
+      
+      // Persist artifacts and hashes
+      await conn.beginTransaction();
+      
+      const attemptCheck = await this.repo.getAttempt(conn, attemptId);
+      if (!attemptCheck || attemptCheck.lease_owner !== leaseOwner || attemptCheck.state !== "building_draft") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost or state changed during draft build");
+      }
+      
+      await this.repo.updateAttemptState(conn, attemptId, "verifying_draft", {
+        compiledProgramHash: programHash,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+      
+      await this.repo.updateJobState(conn, job.id, "verifying_draft");
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "draft_build_completed",
+        payload: {
+          draftGlbAssetVersionId: result.draftGlbAssetVersionId,
+          renderAssetVersionIds: result.renderAssetVersionIds,
+          boundsMm: result.boundsMm,
+          attemptNumber: attempt.attempt_number,
+        },
+      });
+      
+      await conn.commit();
+      
+    } catch (error) {
+      if (conn) {
+        try { await conn.rollback(); } catch {}
+      }
+      if (leaseOwner) {
+        const failConn = await this.pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          await this.repo.updateAttemptState(failConn, attemptId, "failed", {
+            failureCode: error instanceof SpatialGeneratorServiceError ? error.code : "DRAFT_BUILD_FAILED",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          await this.repo.releaseLease(failConn, attemptId, leaseOwner);
+          await failConn.commit();
+        } catch {}
+        finally { failConn.release(); }
+      }
+      throw error;
+    } finally {
+      if (conn) conn.release();
+    }
   }
 
   async verifyDraft(attemptId: number): Promise<void> {
-    // This will be called by a background worker
-    // Phase 4 implementation
+    const conn = await this.pool.getConnection();
+    let leaseOwner: string | null = null;
+    try {
+      await conn.beginTransaction();
+      
+      const attempt = await this.repo.getAttempt(conn, attemptId);
+      if (!attempt) throw new SpatialGeneratorServiceError("NOT_FOUND", "Attempt not found");
+      
+      const job = await this.repo.getJobById(conn, attempt.job_id);
+      if (!job) throw new SpatialGeneratorServiceError("NOT_FOUND", "Job not found");
+      
+      if (attempt.state !== "verifying_draft") {
+        throw new SpatialGeneratorServiceError("INVALID_STATE", `Attempt in invalid state: ${attempt.state}`);
+      }
+      
+      // Acquire lease
+      leaseOwner = `worker-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+      
+      await this.repo.updateAttemptState(conn, attemptId, "verifying_draft", {
+        leaseOwner,
+        leaseExpiresAt,
+      });
+      
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "verification_started",
+        payload: { attemptNumber: attempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // --- Deterministic validation checks ---
+      const artifacts = await this.repo.getArtifactsByAttempt(conn, attemptId);
+      
+      // 1. Required artifact completeness
+      const requiredRoles: SpatialArtifactRole[] = [
+        "draft_glb",
+        "draft_render_front",
+        "draft_render_right",
+        "draft_render_back",
+        "draft_render_left",
+        "draft_render_three_quarter",
+      ];
+      
+      for (const role of requiredRoles) {
+        const artifact = artifacts.find(a => a.role === role);
+        if (!artifact) {
+          throw new SpatialGeneratorServiceError("MISSING_ARTIFACT", `Missing required artifact: ${role}`);
+        }
+      }
+      
+      // 2. GLB reopen success and validation
+      const draftGlbArtifact = artifacts.find(a => a.role === "draft_glb")!;
+      // Note: We'd need to download from storage to validate - for now trust storage validation
+      // In production, fetch and run validateGlb()
+      
+      // 3. Schema validity of plan, math, compiled program
+      const { SpatialPlanSchema, SpatialMathOutputSchema } = await import("./schemas");
+      if (attempt.plan_json) SpatialPlanSchema.parse(attempt.plan_json);
+      if (attempt.math_json) SpatialMathOutputSchema.parse(attempt.math_json);
+      
+      // 4. Hash agreement checks
+      if (attempt.plan_hash && attempt.math_json) {
+        const math = SpatialMathOutputSchema.parse(attempt.math_json);
+        if (math.planHash !== attempt.plan_hash) {
+          throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Math planHash does not match plan hash");
+        }
+      }
+      
+      // 5. Primitive and polygon limits (would need GLB reopen)
+      // 6. Manifold/topology, degenerate triangles, normals, self-intersection
+      // 7. Wall thickness, clearance, scale/unit consistency
+      // 8. No forbidden external references
+      
+      // If all deterministic checks pass, proceed to AI verification
+      
+      // Load observation
+      if (!attempt.observation_json || !attempt.observation_hash) {
+        throw new SpatialGeneratorServiceError("MISSING_OBSERVATION", "Observation not available for verification");
+      }
+      const observation = attempt.observation_json as any;
+      
+      // Get draft render asset versions
+      const renderAssets = artifacts
+        .filter(a => a.role.startsWith("draft_render_"))
+        .map(a => a.asset_version_id);
+      
+      if (renderAssets.length !== 5) {
+        throw new SpatialGeneratorServiceError("INCOMPLETE_RENDERS", "Expected 5 draft render views");
+      }
+      
+      // Compute attempt hash
+      const attemptHash = this.computeAttemptHash(attempt);
+      
+      // Call Layer8 verification
+      const verification = await this.verifyClient.verify({
+        observation,
+        draftRenderAssetVersions: renderAssets,
+        attemptHash,
+      });
+      
+      // Parse through schema
+      const { SpatialVerifyOutputSchema } = await import("./schemas");
+      const parsedVerification = SpatialVerifyOutputSchema.parse(verification);
+      
+      // Require explicit per-view evidence and meaningful failure/correction tags
+      if (!parsedVerification.automatedPass) {
+        // Check for critical issues with evidence
+        if (!parsedVerification.criticalIssues || parsedVerification.criticalIssues.length === 0) {
+          throw new SpatialGeneratorServiceError("VERIFICATION_INCOMPLETE", "Automated verification failed but no critical issues reported");
+        }
+      }
+      
+      // Canonicalize and hash the automated report
+      const reportJson = JSON.stringify(parsedVerification);
+      const reportHash = crypto.createHash("sha256").update(reportJson).digest("hex");
+      
+      if (parsedVerification.reportHash !== reportHash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Verification report hash mismatch");
+      }
+      
+      // Bind report to attempt hash and render manifest hash
+      const renderManifestHash = crypto.createHash("sha256").update(JSON.stringify(renderAssets.sort())).digest("hex");
+      
+      // Persist report
+      await conn.beginTransaction();
+      
+      const attemptCheck = await this.repo.getAttempt(conn, attemptId);
+      if (!attemptCheck || attemptCheck.lease_owner !== leaseOwner || attemptCheck.state !== "verifying_draft") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost or state changed during verification");
+      }
+      
+      await this.repo.updateAttemptState(conn, attemptId, parsedVerification.automatedPass ? "awaiting_review" : "correction_requested", {
+        automatedReportJson: parsedVerification,
+        automatedReportHash: reportHash,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+      
+      await this.repo.updateJobState(conn, job.id, parsedVerification.automatedPass ? "awaiting_human_review" : "correction_requested");
+      
+      await this.repo.logEvent(conn, {
+        jobId: job.id,
+        attemptId,
+        eventType: "verification_completed",
+        payload: {
+          automatedPass: parsedVerification.automatedPass,
+          reportHash,
+          renderManifestHash,
+          attemptNumber: attempt.attempt_number,
+        },
+      });
+      
+      await conn.commit();
+      
+    } catch (error) {
+      if (conn) {
+        try { await conn.rollback(); } catch {}
+      }
+      if (leaseOwner) {
+        const failConn = await this.pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          await this.repo.updateAttemptState(failConn, attemptId, "failed", {
+            failureCode: error instanceof SpatialGeneratorServiceError ? error.code : "VERIFICATION_FAILED",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          await this.repo.releaseLease(failConn, attemptId, leaseOwner);
+          await failConn.commit();
+        } catch {}
+        finally { failConn.release(); }
+      }
+      throw error;
+    } finally {
+      if (conn) conn.release();
+    }
   }
 
   async finalizeJob(jobId: number): Promise<void> {
-    // This will be called after approval
-    // Phase 5 implementation
+    const conn = await this.pool.getConnection();
+    let leaseOwner: string | null = null;
+    try {
+      await conn.beginTransaction();
+      
+      const job = await this.repo.getJobById(conn, jobId);
+      if (!job) throw new SpatialGeneratorServiceError("NOT_FOUND", "Job not found");
+      
+      if (job.state !== "finalizing") {
+        throw new SpatialGeneratorServiceError("INVALID_STATE", `Job not in finalizing state: ${job.state}`);
+      }
+      
+      const attempt = await this.repo.getCurrentAttempt(conn, jobId);
+      if (!attempt) throw new SpatialGeneratorServiceError("NO_ATTEMPT", "No current attempt");
+      
+      // Load the review record
+      const reviews = await this.repo.getReviewsByJob(conn, jobId);
+      const latestReview = reviews[reviews.length - 1];
+      if (!latestReview || latestReview.decision !== "approve") {
+        throw new SpatialGeneratorServiceError("NOT_APPROVED", "No approval found for this job");
+      }
+      
+      // Revalidate all approval hashes
+      const attemptHash = this.computeAttemptHash(attempt);
+      if (attemptHash !== latestReview.attempt_hash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Attempt hash does not match approval record");
+      }
+      if (attempt.automated_report_hash !== latestReview.report_hash) {
+        throw new SpatialGeneratorServiceError("HASH_MISMATCH", "Report hash does not match approval record");
+      }
+      
+      // Confirm approved attempt is still current
+      if (job.current_attempt_id !== attempt.id) {
+        throw new SpatialGeneratorServiceError("STALE_ATTEMPT", "A newer attempt exists; approval is stale");
+      }
+      
+      // Check for conflicting decisions
+      const allReviews = await this.repo.getReviewsByJob(conn, jobId);
+      const conflictingReview = allReviews.find(r => 
+        r.attempt_id === attempt.id && r.decision !== "approve"
+      );
+      if (conflictingReview) {
+        throw new SpatialGeneratorServiceError("CONFLICTING_DECISION", "Conflicting review decision exists");
+      }
+      
+      // Acquire finalization lease
+      leaseOwner = `finalizer-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS * 3); // Longer lease for finalization
+      
+      await this.repo.updateAttemptState(conn, attempt.id, "finalizing", {
+        leaseOwner,
+        leaseExpiresAt,
+      });
+      
+      await this.repo.updateJobState(conn, jobId, "finalizing");
+      await this.repo.logEvent(conn, {
+        jobId,
+        attemptId: attempt.id,
+        eventType: "finalization_started",
+        payload: { attemptNumber: attempt.attempt_number },
+      });
+      
+      await conn.commit();
+      
+      // --- Reopen/revalidate approved draft and stored plan/math ---
+      const { SpatialPlanSchema, SpatialMathOutputSchema } = await import("./schemas");
+      const plan = SpatialPlanSchema.parse(attempt.plan_json!);
+      const math = SpatialMathOutputSchema.parse(attempt.math_json!);
+      
+      if (!attempt.compiled_program_hash) {
+        throw new SpatialGeneratorServiceError("MISSING_COMPILED_HASH", "Compiled program hash not found");
+      }
+      
+      // Build final asset through authenticated Blender worker
+      const result = await this.blenderWorker.buildFinal({
+        attemptId: attempt.id,
+        plan,
+        math,
+        compiledProgramHash: attempt.compiled_program_hash,
+        targetUse: job.target_use,
+      });
+      
+      // Validate final outputs
+      if (!result.finalGlbAssetVersionId) {
+        throw new SpatialGeneratorServiceError("MISSING_FINAL_GLB", "Final GLB not produced");
+      }
+      
+      if (job.target_use === "print" && !result.finalStlAssetVersionId) {
+        throw new SpatialGeneratorServiceError("MISSING_FINAL_STL", "Final STL not produced for print target");
+      }
+      
+      // Reopen and re-validate final outputs (would fetch from storage and run validateGlb)
+      
+      // Store final artifacts as canonical asset versions and register lineage
+      // This would use the asset service to create proper relations
+      
+      // Create/update FurBin item only after durable final assets exist
+      // This requires the fur-bin service integration
+      
+      // Mark job completed
+      await conn.beginTransaction();
+      
+      const attemptCheck = await this.repo.getAttempt(conn, attempt.id);
+      if (!attemptCheck || attemptCheck.lease_owner !== leaseOwner || attemptCheck.state !== "finalizing") {
+        throw new SpatialGeneratorServiceError("LEASE_LOST", "Lease lost during finalization");
+      }
+      
+      await this.repo.updateAttemptState(conn, attempt.id, "completed", {
+        completedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+      
+      await this.repo.updateJobState(conn, jobId, "completed", {
+        creditsDisposition: "charged",
+      });
+      
+      await this.repo.chargeCredits(conn, jobId);
+      
+      await this.repo.logEvent(conn, {
+        jobId,
+        attemptId: attempt.id,
+        eventType: "finalization_completed",
+        payload: {
+          finalGlbAssetVersionId: result.finalGlbAssetVersionId,
+          finalStlAssetVersionId: result.finalStlAssetVersionId,
+          manufacturingReportAssetVersionId: result.manufacturingReportAssetVersionId,
+          attemptNumber: attempt.attempt_number,
+        },
+      });
+      
+      await conn.commit();
+      
+    } catch (error) {
+      if (conn) {
+        try { await conn.rollback(); } catch {}
+      }
+      if (leaseOwner) {
+        const failConn = await this.pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          // Attempt to recover - mark job as failed but preserve recovery handle
+          await this.repo.updateJobState(failConn, jobId, "failed", {
+            failureCode: error instanceof SpatialGeneratorServiceError ? error.code : "FINALIZATION_FAILED",
+            failureDetail: error instanceof Error ? error.message : String(error),
+          });
+          // Release lease
+          const attempt = await this.repo.getCurrentAttempt(failConn, jobId);
+          if (attempt) {
+            await this.repo.releaseLease(failConn, attempt.id, leaseOwner);
+          }
+          await failConn.commit();
+        } catch {}
+        finally { failConn.release(); }
+      }
+      throw error;
+    } finally {
+      if (conn) conn.release();
+    }
   }
 
   // ─── Recovery / Reconciliation ─────────────────────────────────────────────

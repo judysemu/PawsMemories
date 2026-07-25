@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 34;
+export const CURRENT_SCHEMA_VERSION = 35;
 
 export interface Migration {
   version: number;
@@ -1571,6 +1571,7 @@ export const MIGRATIONS: Migration[] = [
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         job_id BIGINT NOT NULL,
         attempt_number TINYINT UNSIGNED NOT NULL,
+        idempotency_key CHAR(36) NOT NULL,
         state ENUM('queued','observing','planning','awaiting_math','validating_math','compiling','building_draft','verifying_draft','awaiting_review','correction_requested','finalizing','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
         observation_json JSON NULL,
         observation_hash CHAR(64) NULL,
@@ -1590,6 +1591,7 @@ export const MIGRATIONS: Migration[] = [
         error_message TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_spatial_attempt_job_number (job_id, attempt_number),
+        UNIQUE KEY uniq_spatial_attempt_idempotency (idempotency_key),
         UNIQUE KEY uniq_spatial_attempt_identity (job_id, id),
         INDEX idx_spatial_attempt_state (state),
         INDEX idx_spatial_attempt_lease (state, lease_expires_at),
@@ -1747,6 +1749,20 @@ export const MIGRATIONS: Migration[] = [
 
       `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wardrobe_wags_box_items' AND COLUMN_NAME = 'asset_generated_at'`,
       `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE wardrobe_wags_box_items ADD COLUMN asset_generated_at DATETIME NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 35,
+    name: "spatial_attempt_idempotency_key",
+    skipWhenTableMissing: "spatial_generation_attempts",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'spatial_generation_attempts' AND COLUMN_NAME = 'idempotency_key'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE spatial_generation_attempts ADD COLUMN idempotency_key CHAR(36) NOT NULL DEFAULT \"\" AFTER attempt_number', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'spatial_generation_attempts' AND INDEX_NAME = 'uniq_spatial_attempt_idempotency'`,
+      `SET @stmt = IF(@idx_exists = 0, 'ALTER TABLE spatial_generation_attempts ADD UNIQUE KEY uniq_spatial_attempt_idempotency (idempotency_key)', 'SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },

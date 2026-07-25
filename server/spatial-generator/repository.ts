@@ -462,6 +462,31 @@ export class SpatialGeneratorRepository {
     return rows as any[];
   }
 
+  async getJobInputs(
+    conn: mysql.PoolConnection,
+    jobId: number,
+  ): Promise<{
+    prompt: string;
+    target_envelope_mm: { x: number; y: number; z: number };
+    scale_anchor: { axis: "x" | "y" | "z"; millimeters: number; label: string } | null;
+    attachment_interface: { targetAssetVersionId: number; clearanceMm: number } | null;
+    reference_asset_version_ids: number[];
+  } | null> {
+    const [rows] = await conn.query(
+      "SELECT prompt, target_envelope_mm, scale_anchor, attachment_interface, reference_asset_version_ids FROM spatial_generation_inputs WHERE job_id = ?",
+      [jobId],
+    );
+    const row = (rows as any[])[0];
+    if (!row) return null;
+    return {
+      prompt: row.prompt,
+      target_envelope_mm: JSON.parse(row.target_envelope_mm),
+      scale_anchor: row.scale_anchor ? JSON.parse(row.scale_anchor) : null,
+      attachment_interface: row.attachment_interface ? JSON.parse(row.attachment_interface) : null,
+      reference_asset_version_ids: JSON.parse(row.reference_asset_version_ids || "[]"),
+    };
+  }
+
   // ─── Recovery / Reconciliation ─────────────────────────────────────────────
 
   async findStaleLeases(

@@ -224,6 +224,10 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `STATIONERY_V2_ENABLED` | Keep `false`; provider shipping/sandbox gate is still open |
 | `WAGS_V2_ENABLED` / `WAGS_STRIPE_WEBHOOK_SECRET` | Keep `false` until the separate Wags Stripe webhook and sandbox gate pass |
 | `BIM_V2_ENABLED` / `VITE_BIM_V2_ENABLED` | Keep both `false` until accepted-model, Shell-worker, Render IFC, and browser gates pass |
+| `INHOUSE_SPATIAL_GENERATOR_ENABLED` | Keep `false`; enables in-house accessory/hard-surface generator (Thermal Cascade: observe → plan → math → compile → draft → verify → approve → finalize). Replaces Tripo only for accessories, attachments, and printables. Organic avatars still use Tripo. | false |
+| `LAYER8_BASE_URL` | Base URL for Layer8 control plane (e.g., `https://layer8.pawsome.ai`) | |
+| `LAYER8_TENANT_API_KEY` | Tenant API key for Layer8 spatial operations | |
+| `LAYER8_SPATIAL_TIMEOUT_MS` | Optional timeout for Layer8 spatial calls (default 30000) | |
 
 > **Hostinger note:** set `DB_HOST` to `127.0.0.1`, not `localhost`. On Node 18+, `mysql2` resolves `localhost` to IPv6 (`::1`), which the Hostinger MySQL user grant does not cover — causing `Access denied … @'::1'`. Forcing IPv4 with `127.0.0.1` resolves it.
 

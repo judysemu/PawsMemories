@@ -7,8 +7,6 @@
  * Used by the MCP tool interface and the LangGraph orchestrator.
  */
 
-
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -139,10 +137,8 @@ export class BlenderClient {
     this.timeoutMs = timeoutMs;
   }
 
-  /**
-   * Send an HTTP request to the Blender worker proxy.
-   */
-  private async send<T = any>(endpoint: string, method: string = "GET", body?: any): Promise<T> {
+  /** Send an HTTP request to the Blender worker proxy. */
+  public async send<T = any>(endpoint: string, method: string = "GET", body?: any): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 

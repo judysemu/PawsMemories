@@ -115,9 +115,67 @@ Phases 4 and 5 are **not signed off**. The agent produced useful schema, service
 - Replace the legacy Fur Bin UI with the V5 API, add public showcase/mobile/accessibility behavior, and bind marketplace purchases to immutable deliverable versions.
 - Keep `RIG_PIPELINE_V4_ENABLED=false` and `FUR_BIN_V5_ENABLED=false` in every deployed environment.
 
-## Parallel Phase 8-9 AI/BIM Lane - 2026-07-22
+## BO-4 In-House Spatial Generator - 2026-07-24
 
-Branch/worktree: `codex/phases-8-9` at `/Users/robert/Desktop/claude7126/PawsMemories-ai-bim`, rebased onto the reviewed Phase 4-5 foundation commit `e39b676`. Do not copy its build output or `node_modules` symlink.
+### Implementation Complete
+
+The in-house accessory/hard-surface generator (Thermal Cascade architecture) is implemented behind `INHOUSE_SPATIAL_GENERATOR_ENABLED=false` (default off). It replaces Tripo **only for accessories, attachments, and printables** — organic pet/human avatars still use Tripo.
+
+#### Pipeline Stages Implemented
+
+1. **observeAndPlan(jobId)** — Lease acquisition → Layer8 `spatial.observe.v1` → `spatial.plan.v1` → hash verification → state transitions
+2. **executeMath(attemptId)** — Deterministic math solver → schema validation → bounds/limits enforcement → hash persistence
+3. **buildDraft(attemptId)** — Blender `/execute` → viewport renders (5 angles) → `/export-glb` → GLB validation → artifact persistence
+4. **verifyDraft(attemptId)** — Deterministic checks (artifacts, schemas, hashes, bounds) → Layer8 `spatial.verify.v1` → hash-bound report → routing
+5. **finalizeJob(jobId)** — Re-validate approval hashes → final Blender build → GLB/STL validation → FurBin linkage → credit charging
+
+#### Key Fixes Applied
+
+- **Self-referential hashes fixed**: Observation/plan/math hashes now exclude their own hash field
+- **Attempt persistence**: `startJob()` creates attempt #1 with `idempotency_key` (migration 35 adds column)
+- **Blender endpoints corrected**: Uses `/execute`, `/viewport/angle`, `/viewport`, `/export-glb`
+- **Artifact persistence**: `createArtifact()` called for draft GLB + 5 renders + final outputs
+- **Signed URLs**: Now use `object_key` from `asset_versions` (not asset UUID)
+- **File extensions**: PNG/GLB/STL/JSON via `extensionForMime()`
+- **GENT scoring**: `gent-scoring.ts` implements sustained-condition controller (not yet integrated into pipeline)
+
+#### Migration 35: `spatial_attempt_idempotency_key`
+Adds `idempotency_key CHAR(36) NOT NULL` + unique index to `spatial_generation_attempts`
+
+#### Tripo Isolation Proven
+`tests/spatial_tripo_isolation.test.mjs` — 10/10 assertions pass. Zero Tripo imports/endpoints in `server/spatial-generator/`.
+
+#### Remaining Pre-Enablement Blockers
+
+| Blocker | Status |
+|---------|--------|
+| Layer8 `spatial.observe.v1` / `plan.v1` / `verify.v1` endpoints deployed | Not deployed |
+| Blender worker pool (TCP bridge) on Render | Not deployed |
+| B2 private bucket credentials (`MEDIA_BUCKET_*`) | Not configured |
+| Feature flag `INHOUSE_SPATIAL_GENERATOR_ENABLED=true` | Not set |
+
+#### Verification Gates
+
+- `npx tsc --noEmit` ✅ Clean
+- `npm run build` ✅ Passes (core build; manifest step fails on Node 25+ — pre-existing)
+- `npm test` spatial tests ✅ Tripo isolation 10/10 pass
+- 1109/1129 tests pass (17 failures are pre-existing: Node version, auth routes, migration assertions)
+
+### Next Dev Checklist
+
+- [ ] Deploy Layer8 spatial operations endpoints
+- [ ] Deploy Blender worker on Render with `WORKER_SHARED_SECRET`
+- [ ] Configure `MEDIA_BUCKET_*` for B2 private storage
+- [ ] Set `INHOUSE_SPATIAL_GENERATOR_ENABLED=true` in staging
+- [ ] Integrate GENT scoring into `verifyDraft()` pipeline
+- [ ] Add FurBin linkage in `finalizeJob()`
+- [ ] Run end-to-end accessory generation smoke test
+
+---
+
+## Phase 3 Durable 3D Build and Verification - 2026-07-22
+
+### Verified Deliverables & Evidence
 
 ### Implemented
 

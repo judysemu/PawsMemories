@@ -23,10 +23,23 @@ export class SpatialStorage {
     this.pool = pool || getPool();
   }
 
-  private generateObjectKey(role: SpatialArtifactRole, jobUuid: string, attemptNumber: number): string {
+  private generateObjectKey(role: SpatialArtifactRole, jobUuid: string, attemptNumber: number, mimeType: string): string {
     const timestamp = Date.now();
     const random = crypto.randomBytes(4).toString("hex");
-    return `models/spatial/${jobUuid}/attempt-${attemptNumber}/${role}-${timestamp}-${random}.glb`;
+    const extension = extensionForMime(mimeType);
+    return `models/spatial/${jobUuid}/attempt-${attemptNumber}/${role}-${timestamp}-${random}.${extension}`;
+  }
+
+  private getExtensionFromMimeType(mimeType: string): string {
+    const mimeToExt: Record<string, string> = {
+      "model/gltf-binary": "glb",
+      "application/sla": "stl",
+      "application/octet-stream": "stl",
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "application/json": "json",
+    };
+    return mimeToExt[mimeType] || "bin";
   }
 
   async uploadArtifact(
@@ -43,7 +56,7 @@ export class SpatialStorage {
     const sha256 = sha256Hex(buffer);
     const sizeBytes = buffer.length;
     const assetUuid = uuidv4();
-    const objectKey = this.generateObjectKey(role, jobUuid, attemptNumber);
+    const objectKey = this.generateObjectKey(role, jobUuid, attemptNumber, mimeType);
 
     // Upload to B2 private bucket
     await putPrivateObject(objectKey, buffer, mimeType);
@@ -68,7 +81,7 @@ export class SpatialStorage {
         license: "proprietary",
         commercialUseEligible: false,
       },
-      { internal: true },
+      { authorization: { internal: true } },
     );
 
     return {
@@ -96,7 +109,7 @@ export class SpatialStorage {
     const { assetUuid, buffer, mimeType, role, jobUuid, attemptNumber, ownerPhone } = params;
     const sha256 = sha256Hex(buffer);
     const sizeBytes = buffer.length;
-    const objectKey = this.generateObjectKey(role, jobUuid, attemptNumber);
+    const objectKey = this.generateObjectKey(role, jobUuid, attemptNumber, mimeType);
 
     // Upload to B2 private bucket
     await putPrivateObject(objectKey, buffer, mimeType);
@@ -156,12 +169,12 @@ export class SpatialStorage {
     const conn = await this.pool.getConnection();
     try {
       const [rows] = await conn.query(
-        "SELECT a.asset_uuid, av.version_number FROM assets a JOIN asset_versions av ON av.asset_id = a.id WHERE a.id = ? AND av.id = ?",
+        "SELECT a.asset_uuid, av.object_key FROM assets a JOIN asset_versions av ON av.asset_id = a.id WHERE a.id = ? AND av.id = ?",
         [assetId, assetVersionId],
       );
       const record = (rows as any[])[0];
       if (!record) throw new Error("Asset version not found");
-      const result = await getPrivateSignedUrl(record.asset_uuid, ttlSeconds);
+      const result = await getPrivateSignedUrl(record.object_key, ttlSeconds);
       return result.url;
     } finally {
       conn.release();

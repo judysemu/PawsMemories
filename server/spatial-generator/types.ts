@@ -259,7 +259,7 @@ export interface SpatialObserveOutput {
   features: Array<{
     name: string;
     confidence: number;
-    normalizedBounds: { min: [number, number, number]; max: [number, number, number] };
+    normalizedBounds: { min: number[]; max: number[] };
     viewIndices: number[];
   }>;
   scaleEvidence: { hasAnchor: boolean; uncertainty: number };
@@ -307,7 +307,7 @@ export interface SpatialMathInput {
 }
 
 export interface SpatialMathOutput {
-  schemaVersion: "pawsome.spatial-math-request.v1";
+  schemaVersion: "pawsome.spatial-math.v1";
   planHash: string;
   units: "mm";
   resolvedPrimitives: Array<{

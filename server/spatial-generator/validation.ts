@@ -3,7 +3,35 @@ import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
 import { getBounds } from "@gltf-transform/functions";
 import { MATH_LIMITS, type SpatialMathOutput } from "./types";
-import type { GlbValidationMetrics } from "./schemas";
+
+export interface GlbValidationMetrics {
+  magicValid: boolean;
+  versionValid: boolean;
+  declaredLength: number;
+  actualLength: number;
+  sceneCount: number;
+  nodeCount: number;
+  meshCount: number;
+  primitiveCount: number;
+  triangleCount: number;
+  vertexCount: number;
+  materialCount: number;
+  textureCount: number;
+  hasPositionAccessor: boolean;
+  hasNormals: boolean;
+  hasUVs: boolean;
+  hasSkin: boolean;
+  hasAnimation: boolean;
+  boundingBox: { min: [number, number, number]; max: [number, number, number] } | null;
+  dimensions: { width: number; height: number; depth: number; unit: "unscaled" } | null;
+  containsNaN: boolean;
+  containsInfinity: boolean;
+  hasExternalUris: boolean;
+  hasEmptyGeometry: boolean;
+  textureDetails: Array<{ mimeType: string; width: number; height: number }>;
+  warnings?: string[];
+  errors?: string[];
+}
 
 export const VALIDATOR_VERSION = "spatial-v1.0.0";
 
