@@ -1,3 +1,9 @@
+// MUST be the first import. ESM evaluates all imports before any top-level
+// statement, so `dotenv.config()` further down runs too late: any module that
+// touches process.env at import time (and getPool() memoises its options on
+// first call) would capture an empty config and cache it. Importing
+// "dotenv/config" here loads .env during module resolution instead.
+import "dotenv/config";
 import express from "express";
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
 import { z } from "zod";

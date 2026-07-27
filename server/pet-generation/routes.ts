@@ -167,14 +167,59 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   return router;
 }
 
-/** Webhook handler — mounted OUTSIDE the auth router; Stripe is not a user. */
+/**
+ * Webhook handler — mounted OUTSIDE the auth router; Stripe is not a user.
+ *
+ * The body arrives as raw bytes (express.raw) because signature verification
+ * must run over the exact payload Stripe signed — any JSON re-serialisation
+ * invalidates it. Only a signature-verified event may mark an order paid.
+ */
 export function createPetGlbWebhookHandler(deps: PetGlbServiceDeps) {
   const service = new PetGlbService(deps);
+  const secret = process.env.PET_GLB_STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET || "";
+  const apiKey = process.env.STRIPE_SECRET_KEY || "";
+
   return async (req: Request, res: Response) => {
-    const eventId = String(req.body?.id || "");
-    const eventType = String(req.body?.type || "");
-    const orderUuid = String(req.body?.data?.object?.metadata?.order_uuid || "");
+    const raw = req.body;
+    if (!Buffer.isBuffer(raw)) {
+      console.error("[pet-glb] webhook body is not raw bytes — check express.raw() mount order");
+      return res.status(400).json({ error: "RAW_BODY_REQUIRED" });
+    }
+
+    let event: any;
+    if (secret && apiKey) {
+      const signature = req.headers["stripe-signature"];
+      if (typeof signature !== "string" || !signature) {
+        return res.status(400).json({ error: "MISSING_SIGNATURE" });
+      }
+      try {
+        const { default: Stripe } = await import("stripe");
+        const stripe = new Stripe(apiKey);
+        event = stripe.webhooks.constructEvent(raw, signature, secret);
+      } catch (err: any) {
+        console.error("[pet-glb] webhook signature verification failed:", err.message);
+        return res.status(400).json({ error: "INVALID_SIGNATURE" });
+      }
+    } else {
+      // No secret configured => sandbox simulation. Refuse in production so a
+      // missing secret can never become an unauthenticated "mark as paid" hole.
+      if (process.env.NODE_ENV === "production") {
+        return res.status(503).json({ error: "WEBHOOK_SECRET_NOT_CONFIGURED" });
+      }
+      console.warn("[pet-glb] no webhook secret — accepting UNVERIFIED event (non-production only)");
+      try { event = JSON.parse(raw.toString("utf8")); }
+      catch { return res.status(400).json({ error: "MALFORMED_EVENT" }); }
+    }
+
+    const eventId = String(event?.id || "");
+    const eventType = String(event?.type || "");
+    const orderUuid = String(event?.data?.object?.metadata?.order_uuid || "");
+
+    if (eventType !== "checkout.session.completed" && eventType !== "payment_intent.succeeded") {
+      return res.json({ received: true, ignored: eventType });
+    }
     if (!eventId || !orderUuid) return res.status(400).json({ error: "MALFORMED_EVENT" });
+
     try {
       const result = await service.handlePaymentSucceeded(eventId, eventType, orderUuid);
       res.json({ received: true, duplicate: result === null });
