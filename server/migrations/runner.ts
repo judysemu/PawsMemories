@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 35;
+export const CURRENT_SCHEMA_VERSION = 37;
 
 export interface Migration {
   version: number;
@@ -1763,6 +1763,94 @@ export const MIGRATIONS: Migration[] = [
 
       `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'spatial_generation_attempts' AND INDEX_NAME = 'uniq_spatial_attempt_idempotency'`,
       `SET @stmt = IF(@idx_exists = 0, 'ALTER TABLE spatial_generation_attempts ADD UNIQUE KEY uniq_spatial_attempt_idempotency (idempotency_key)', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    // NOTE: version 36 is the BO-4 Nurse-Saul maturity index, which lives on
+    // phase/bo-4-spatial-generator. Numbering is intentionally left clear for
+    // it; the runner applies by version number and tolerates the gap until
+    // that branch merges.
+    version: 37,
+    name: "pet_glb_orders_and_provider_jobs",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS provider_generation_jobs (
+         job_id CHAR(36) NOT NULL PRIMARY KEY,
+         order_id BIGINT NULL,
+         provider_id VARCHAR(40) NOT NULL,
+         provider_version VARCHAR(80) NOT NULL,
+         provider_task_handle VARCHAR(190) NOT NULL,
+         model VARCHAR(120) NOT NULL DEFAULT '',
+         config_hash CHAR(64) NOT NULL DEFAULT '',
+         cancelled TINYINT(1) NOT NULL DEFAULT 0,
+         glb_url TEXT NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         KEY idx_pgj_order (order_id),
+         KEY idx_pgj_handle (provider_task_handle)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS pet_glb_orders (
+         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         order_uuid CHAR(36) NOT NULL,
+         owner_phone VARCHAR(32) NOT NULL,
+         sku VARCHAR(64) NOT NULL,
+         state VARCHAR(40) NOT NULL DEFAULT 'draft',
+         reference_session_id BIGINT NULL,
+         generation_job_id CHAR(36) NULL,
+         asset_id BIGINT NULL,
+         approved_version_id BIGINT NULL,
+         credits_reserved INT NOT NULL DEFAULT 0,
+         credits_disposition ENUM('reserved','charged','refunded','none') NOT NULL DEFAULT 'none',
+         delivered_at DATETIME NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uniq_pet_glb_order_uuid (order_uuid),
+         KEY idx_pgo_owner_state (owner_phone, state),
+         KEY idx_pgo_state_created (state, created_at)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS pet_glb_order_events (
+         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         order_id BIGINT NOT NULL,
+         from_state VARCHAR(40) NULL,
+         to_state VARCHAR(40) NOT NULL,
+         actor_type ENUM('system','customer','operator') NOT NULL DEFAULT 'system',
+         actor_id VARCHAR(64) NULL,
+         reason VARCHAR(190) NULL,
+         request_id CHAR(36) NULL,
+         job_id CHAR(36) NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         KEY idx_pgoe_order_created (order_id, created_at)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      // Inbound Stripe replay defence. Stripe's idempotencyKey protects
+      // OUTBOUND calls only; a redelivered event must be a no-op here.
+      `CREATE TABLE IF NOT EXISTS stripe_event_ledger (
+         event_id VARCHAR(190) NOT NULL PRIMARY KEY,
+         event_type VARCHAR(80) NOT NULL,
+         order_id BIGINT NULL,
+         processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      // SALTI forward-compatibility (populated at G10; UNMEASURED until then).
+      // salti_margin is signed and numerically compared, so DECIMAL not VARCHAR.
+      // Operator role. Deliberately NOT is_admin — an existing admin bypass
+      // must not silently satisfy mandatory operator approval.
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_operator'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE users ADD COLUMN is_operator TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'asset_versions' AND COLUMN_NAME = 'salti_condition'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE asset_versions ADD COLUMN salti_condition JSON NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'asset_versions' AND COLUMN_NAME = 'salti_damage'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE asset_versions ADD COLUMN salti_damage JSON NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'asset_versions' AND COLUMN_NAME = 'salti_margin'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE asset_versions ADD COLUMN salti_margin DECIMAL(6,3) NULL', 'SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },

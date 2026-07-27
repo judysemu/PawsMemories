@@ -47,6 +47,7 @@ const AnimatorScreen = lazy(() => import("./animator/components/AnimatorScreen")
 import WarehouseMode from "./components/WarehouseMode";
 import { MOBILE_NAV, SIDEBAR_NAV, SHELL_ICON_NAV } from "./shellNavigation";
 import { syncSeoMetadata } from "./seo";
+import PetGlbStoreScreen from "./components/PetGlbStoreScreen";
 
 const EMPTY_PROFILE: UserProfile = { fullName: "", email: "", credits: 0, treats: 0, isAdmin: false, city: "", ageVerified: false, acceptedTermsVersion: null, currentTermsVersion: undefined, requiresTermsAcceptance: false };
 
@@ -56,6 +57,7 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
   [Screen.MODELS]: "/furball3d",
   [Screen.ANIMATOR]: "/animator",
   [Screen.PAWPRINTS]: "/pawprints",
+  [Screen.PET_GLB]: "/pet-glb",
   [Screen.PAWLISHER]: "/fidos-styles",
   [Screen.FURBIN]: "/fur-bin",
   [Screen.STORE]: "/store",
@@ -107,6 +109,7 @@ const getBackgroundImage = (screen: Screen) => {
     case Screen.STORE:
     case Screen.VOICE_TEST:
     case Screen.BIM:
+    case Screen.PET_GLB:
     case Screen.PAWPRINTS:
     case Screen.PAWLISHER:
     case Screen.FURBIN:
@@ -699,7 +702,7 @@ export default function App() {
 
       <div className="flex-grow flex w-full relative">
         {/* Desktop Sidebar */}
-        {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.ADMIN_WAGS, Screen.WAGS_INBOX, Screen.PET_HEALTH].includes(currentScreen) && (
+        {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PET_GLB, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.ADMIN_WAGS, Screen.WAGS_INBOX, Screen.PET_HEALTH].includes(currentScreen) && (
           <aside className="fixed bottom-0 left-0 top-16 z-40 hidden w-64 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-outline-variant/20 bg-surface/85 py-5 shadow-xl backdrop-blur-xl dark:bg-surface-dim/85 md:flex">
             <nav className="mt-4 flex-1 space-y-2 px-4">
               {SIDEBAR_NAV.map((item) => {
@@ -771,6 +774,8 @@ export default function App() {
         {currentScreen === Screen.CREATE_RIG_REVIEW && (
           <CreateRigReviewScreen onNavigate={setCurrentScreen} />
         )}
+
+        {currentScreen === Screen.PET_GLB && <PetGlbStoreScreen />}
 
         {currentScreen === Screen.PAWPRINTS && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>

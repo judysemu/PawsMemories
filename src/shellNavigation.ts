@@ -12,6 +12,7 @@ export const TOP_PRIMARY_NAV: ShellNavigationItem[] = [
   { id: "create", label: "Create", screen: Screen.CREATE, materialIcon: "add_circle", imageSrc: "/brand/furball3d.jpg" },
   { id: "voice", label: "Voice Test", screen: Screen.VOICE_TEST, materialIcon: "graphic_eq" },
   { id: "pawprints", label: "Pawprints", screen: Screen.PAWPRINTS, materialIcon: "auto_stories", imageSrc: "/brand/pawprints.png" },
+  { id: "pet-glb", label: "3D Model", screen: Screen.PET_GLB, materialIcon: "view_in_ar" },
 ];
 
 /**
