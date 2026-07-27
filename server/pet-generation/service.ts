@@ -234,7 +234,9 @@ export class PetGlbService {
       jobId: order.generationJobId,
     });
 
-    return { order: { ...updated, assetId }, report: { ...report, fileHash: artifacts.glb.sha256 } as ValidationReport & { versionId?: number } };
+    // Surface versionId so the operator knows which candidate to approve
+    // (POST /operator/orders/:uuid/approve needs it) — there is no operator UI yet.
+    return { order: { ...updated, assetId }, report: { ...report, fileHash: artifacts.glb.sha256, versionId } as ValidationReport & { versionId?: number } };
   }
 
   // ── 6. Operator approval — role-gated, one immutable version ──────────────
