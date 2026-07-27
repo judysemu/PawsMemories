@@ -86,6 +86,43 @@ export class PetGlbService {
     return this.orders.transition(paid.id, "awaiting_references", { actorType: "system" });
   }
 
+  // ── 2b. Payment — credits-only path ───────────────────────────────────────
+  /**
+   * This SKU is paid entirely in credits; there is no per-order Stripe charge.
+   * Credits are bought separately via the site's existing (verified) credit-
+   * purchase webhook and already sit in the user's wallet. They were debited
+   * and marked `reserved` at order creation (createOrder). "Paying" the order
+   * simply finalises that reservation to `charged` and advances the state
+   * machine — no money moves here, so no signature to verify. Customer-driven
+   * and idempotent: a second call after payment returns the current order.
+   */
+  async payWithCredits(orderUuid: string, ownerPhone: string): Promise<PetGlbOrder> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+
+    if (order.state !== "awaiting_payment") {
+      // Already paid → idempotent success. Anything else is illegal.
+      if (order.creditsDisposition === "charged") return order;
+      throw new PetGenerationError(
+        "ILLEGAL_TRANSITION",
+        `Order ${orderUuid} cannot be paid from state ${order.state}`,
+      );
+    }
+
+    // Guarded charge: finalise the reservation. Credits already left the wallet
+    // at reserve time; affectedRows 0 (already charged) is a safe no-op.
+    await this.deps.getPool().query(
+      `UPDATE pet_glb_orders SET credits_disposition = 'charged' WHERE id = ? AND credits_disposition = 'reserved'`,
+      [order.id],
+    );
+
+    const paid = await this.orders.transition(order.id, "paid", {
+      actorType: "customer",
+      actorId: ownerPhone,
+      reason: "credits_charged",
+    });
+    return this.orders.transition(paid.id, "awaiting_references", { actorType: "system" });
+  }
+
   // ── 3. References ─────────────────────────────────────────────────────────
   async attachReferences(orderUuid: string, ownerPhone: string, referenceSessionId: number): Promise<PetGlbOrder> {
     const order = await this.requireOwned(orderUuid, ownerPhone);

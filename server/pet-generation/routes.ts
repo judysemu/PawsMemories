@@ -76,6 +76,17 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     } catch (err) { fail(res, err); }
   });
 
+  // Credits-only payment: charge the reserved credits and advance the order.
+  // No Stripe session — this SKU is paid from the wallet the credit-purchase
+  // flow already funds.
+  router.post("/orders/:orderUuid/pay", writeLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      res.json(await service.payWithCredits(req.params.orderUuid, phone));
+    } catch (err) { fail(res, err); }
+  });
+
   router.get("/orders/:orderUuid", pollLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });

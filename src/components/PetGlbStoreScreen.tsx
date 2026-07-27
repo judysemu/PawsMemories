@@ -93,6 +93,13 @@ export default function PetGlbStoreScreen() {
     }).then(setOrder).catch(() => {});
   };
 
+  const payWithCredits = () => {
+    if (!order) return;
+    call(`/api/pet-glb/orders/${order.orderUuid}/pay`, { method: "POST" })
+      .then(setOrder)
+      .catch(() => {});
+  };
+
   const refresh = () => {
     if (!order) return;
     call(`/api/pet-glb/orders/${order.orderUuid}/poll`, { method: "POST" })
@@ -152,7 +159,22 @@ export default function PetGlbStoreScreen() {
             </div>
           </div>
 
-          {["awaiting_payment", "paid", "awaiting_references", "references_received"].includes(order.state) && (
+          {order.state === "awaiting_payment" && (
+            <div className="space-y-2">
+              <button
+                onClick={payWithCredits}
+                disabled={busy}
+                className="rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
+              >
+                {busy ? "Processing…" : `Pay ${order.creditsReserved} credits`}
+              </button>
+              <p className="text-xs opacity-60">
+                Paid from your credit balance. You upload your photos next.
+              </p>
+            </div>
+          )}
+
+          {["paid", "awaiting_references", "references_received"].includes(order.state) && (
             <div className="space-y-3">
               <h2 className="font-medium">Upload your photos</h2>
               {product.referenceRequirements.required.map((key) => (
