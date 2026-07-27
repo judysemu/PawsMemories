@@ -56,6 +56,8 @@ export interface GenerationArtifacts {
  */
 export interface ProviderJobRecord {
   jobId: string;
+  /** FK to pet_glb_orders.id once G3's order table exists. */
+  orderId?: number;
   providerId: string;
   providerVersion: string;
   providerTaskHandle: string;

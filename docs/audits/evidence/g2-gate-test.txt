@@ -1,0 +1,78 @@
+$ npx tsx --test tests/g2_provider_interface.test.mjs
+TAP version 13
+# [SkuRegistry] registered sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] resolved sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] resolved sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] registered sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] registered sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] resolved sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [ProviderFactory] sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# [SkuRegistry] registered sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=not-implemented providerVersion=9
+# [SkuRegistry] resolved sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=not-implemented providerVersion=9
+# [ProviderFactory] sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=not-implemented providerVersion=9
+# [SkuRegistry] registered sku=CUSTOM_RIGGED_PET_GLB_V1 providerId=tripo providerVersion=default
+# Subtest: G2 provider boundary
+    # Subtest: SKU resolution is deterministic and logged
+    ok 1 - SKU resolution is deterministic and logged
+      ---
+      duration_ms: 0.900083
+      type: 'test'
+      ...
+    # Subtest: unknown SKU fails closed — even with the stub override on
+    ok 2 - unknown SKU fails closed — even with the stub override on
+      ---
+      duration_ms: 0.328542
+      type: 'test'
+      ...
+    # Subtest: CUSTOM_RIGGED_PET_GLB_V1 resolves to the approved Tripo adapter
+    ok 3 - CUSTOM_RIGGED_PET_GLB_V1 resolves to the approved Tripo adapter
+      ---
+      duration_ms: 0.129042
+      type: 'test'
+      ...
+    # Subtest: swapping the registry binding swaps the provider, no other change
+    ok 4 - swapping the registry binding swaps the provider, no other change
+      ---
+      duration_ms: 0.354
+      type: 'test'
+      ...
+    # Subtest: full downstream path runs against the URL-free stub
+    ok 5 - full downstream path runs against the URL-free stub
+      ---
+      duration_ms: 1.098708
+      type: 'test'
+      ...
+    # Subtest: GenerationArtifacts exposes no URL, at any depth, from either provider
+    ok 6 - GenerationArtifacts exposes no URL, at any depth, from either provider
+      ---
+      duration_ms: 0.867709
+      type: 'test'
+      ...
+    # Subtest: cancelJob tombstones: record survives, late results discarded
+    ok 7 - cancelJob tombstones: record survives, late results discarded
+      ---
+      duration_ms: 0.573458
+      type: 'test'
+      ...
+    # Subtest: feature flag defaults closed
+    ok 8 - feature flag defaults closed
+      ---
+      duration_ms: 0.167291
+      type: 'test'
+      ...
+    1..8
+ok 1 - G2 provider boundary
+  ---
+  duration_ms: 5.6465
+  type: 'test'
+  ...
+1..1
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 202.66825
+---
