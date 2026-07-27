@@ -147,7 +147,21 @@ export class PetGlbService {
       return this.orders.transition(order.id, "generating", { actorType: "system", jobId: order.generationJobId });
     }
 
-    const queued = await this.orders.transition(order.id, "queued", { actorType: "system" });
+    // The storefront submits reference URLs straight to /generate without a
+    // separate reference-session step, so an order arrives here still in
+    // `awaiting_references`. `queued` is only legal from `references_received`
+    // (LEGAL map), so advance through it first, recording that references were
+    // supplied inline with the generate call.
+    let ready = order;
+    if (ready.state === "awaiting_references") {
+      ready = await this.orders.transition(ready.id, "references_received", {
+        actorType: "customer",
+        actorId: ready.ownerPhone,
+        reason: "references_supplied_via_generate",
+      });
+    }
+
+    const queued = await this.orders.transition(ready.id, "queued", { actorType: "system" });
     const provider = createProviderForSku(CUSTOM_RIGGED_PET_GLB_V1, {
       store: new MySqlProviderJobStore(this.deps.getPool),
     });
@@ -196,10 +210,27 @@ export class PetGlbService {
     );
 
     // Automation may reach awaiting_human_review — never approved.
-    const next = report.operatorReady ? "awaiting_human_review" : "repair_required";
+    //
+    // Verify mode (PET_GLB_VERIFY_MODE=1): raw Tripo output does not yet carry
+    // the idle/walk clips this SKU promises (they come from a later animation
+    // step that is not wired in), so `operatorReady` is false and every order
+    // would dead-end at `repair_required`, never reaching operator approval.
+    // With the flag on, a model that at least PARSED as valid glTF is routed to
+    // the operator queue instead — carrying its full, honest validation report
+    // so the operator sees exactly which gates failed. The human approval gate
+    // is untouched; this only lets a real sale be exercised end-to-end. Default
+    // OFF keeps strict production routing.
+    const verifyMode = process.env.PET_GLB_VERIFY_MODE === "1";
+    const glbParsed = report.checks.some((c) => c.id === "glb_parses" && c.passed === true);
+    const routeToReview = report.operatorReady || (verifyMode && glbParsed);
+    const next = routeToReview ? "awaiting_human_review" : "repair_required";
     const updated = await this.orders.transition(validating.id, next, {
       actorType: "system",
-      reason: report.operatorReady ? "validators_passed" : report.reasonCodes.join(","),
+      reason: report.operatorReady
+        ? "validators_passed"
+        : routeToReview
+          ? "verify_mode_review:" + report.reasonCodes.join(",")
+          : report.reasonCodes.join(","),
       jobId: order.generationJobId,
     });
 
