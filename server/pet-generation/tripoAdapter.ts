@@ -14,11 +14,52 @@ import type {
   GenerationJob,
   GenerationArtifacts,
   GenerationJobStatus,
+  ProviderJobRecord,
 } from "./types";
+import { mergeIdleWalk } from "./animationMerge";
+import { startRig, startRetarget, pollTripoTask } from "../../tripo";
 
 function sha256(data: Buffer): string {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
+
+/** Map a provider progress reading (0–100, maybe absent) into a sub-range. */
+function scale(progress: number | undefined, lo: number, hi: number): number {
+  if (progress === undefined) return lo;
+  const p = Math.max(0, Math.min(100, progress));
+  return Math.round(lo + (p / 100) * (hi - lo));
+}
+
+/** Result of polling one Tripo task — same shape upstream and in tests. */
+export interface TripoTaskPoll {
+  done: boolean;
+  glbUrl?: string;
+  error?: string;
+  progress?: number;
+}
+
+/**
+ * The Tripo-specific rig + preset-retarget operations the animated pipeline
+ * needs, injected so the multi-stage state machine is unit-testable without a
+ * live Tripo account. Default implementation wires straight to tripo.ts.
+ */
+export interface TripoAnimationOps {
+  /** animate_rig (UniRig quadruped) on the base model task → rig task handle. */
+  startRig(baseModelTaskHandle: string): Promise<string>;
+  /** animate_retarget preset:idle|walk on the rig task → retarget task handle. */
+  startRetarget(
+    rigTaskHandle: string,
+    animation: "preset:idle" | "preset:walk",
+  ): Promise<string>;
+  /** Poll any Tripo rig/retarget task. */
+  pollTask(taskHandle: string): Promise<TripoTaskPoll>;
+}
+
+const defaultAnimationOps: TripoAnimationOps = {
+  startRig: (h) => startRig(h, { avatarType: "dog" }),
+  startRetarget: (h, a) => startRetarget(h, a),
+  pollTask: (h) => pollTripoTask(h),
+};
 
 /**
  * Wraps the existing three-method ModelBuildProvider port
@@ -35,11 +76,21 @@ function sha256(data: Buffer): string {
  * working; this adds a boundary above it.
  */
 export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
+  private readonly animate: boolean;
+  private readonly ops: TripoAnimationOps;
+
   constructor(
     private readonly provider: ModelBuildProvider,
     private readonly store: ProviderJobStore = new InMemoryJobStore(),
     private readonly providerVersion: string = process.env.TRIPO_MODEL_VERSION || "default",
-  ) {}
+    opts: { animate?: boolean; animationOps?: TripoAnimationOps } = {},
+  ) {
+    // Default OFF so existing single-shot construction is unchanged; the pet-glb
+    // factory opts in. When on, getJob runs base → rig → idle → walk and
+    // fetchArtifacts returns ONE merged GLB carrying both idle and walk clips.
+    this.animate = opts.animate ?? false;
+    this.ops = opts.animationOps ?? defaultAnimationOps;
+  }
 
   async createJob(input: PetModelGenerationInput): Promise<GenerationJob> {
     // 5 canonical views -> Tripo's 4-slot contract. threeQuarterUrl is
@@ -79,6 +130,8 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       return { id: jobId, status: "cancelled", reason: "CANCELLED_BY_CALLER" };
     }
 
+    if (this.animate) return this.advanceAnimatedJob(jobId, record);
+
     const poll: ModelBuildPollResult = await this.provider.poll(
       record.providerTaskHandle,
     );
@@ -97,6 +150,64 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       ...(poll.progress !== undefined ? { progress: poll.progress } : {}),
       ...(poll.error ? { reason: "PROVIDER_ERROR" } : {}),
     };
+  }
+
+  /**
+   * Animated build state machine. Each getJob call advances AT MOST one stage;
+   * the caller polls repeatedly (the existing order poll loop). Stages:
+   * base (image→model) → rig (animate_rig) → idle (animate_retarget) →
+   * walk (animate_retarget) → ready. Every task handle and URL stays in the
+   * record and never crosses the boundary; only {id,status,progress,reason}
+   * leaves this method.
+   */
+  private async advanceAnimatedJob(
+    jobId: string,
+    record: ProviderJobRecord,
+  ): Promise<GenerationJob> {
+    const processing = (progress: number): GenerationJob => ({
+      id: jobId, status: "processing", progress,
+    });
+    const failed = (): GenerationJob => ({
+      id: jobId, status: "failed", reason: "PROVIDER_ERROR",
+    });
+
+    switch (record.stage ?? "base") {
+      case "base": {
+        const poll = await this.provider.poll(record.providerTaskHandle);
+        if (poll.error) return failed();
+        if (!poll.done) return processing(scale(poll.progress, 0, 20));
+        const rigTaskHandle = await this.ops.startRig(record.providerTaskHandle);
+        await this.store.update(jobId, { stage: "rig", rigTaskHandle });
+        return processing(25);
+      }
+      case "rig": {
+        const poll = await this.ops.pollTask(record.rigTaskHandle!);
+        if (poll.error) return failed();
+        if (!poll.done) return processing(scale(poll.progress, 25, 45));
+        const idleTaskHandle = await this.ops.startRetarget(record.rigTaskHandle!, "preset:idle");
+        await this.store.update(jobId, { stage: "idle", idleTaskHandle });
+        return processing(50);
+      }
+      case "idle": {
+        const poll = await this.ops.pollTask(record.idleTaskHandle!);
+        if (poll.error) return failed();
+        if (!poll.done) return processing(scale(poll.progress, 50, 70));
+        if (poll.glbUrl) await this.store.update(jobId, { idleGlbUrl: poll.glbUrl });
+        const walkTaskHandle = await this.ops.startRetarget(record.rigTaskHandle!, "preset:walk");
+        await this.store.update(jobId, { stage: "walk", walkTaskHandle });
+        return processing(75);
+      }
+      case "walk": {
+        const poll = await this.ops.pollTask(record.walkTaskHandle!);
+        if (poll.error) return failed();
+        if (!poll.done) return processing(scale(poll.progress, 75, 95));
+        if (poll.glbUrl) await this.store.update(jobId, { walkGlbUrl: poll.glbUrl });
+        await this.store.update(jobId, { stage: "ready" });
+        return { id: jobId, status: "completed" };
+      }
+      default: // "ready"
+        return { id: jobId, status: "completed" };
+    }
   }
 
   /**
@@ -119,6 +230,8 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
         `Job was cancelled; late results are discarded: ${jobId}`,
       );
     }
+
+    if (this.animate) return this.fetchAnimatedArtifacts(record, jobId);
 
     let glbUrl = record.glbUrl;
     if (!glbUrl) {
@@ -149,6 +262,43 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
         model: record.model,
         configHash: record.configHash,
         threeQuarterViewConsumed: false,
+      },
+    };
+  }
+
+  /**
+   * Animated artifact: download the idle and walk retarget GLBs (SSRF-protected
+   * via provider.download) and merge them into ONE GLB carrying both clips.
+   * The merged bytes are what the validator sees and what the customer buys.
+   */
+  private async fetchAnimatedArtifacts(
+    record: ProviderJobRecord,
+    jobId: string,
+  ): Promise<GenerationArtifacts> {
+    if (record.stage !== "ready") {
+      throw new PetGenerationError("JOB_NOT_COMPLETE", `Animated job not yet complete: ${jobId}`);
+    }
+    if (!record.idleGlbUrl || !record.walkGlbUrl) {
+      throw new PetGenerationError("NO_ARTIFACT", `Missing idle/walk artifact for job: ${jobId}`);
+    }
+
+    const [idleBuf, walkBuf] = await Promise.all([
+      this.provider.download(record.idleGlbUrl),
+      this.provider.download(record.walkGlbUrl),
+    ]);
+    const merged = await mergeIdleWalk(idleBuf, walkBuf);
+
+    return {
+      glb: { data: merged, sha256: sha256(merged), size: merged.length },
+      previews: [],
+      metadata: {
+        providerId: record.providerId,
+        providerVersion: record.providerVersion,
+        model: record.model,
+        configHash: record.configHash,
+        threeQuarterViewConsumed: false,
+        animated: true,
+        animations: ["idle", "walk"],
       },
     };
   }

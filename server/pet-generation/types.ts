@@ -67,4 +67,18 @@ export interface ProviderJobRecord {
   /** Provider-issued download URL, resolved during polling. Internal only. */
   glbUrl?: string;
   createdAt: number;
+
+  /**
+   * Multi-stage animated build (Tripo-native rig + idle/walk retarget). All of
+   * this is INTERNAL and never crosses the provider boundary — the same rule
+   * as glbUrl. `stage` drives the state machine in TripoPetGenerationAdapter;
+   * the task handles and URLs are Tripo-issued and resolved during polling.
+   * Absent on single-shot (non-animated) jobs.
+   */
+  stage?: "base" | "rig" | "idle" | "walk" | "ready";
+  rigTaskHandle?: string;
+  idleTaskHandle?: string;
+  walkTaskHandle?: string;
+  idleGlbUrl?: string;
+  walkGlbUrl?: string;
 }
