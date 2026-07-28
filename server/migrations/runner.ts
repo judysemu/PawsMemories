@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 37;
+export const CURRENT_SCHEMA_VERSION = 38;
 
 export interface Migration {
   version: number;
@@ -1851,6 +1851,20 @@ export const MIGRATIONS: Migration[] = [
 
       `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'asset_versions' AND COLUMN_NAME = 'salti_margin'`,
       `SET @stmt = IF(@c = 0, 'ALTER TABLE asset_versions ADD COLUMN salti_margin DECIMAL(6,3) NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    // Multi-stage Tripo animation pipeline (base -> rig -> idle/walk -> merge).
+    // The adapter persists which stage a job is in plus the rig/retarget task
+    // handles and the idle/walk GLB URLs, so an animated build survives across
+    // poll calls / restarts. All internal; never selected toward a caller.
+    version: 38,
+    name: "provider_generation_jobs_animation_stages",
+    skipWhenTableMissing: "provider_generation_jobs",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_generation_jobs' AND COLUMN_NAME = 'stage'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE provider_generation_jobs ADD COLUMN stage VARCHAR(16) NULL, ADD COLUMN rig_task_handle VARCHAR(190) NULL, ADD COLUMN idle_task_handle VARCHAR(190) NULL, ADD COLUMN walk_task_handle VARCHAR(190) NULL, ADD COLUMN idle_glb_url TEXT NULL, ADD COLUMN walk_glb_url TEXT NULL', 'SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },
