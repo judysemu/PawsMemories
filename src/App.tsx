@@ -47,7 +47,7 @@ const AnimatorScreen = lazy(() => import("./animator/components/AnimatorScreen")
 import WarehouseMode from "./components/WarehouseMode";
 import { MOBILE_NAV, SIDEBAR_NAV, SHELL_ICON_NAV } from "./shellNavigation";
 import { syncSeoMetadata } from "./seo";
-import PetGlbStoreScreen from "./components/PetGlbStoreScreen";
+import PetModelStudio from "./components/PetModelStudio";
 
 const EMPTY_PROFILE: UserProfile = { fullName: "", email: "", credits: 0, treats: 0, isAdmin: false, city: "", ageVerified: false, acceptedTermsVersion: null, currentTermsVersion: undefined, requiresTermsAcceptance: false };
 
@@ -775,7 +775,7 @@ export default function App() {
           <CreateRigReviewScreen onNavigate={setCurrentScreen} />
         )}
 
-        {currentScreen === Screen.PET_GLB && <PetGlbStoreScreen />}
+        {currentScreen === Screen.PET_GLB && <PetModelStudio />}
 
         {currentScreen === Screen.PAWPRINTS && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
