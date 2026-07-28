@@ -85,6 +85,9 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
 function screenFromPath(pathname: string): Screen | null {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/creations") return Screen.FURBIN;
+  // Retire bookmarked create-wizard steps. Signed-in customers must enter the
+  // customer-gated model lifecycle instead of bypassing its approval stages.
+  if (normalized.startsWith("/create/")) return Screen.CREATE;
   // Retired marketplace surfaces fall through to the safe Shop landing page.
   if (normalized === "/marketplace" || normalized === "/admin/marketplace") return Screen.STORE;
   if (normalized === "/home" || normalized === "/") return Screen.DASHBOARD;
@@ -748,7 +751,9 @@ export default function App() {
         )}
 
         {currentScreen === Screen.CREATE && (
-          <CreateScreen onNavigate={setCurrentScreen} />
+          isAuthed
+            ? <PetModelStudio />
+            : <CreateScreen onNavigate={setCurrentScreen} />
         )}
         {currentScreen === Screen.CREATE_REFERENCE && (
           <CreateReferenceScreen onNavigate={setCurrentScreen} />

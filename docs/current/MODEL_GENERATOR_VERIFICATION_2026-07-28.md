@@ -14,6 +14,8 @@ Baseline: `4ee12d648344034707c71bacbcd5fdfab66cc0b2`
 - private canonical GLB persistence, signed previews, exact-version approvals,
   idempotency, refunds, and recovery;
 - operator-only final-version inspection and release from the model-studio UI;
+- the signed-in `/create` entry opens the gated studio, while retired
+  `/create/*` wizard bookmarks collapse to that same guarded entry;
 - facial-rig purchase removed and rejected until the measured success policy can
   satisfy the 75% release threshold.
 
@@ -29,7 +31,7 @@ Baseline: `4ee12d648344034707c71bacbcd5fdfab66cc0b2`
 | Gate | Result |
 |---|---:|
 | `npm run lint` | passed |
-| Full serial `npm run test` | 1,163 passed; 0 failed; 3 intentional skips; 1,166 total |
+| Full serial `npm run test` | 1,164 passed; 0 failed; 3 intentional skips; 1,167 total |
 | `npm run test:contracts` | 40 passed; 0 failed |
 | `npm run test:security` | 8 passed; 0 failed |
 | `npm run test:ar` | 139 passed; 0 failed |

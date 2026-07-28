@@ -233,3 +233,12 @@ test("an operator can inspect and release the exact customer-approved version fr
   assert.match(studio, /Operator release queue/);
   assert.match(studio, /Approve exact version & release/);
 });
+
+test("the primary signed-in Create route opens the gated studio and retires wizard sub-routes", () => {
+  const source = fs.readFileSync("src/App.tsx", "utf8");
+  assert.match(source, /normalized\.startsWith\("\/create\/"\)\) return Screen\.CREATE/);
+  assert.match(
+    source,
+    /currentScreen === Screen\.CREATE[\s\S]*?isAuthed[\s\S]*?<PetModelStudio \/>[\s\S]*?: <CreateScreen/,
+  );
+});
