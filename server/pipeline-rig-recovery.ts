@@ -98,7 +98,10 @@ function riggingSelection(context: PipelineRigRecoveryContext): { enabled: boole
   const rigging = context.customizationState?.rigging;
   if (!rigging || typeof rigging !== "object") return { enabled: false, facial: false };
   const selection = rigging as Record<string, unknown>;
-  return { enabled: selection.enabled === true, facial: selection.facial === true };
+  // Facial generation is fail-closed until the 75% release cohort exists.
+  // Normalize cached pre-policy selections so they cannot trigger a charge or
+  // a facial pass after the option has been removed from the customer UI.
+  return { enabled: selection.enabled === true, facial: false };
 }
 
 export function pipelineModelFingerprint(modelUrl: string): string {

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 38;
+export const CURRENT_SCHEMA_VERSION = 39;
 
 export interface Migration {
   version: number;
@@ -1865,6 +1865,108 @@ export const MIGRATIONS: Migration[] = [
     statements: [
       `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_generation_jobs' AND COLUMN_NAME = 'stage'`,
       `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE provider_generation_jobs ADD COLUMN stage VARCHAR(16) NULL, ADD COLUMN rig_task_handle VARCHAR(190) NULL, ADD COLUMN idle_task_handle VARCHAR(190) NULL, ADD COLUMN walk_task_handle VARCHAR(190) NULL, ADD COLUMN idle_glb_url TEXT NULL, ADD COLUMN walk_glb_url TEXT NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 39,
+    name: "pet_glb_customer_gated_stages",
+    skipWhenTableMissing: "pet_glb_orders",
+    statements: [
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'mesh_profile'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN mesh_profile VARCHAR(24) NOT NULL DEFAULT ''hd''', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'subject_profile'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN subject_profile VARCHAR(24) NOT NULL DEFAULT ''pet''', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'include_texture'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN include_texture TINYINT(1) NOT NULL DEFAULT 1', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'include_rig'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN include_rig TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'texture_quality'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN texture_quality VARCHAR(24) NOT NULL DEFAULT ''standard''', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'style_direction'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN style_direction VARCHAR(400) NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'reference_manifest_json'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN reference_manifest_json JSON NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'reference_manifest_hash'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN reference_manifest_hash CHAR(64) NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'current_stage'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN current_stage VARCHAR(24) NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'current_stage_attempt_id'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN current_stage_attempt_id BIGINT NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND COLUMN_NAME = 'final_customer_version_id'`,
+      `SET @stmt = IF(@c = 0, 'ALTER TABLE pet_glb_orders ADD COLUMN final_customer_version_id BIGINT NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts (
+         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         attempt_uuid CHAR(36) NOT NULL,
+         order_id BIGINT NOT NULL,
+         stage VARCHAR(24) NOT NULL,
+         attempt_number INT NOT NULL,
+         state VARCHAR(40) NOT NULL,
+         input_hash CHAR(64) NOT NULL,
+         source_attempt_id BIGINT NULL,
+         provider_job_id CHAR(36) NULL,
+         asset_id BIGINT NULL,
+         asset_version_id BIGINT NULL,
+         artifact_sha256 CHAR(64) NULL,
+         validation_report_json JSON NULL,
+         validation_report_sha256 CHAR(64) NULL,
+         capability_report_json JSON NULL,
+         price_credits INT NOT NULL DEFAULT 0,
+         credits_disposition ENUM('none','charged','refunded') NOT NULL DEFAULT 'none',
+         charge_idempotency_key VARCHAR(190) NULL,
+         approval_idempotency_key VARCHAR(190) NULL,
+         approval_hash CHAR(64) NULL,
+         approved_by VARCHAR(32) NULL,
+         approved_at DATETIME NULL,
+         rejection_reason VARCHAR(500) NULL,
+         failure_code VARCHAR(80) NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uniq_pet_glb_stage_uuid (attempt_uuid),
+         UNIQUE KEY uniq_pet_glb_stage_number (order_id, stage, attempt_number),
+         UNIQUE KEY uniq_pet_glb_stage_order_identity (order_id, id),
+         UNIQUE KEY uniq_pet_glb_stage_charge_key (charge_idempotency_key),
+         UNIQUE KEY uniq_pet_glb_stage_approval_key (approval_idempotency_key),
+         KEY idx_pet_glb_stage_order_current (order_id, state, created_at),
+         KEY idx_pet_glb_stage_provider_job (provider_job_id),
+         CONSTRAINT fk_pet_glb_stage_order
+           FOREIGN KEY (order_id) REFERENCES pet_glb_orders(id) ON DELETE RESTRICT,
+         CONSTRAINT fk_pet_glb_stage_source
+           FOREIGN KEY (source_attempt_id) REFERENCES pet_glb_stage_attempts(id) ON DELETE RESTRICT,
+         CONSTRAINT fk_pet_glb_stage_provider_job
+           FOREIGN KEY (provider_job_id) REFERENCES provider_generation_jobs(job_id) ON DELETE RESTRICT,
+         CONSTRAINT fk_pet_glb_stage_asset_version
+           FOREIGN KEY (asset_id, asset_version_id) REFERENCES asset_versions(asset_id, id) ON DELETE RESTRICT
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `SELECT COUNT(*) INTO @fk_exists FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND CONSTRAINT_NAME = 'fk_pet_glb_order_current_stage'`,
+      `SET @stmt = IF(@fk_exists = 0, 'ALTER TABLE pet_glb_orders ADD CONSTRAINT fk_pet_glb_order_current_stage FOREIGN KEY (id, current_stage_attempt_id) REFERENCES pet_glb_stage_attempts(order_id, id) ON DELETE RESTRICT', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @fk_exists FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND CONSTRAINT_NAME = 'fk_pet_glb_order_final_customer_version'`,
+      `SET @stmt = IF(@fk_exists = 0, 'ALTER TABLE pet_glb_orders ADD CONSTRAINT fk_pet_glb_order_final_customer_version FOREIGN KEY (asset_id, final_customer_version_id) REFERENCES asset_versions(asset_id, id) ON DELETE RESTRICT', 'SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },

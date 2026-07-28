@@ -6,6 +6,8 @@ import type {
   PetModelGenerationInput,
   GenerationJob,
   GenerationArtifacts,
+  SubjectProfile,
+  TextureQuality,
 } from "./types";
 
 /**
@@ -20,7 +22,10 @@ import type {
  * permanent substitute.
  */
 export class StubPetGenerationProvider implements PetModelGenerationProvider {
-  private jobs = new Map<string, { cancelled: boolean }>();
+  private jobs = new Map<string, {
+    cancelled: boolean;
+    capability?: { riggable: boolean; rigType: "quadruped" };
+  }>();
   private fixture: Buffer;
 
   constructor(fixturePath = resolve(process.cwd(), "fixtures/1m-cube.glb")) {
@@ -33,11 +38,32 @@ export class StubPetGenerationProvider implements PetModelGenerationProvider {
     return { id: jobId, status: "completed" };
   }
 
+  async createBaseJob(input: PetModelGenerationInput): Promise<GenerationJob> {
+    return this.createJob(input);
+  }
+
+  async createTextureJob(
+    _sourceJobId: string,
+    _options: { styleDirection?: string | null; quality: TextureQuality },
+  ): Promise<GenerationJob> {
+    return this.createJob(stubInput());
+  }
+
+  async createRigCheckJob(_sourceJobId: string): Promise<GenerationJob> {
+    const job = await this.createJob(stubInput());
+    this.jobs.set(job.id, { cancelled: false, capability: { riggable: true, rigType: "quadruped" } });
+    return job;
+  }
+
+  async createRigJob(_sourceJobId: string, _subjectProfile: SubjectProfile): Promise<GenerationJob> {
+    return this.createJob(stubInput());
+  }
+
   async getJob(jobId: string): Promise<GenerationJob> {
     const job = this.require(jobId);
     return job.cancelled
       ? { id: jobId, status: "cancelled", reason: "CANCELLED_BY_CALLER" }
-      : { id: jobId, status: "completed", progress: 100 };
+      : { id: jobId, status: "completed", progress: 100, ...(job.capability ? { capability: job.capability } : {}) };
   }
 
   /** Tombstone, matching the real adapter: mark, never delete. */
@@ -71,4 +97,14 @@ export class StubPetGenerationProvider implements PetModelGenerationProvider {
     }
     return job;
   }
+}
+
+function stubInput(): PetModelGenerationInput {
+  return {
+    frontUrl: "https://stub.invalid/front.png",
+    leftUrl: "https://stub.invalid/left.png",
+    rightUrl: "https://stub.invalid/right.png",
+    rearUrl: "https://stub.invalid/rear.png",
+    threeQuarterUrl: "https://stub.invalid/three-quarter.png",
+  };
 }

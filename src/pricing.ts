@@ -28,6 +28,31 @@ export const CREDIT_PRICES = {
   STORAGE_GB_MONTH: 4,
 } as const;
 
+/**
+ * Customer-gated GLB product pricing.
+ *
+ * Each value is charged at the moment its stage is explicitly approved to
+ * start. Keeping the object beside CREDIT_PRICES makes the browser quote and
+ * server ledger consume the same immutable constants without accepting a
+ * client-provided amount.
+ */
+export const PET_GLB_STAGE_PRICES = {
+  BASE: CREDIT_PRICES.STATIC_3D_PHOTO,
+  TEXTURE: CREDIT_PRICES.TEXTURE_GENERATION,
+  RIG: CREDIT_PRICES.RIG_ADDON,
+} as const;
+
+export interface PetGlbSelections {
+  texture: boolean;
+  rig: boolean;
+}
+
+export function petGlbTotalCost(selection: PetGlbSelections): number {
+  return PET_GLB_STAGE_PRICES.BASE
+    + (selection.texture ? PET_GLB_STAGE_PRICES.TEXTURE : 0)
+    + (selection.rig ? PET_GLB_STAGE_PRICES.RIG : 0);
+}
+
 /** Discount applied when a user reuses a previously generated image of the same
  *  subject (skips the fresh image-generation step). 0.2 = 20% off. */
 export const REUSE_DISCOUNT = 0.2;
@@ -61,12 +86,7 @@ export const SERVICE_PRICES: readonly ServicePrice[] = [
   { label: "Static 3D Object", credits: CREDIT_PRICES.STATIC_3D_PHOTO, detail: "Photo to GLB" },
   { label: "Rigged 3D Avatar", credits: CREDIT_PRICES.RIGGED_3D_AVATAR },
   { label: "Rigging Add-on", credits: CREDIT_PRICES.RIG_ADDON, detail: "Create flow: animation-ready skeleton + quality gates" },
-  // "Early access" is load-bearing copy, not marketing. The facial pass can only
-  // canonicalize viseme morphs the model provider returned; it never fabricates
-  // mouth shapes. When no morphs come back the model falls back to jaw-only
-  // motion and this add-on is still charged with no refund — so every surface
-  // that shows the price must also show the caveat.
-  { label: "Facial Rig Add-on", credits: CREDIT_PRICES.FACIAL_RIG_ADDON, detail: "Early access — viseme blendshapes for lip-sync when the model supports them; not guaranteed, no refund (requires Rigging Add-on)" },
+  { label: "Facial Rig Add-on", credits: null, detail: "Unavailable until measured reliability reaches 75%", comingSoon: true },
   // RD-2: BIM has moved to fsai.pro (dedicated BIM/IFC platform). Prices are
   // retired from the Pawsome3D store; the backend endpoints remain until FSAI is live.
   { label: "Scaled Building Shell", credits: null, detail: "Moved to fsai.pro", comingSoon: true },
@@ -90,12 +110,11 @@ export interface RiggingSelection {
   facial: boolean;
 }
 
-/** Authoritative create-flow price: base model + optional rig + optional facial. */
+/** Authoritative create-flow price: base model + optional body rig. */
 export function createModelCost(rigging?: RiggingSelection | null): number {
   let total: number = CREDIT_PRICES.STATIC_3D_PHOTO;
   if (rigging?.enabled) {
     total += CREDIT_PRICES.RIG_ADDON;
-    if (rigging.facial) total += CREDIT_PRICES.FACIAL_RIG_ADDON;
   }
   return total;
 }
@@ -103,7 +122,7 @@ export function createModelCost(rigging?: RiggingSelection | null): number {
 /** The refundable portion when rigging fails and the static model is delivered. */
 export function riggingAddonCost(rigging?: RiggingSelection | null): number {
   if (!rigging?.enabled) return 0;
-  return CREDIT_PRICES.RIG_ADDON + (rigging.facial ? CREDIT_PRICES.FACIAL_RIG_ADDON : 0);
+  return CREDIT_PRICES.RIG_ADDON;
 }
 
 export function avatarGenerationCost(avatarType: "dog" | "human" | "object", inputMode: "image" | "text"): number {

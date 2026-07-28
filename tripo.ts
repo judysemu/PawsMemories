@@ -56,6 +56,12 @@ export interface TripoGeometry {
   texture?: boolean;
   /** Whether the texture should be PBR. */
   pbr?: boolean;
+  /** Explicit provider model version selected by the server profile. */
+  modelVersion?: string;
+  /** Hand-crafted low-poly topology for supported non-P1 versions. */
+  smartLowPoly?: boolean;
+  /** v3+ geometry quality. Not sent to P1. */
+  geometryQuality?: "standard" | "detailed";
 }
 
 export interface TripoJobInput {
@@ -179,6 +185,9 @@ export async function startImageTo3D(input: TripoJobInput): Promise<string> {
     pbr,
     face_limit: g.faceLimit && g.faceLimit > 0 ? g.faceLimit : 40000,
   };
+  if (g.modelVersion) common.model_version = g.modelVersion;
+  if (g.smartLowPoly) common.smart_low_poly = true;
+  if (g.geometryQuality) common.geometry_quality = g.geometryQuality;
   // Texture-quality/alignment only matter when a texture is actually baked.
   if (texture) {
     common.texture_quality = "detailed";
@@ -225,20 +234,63 @@ export async function startImageTo3D(input: TripoJobInput): Promise<string> {
  */
 export async function startRig(
   originalModelTaskId: string,
-  opts?: { modelVersion?: string; avatarType?: 'dog' | 'human' | 'object' }
+  opts?: {
+    modelVersion?: string;
+    avatarType?: "dog" | "human" | "object";
+    rigType?: "biped" | "quadruped" | "hexapod" | "octopod" | "avian" | "serpentine" | "aquatic";
+  },
 ): Promise<string> {
   const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
     ? tripoTaskId(originalModelTaskId)
     : originalModelTaskId;
-  const spec = opts?.avatarType === "human" ? "humanoid" : "tripo";
+  const rigType = opts?.rigType || (opts?.avatarType === "human" ? "biped" : "quadruped");
   return submitTask({
     type: "animate_rig",
     original_model_task_id: original,
     out_format: "glb",
-    spec,
+    spec: "tripo",
+    rig_type: rigType,
     // Pin a rig model version for reproducibility; override via env if Tripo bumps it.
-    model_version: opts?.modelVersion || process.env.TRIPO_RIG_MODEL_VERSION || "v2.0-20250506",
+    model_version: opts?.modelVersion || process.env.TRIPO_RIG_MODEL_VERSION || "v2.5-20260210",
   });
+}
+
+export async function startPreRigCheck(originalModelTaskId: string): Promise<string> {
+  const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
+    ? tripoTaskId(originalModelTaskId)
+    : originalModelTaskId;
+  return submitTask({
+    type: "animate_prerigcheck",
+    original_model_task_id: original,
+  });
+}
+
+export interface TripoTextureOptions {
+  prompt?: string;
+  quality?: "standard" | "detailed";
+  pbr?: boolean;
+}
+
+/** Separate texture operation, run only after the blank base is approved. */
+export async function startTextureModel(
+  originalModelTaskId: string,
+  opts: TripoTextureOptions = {},
+): Promise<string> {
+  const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
+    ? tripoTaskId(originalModelTaskId)
+    : originalModelTaskId;
+  const body: Record<string, unknown> = {
+    type: "texture_model",
+    original_model_task_id: original,
+    texture: true,
+    pbr: opts.pbr !== false,
+    texture_quality: opts.quality || "standard",
+    texture_alignment: "original_image",
+    bake: true,
+  };
+  const prompt = opts.prompt?.trim();
+  if (prompt) body.texture_prompt = { text: prompt.slice(0, 400) };
+  return submitTask(body);
 }
 
 /**
@@ -265,6 +317,18 @@ export interface TripoPollResult {
   glbUrl?: string;
   error?: string;
   progress?: number;
+  capability?: {
+    riggable: boolean;
+    rigType:
+      | "biped"
+      | "quadruped"
+      | "hexapod"
+      | "octopod"
+      | "avian"
+      | "serpentine"
+      | "aquatic"
+      | null;
+  };
 }
 
 /** Poll any Tripo task (generation, rig, or retarget) for its GLB output. */
@@ -292,6 +356,17 @@ export async function pollImageTo3D(operationName: string): Promise<TripoPollRes
 
   if (status === "success") {
     const output = json?.data?.output || {};
+    if (typeof output.riggable === "boolean") {
+      const knownRigTypes = new Set([
+        "biped", "quadruped", "hexapod", "octopod", "avian", "serpentine", "aquatic",
+      ]);
+      const rigType = knownRigTypes.has(output.rig_type) ? output.rig_type : null;
+      return {
+        done: true,
+        progress: 100,
+        capability: { riggable: output.riggable, rigType },
+      };
+    }
     // Try multiple possible field names for the GLB download URL
     const glbUrl = output.model || output.model_url || output.pbr_model || output.base_model;
     console.log(`[Tripo] Task ${taskId} succeeded. Output keys: ${Object.keys(output).join(", ")}. glbUrl: ${glbUrl}`);

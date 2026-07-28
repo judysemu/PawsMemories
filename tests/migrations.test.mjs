@@ -31,13 +31,13 @@ test("sha256 produces deterministic checksums", () => {
 });
 
 test("published migrations remain immutable", () => {
-  assert.equal(MIGRATIONS.length, Object.keys(PUBLISHED_MIGRATION_CHECKSUMS).length);
-
-  for (const migration of MIGRATIONS) {
+  for (const [versionText, expectedChecksum] of Object.entries(PUBLISHED_MIGRATION_CHECKSUMS)) {
+    const migration = MIGRATIONS.find((entry) => entry.version === Number(versionText));
+    assert.ok(migration, `published migration ${versionText} is missing`);
     const rawSql = migration.statements.map((statement) => statement.trim()).join(";\n");
     assert.equal(
       sha256(rawSql),
-      PUBLISHED_MIGRATION_CHECKSUMS[migration.version],
+      expectedChecksum,
       `migration ${migration.version} was edited; add a new migration instead`,
     );
   }

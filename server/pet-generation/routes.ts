@@ -5,6 +5,18 @@ import type { AuthedRequest } from "../../auth";
 import { PetGlbService, type PetGlbServiceDeps } from "./service";
 import { PetGenerationError } from "./provider";
 import { assertPetGlbEnabled, PetGlbFeatureError } from "./featureFlag";
+import {
+  canonicalHash,
+  CreatePetGlbOrderSchema,
+  FACIAL_RIG_POLICY,
+  meshProfilePolicy,
+  ReferenceManifestSchema,
+  StageApprovalSchema,
+  StageKindSchema,
+  StageRejectionSchema,
+  StageRetrySchema,
+} from "./contracts";
+import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
 
 function phoneOf(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -18,8 +30,11 @@ function fail(res: Response, err: unknown) {
     const status =
       err.code === "ORDER_NOT_FOUND" || err.code === "JOB_NOT_FOUND" ? 404 :
       err.code === "FORBIDDEN" || err.code === "NOT_OPERATOR" || err.code === "OPERATOR_ROLE_UNCONFIGURED" ? 403 :
+      err.code === "INSUFFICIENT_CREDITS" ? 402 :
       err.code === "ILLEGAL_TRANSITION" || err.code === "CONCURRENT_TRANSITION" ||
-      err.code === "ALREADY_DELIVERED" || err.code === "APPROVAL_REJECTED" ? 409 :
+      err.code === "ALREADY_DELIVERED" || err.code === "APPROVAL_REJECTED" ||
+      err.code === "STALE_STAGE" || err.code === "IDEMPOTENCY_CONFLICT" ||
+      err.code === "STAGE_NOT_APPROVABLE" ? 409 :
       400;
     return res.status(status).json({ error: err.code, message: err.message });
   }
@@ -49,9 +64,29 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   router.get("/product", (_req, res) => {
     res.json({
       sku: "CUSTOM_RIGGED_PET_GLB_V1",
-      name: "Custom Rigged Pet 3D Model",
-      deliverables: ["one approved GLB pet model", "one validated idle animation", "one validated walk animation"],
+      name: "Custom 3D Model",
+      deliverables: ["customer-approved GLB", "measured mesh report", "secure private download"],
       operatorApprovalRequired: true,
+      prices: {
+        base: PET_GLB_STAGE_PRICES.BASE,
+        texture: PET_GLB_STAGE_PRICES.TEXTURE,
+        rig: PET_GLB_STAGE_PRICES.RIG,
+        currency: "PupCoins",
+      },
+      meshProfiles: {
+        hd: meshProfilePolicy("hd"),
+        smart_mesh: meshProfilePolicy("smart_mesh"),
+      },
+      subjectProfiles: [
+        { id: "pet", label: "Pet / animal", rigType: "quadruped" },
+        { id: "humanoid", label: "Humanoid character", rigType: "biped" },
+      ],
+      facialRig: FACIAL_RIG_POLICY,
+      styleDirection: {
+        stage: "texture",
+        maxCharacters: 400,
+        presets: ["reference-faithful", "soft-stylized", "toy-collectible", "studio-realistic"],
+      },
       referenceRequirements: {
         required: ["front", "left", "right", "rear", "three_quarter"],
         guidance: [
@@ -71,8 +106,30 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   router.post("/orders", writeLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const parsed = CreatePetGlbOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "INVALID_CONFIGURATION",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+      });
+    }
     try {
-      res.json(await service.createOrder(phone));
+      res.json(await service.createConfiguredOrder(phone, {
+        meshProfile: parsed.data.meshProfile,
+        subjectProfile: parsed.data.subjectProfile,
+        includeTexture: parsed.data.includeTexture,
+        includeRig: parsed.data.includeRig,
+        textureQuality: parsed.data.textureQuality,
+        styleDirection: parsed.data.styleDirection || null,
+      }));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.get("/orders", pollLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      res.json(await service.listOrderViews(phone, Number(req.query.limit || 20)));
     } catch (err) { fail(res, err); }
   });
 
@@ -91,45 +148,124 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
-      const order = await service.repository.findByUuid(req.params.orderUuid);
-      if (!order) return res.status(404).json({ error: "ORDER_NOT_FOUND" });
-      if (order.ownerPhone !== phone && !(await deps.isAdmin(phone))) {
-        return res.status(403).json({ error: "FORBIDDEN" });
-      }
-      res.json(order);
+      res.json(await service.getOrderView(req.params.orderUuid, phone));
     } catch (err) { fail(res, err); }
   });
 
   router.post("/orders/:orderUuid/references", writeLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
-    const sessionId = Number(req.body?.referenceSessionId);
-    if (!Number.isInteger(sessionId) || sessionId <= 0) {
-      return res.status(400).json({ error: "INVALID_REFERENCE_SESSION" });
+    const parsed = ReferenceManifestSchema.safeParse(req.body?.references);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "INCOMPLETE_REFERENCES",
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+      });
     }
     try {
-      res.json(await service.attachReferences(req.params.orderUuid, phone, sessionId));
+      res.json(await service.submitReferenceManifest(req.params.orderUuid, phone, parsed.data));
     } catch (err) { fail(res, err); }
   });
 
+  // The former /generate endpoint crossed every customer gate. Keep a stable,
+  // non-mutating error for stale clients instead of silently starting work.
   router.post("/orders/:orderUuid/generate", writeLimiter, async (req, res) => {
+    if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
+    res.status(409).json({
+      error: "GATED_FLOW_REQUIRED",
+      message: "Save and approve references before starting the base model.",
+    });
+  });
+
+  router.post("/orders/:orderUuid/stages/:stage/approve", writeLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
-    const r = req.body?.references;
-    const required = ["frontUrl", "leftUrl", "rightUrl", "rearUrl", "threeQuarterUrl"];
-    if (!r || required.some((k) => typeof r[k] !== "string" || !r[k])) {
-      return res.status(400).json({ error: "INCOMPLETE_REFERENCES", required });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    const parsed = StageApprovalSchema.safeParse(req.body);
+    if (!stage.success || !parsed.success) {
+      return res.status(400).json({ error: "INVALID_STAGE_APPROVAL" });
     }
     try {
-      res.json(await service.startGeneration(req.params.orderUuid, r));
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (view.currentStage?.stage !== stage.data) {
+        return res.status(409).json({ error: "STALE_STAGE" });
+      }
+      res.json(await service.approveCustomerStage(req.params.orderUuid, phone, {
+        idempotencyKey: parsed.data.idempotencyKey,
+        attemptUuid: parsed.data.attemptUuid,
+        artifactSha256: parsed.data.artifactSha256,
+        assetVersionId: parsed.data.assetVersionId ?? null,
+        reportSha256: parsed.data.reportSha256 ?? null,
+        approvalHash: canonicalHash({ orderUuid: req.params.orderUuid, stage: stage.data, ...parsed.data }),
+      }));
     } catch (err) { fail(res, err); }
   });
 
+  router.post("/orders/:orderUuid/stages/:stage/reject", writeLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    const parsed = StageRejectionSchema.safeParse(req.body);
+    if (!stage.success || !parsed.success) {
+      return res.status(400).json({ error: "INVALID_STAGE_REJECTION" });
+    }
+    try {
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (view.currentStage?.stage !== stage.data) {
+        return res.status(409).json({ error: "STALE_STAGE" });
+      }
+      res.json(await service.rejectCustomerStage(req.params.orderUuid, phone, parsed.data));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.post("/orders/:orderUuid/stages/:stage/retry", writeLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    const parsed = StageRetrySchema.safeParse(req.body);
+    if (!stage.success || !parsed.success || stage.data === "reference") {
+      return res.status(400).json({ error: "INVALID_STAGE_RETRY" });
+    }
+    try {
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (view.currentStage?.stage !== stage.data) {
+        return res.status(409).json({ error: "STALE_STAGE" });
+      }
+      res.json(await service.retryCustomerStage(req.params.orderUuid, phone, parsed.data));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.post("/orders/:orderUuid/stages/:stage/poll", pollLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    if (!stage.success || stage.data === "reference") {
+      return res.status(400).json({ error: "INVALID_POLL_STAGE" });
+    }
+    try {
+      res.json(await service.pollCustomerStage(req.params.orderUuid, phone, stage.data));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.get("/orders/:orderUuid/stages/current/preview", pollLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      res.json(await service.previewCurrentStage(req.params.orderUuid, phone));
+    } catch (err) { fail(res, err); }
+  });
+
+  // Legacy poll route is read-compatible but can no longer advance the
+  // automatic pipeline.
   router.post("/orders/:orderUuid/poll", pollLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
-      res.json(await service.pollAndValidate(req.params.orderUuid));
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (!view.currentStage || view.currentStage.stage === "reference") {
+        return res.json(view);
+      }
+      res.json(await service.pollCustomerStage(req.params.orderUuid, phone, view.currentStage.stage));
     } catch (err) { fail(res, err); }
   });
 
@@ -148,6 +284,14 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
       res.json(await service.operatorQueue(phone));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.get("/operator/orders/:orderUuid/preview", pollLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      res.json(await service.operatorPreview(req.params.orderUuid, phone));
     } catch (err) { fail(res, err); }
   });
 

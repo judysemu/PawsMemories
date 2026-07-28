@@ -31,9 +31,14 @@ export function createSpatialGeneratorRouter(
   } = {},
 ): Router {
   const router = Router();
-  const pool = options.pool || getPool();
   const checkAdmin = options.isAdmin || isUserAdmin;
-  const service = options.service || new SpatialGeneratorService({ pool });
+  let service = options.service;
+  const getService = () => {
+    if (!service) {
+      service = new SpatialGeneratorService({ pool: options.pool || getPool() });
+    }
+    return service;
+  };
 
   // Admin-only for initial release
   const adminGuard = async (req: Request, res: Response, next: Function) => {
@@ -89,7 +94,7 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const job = await service.startJob(userPhone, parsed.data);
+      const job = await getService().startJob(userPhone, parsed.data);
       return res.status(202).json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -111,7 +116,7 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const quote = await service.getQuote(userPhone, parsed.data);
+      const quote = await getService().getQuote(userPhone, parsed.data);
       return res.json(quote);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -131,7 +136,7 @@ export function createSpatialGeneratorRouter(
     const offset = Number(req.query.offset) || 0;
 
     try {
-      const jobs = await service.listJobs(userPhone, limit, offset);
+      const jobs = await getService().listJobs(userPhone, limit, offset);
       return res.json(jobs);
     } catch (error) {
       console.error("List spatial jobs failed:", error);
@@ -147,7 +152,7 @@ export function createSpatialGeneratorRouter(
     const { jobUuid } = req.params;
 
     try {
-      const job = await service.getJobDetail(userPhone, jobUuid);
+      const job = await getService().getJobDetail(userPhone, jobUuid);
       return res.json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -170,7 +175,7 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const job = await service.reviewJob(userPhone, jobUuid, parsed.data);
+      const job = await getService().reviewJob(userPhone, jobUuid, parsed.data);
       return res.json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -194,7 +199,7 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const job = await service.retryJob(userPhone, jobUuid, parsed.data);
+      const job = await getService().retryJob(userPhone, jobUuid, parsed.data);
       return res.status(202).json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -217,7 +222,7 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const job = await service.cancelJob(userPhone, jobUuid, parsed.data.reason);
+      const job = await getService().cancelJob(userPhone, jobUuid, parsed.data.reason);
       return res.json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
@@ -237,7 +242,7 @@ export function createSpatialGeneratorRouter(
     if (!isAdmin) return res.status(403).json({ error: "Admin only" });
 
     try {
-      const health = await service.getHealthStatus();
+      const health = await getService().getHealthStatus();
       return res.json(health);
     } catch (error) {
       console.error("Spatial generator health check failed:", error);
@@ -248,5 +253,4 @@ export function createSpatialGeneratorRouter(
   return router;
 }
 
-const productionService = new SpatialGeneratorService();
-export const spatialGeneratorRouter = createSpatialGeneratorRouter({ service: productionService });
+export const spatialGeneratorRouter = createSpatialGeneratorRouter();

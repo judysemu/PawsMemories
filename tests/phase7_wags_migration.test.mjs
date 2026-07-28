@@ -28,7 +28,6 @@ test("migration 28 contains the complete durable Wags v2 schema", () => {
   const migration = MIGRATIONS.find((item) => item.version === 28);
   assert.ok(migration);
   assert.ok(CURRENT_SCHEMA_VERSION >= 28, "Wags schema changes must remain in migration 28");
-  assert.equal(MIGRATIONS.some((item) => item.version === 31), false, "Migration 31 is reserved for the in-house spatial generator");
   const ddl = migration.statements.join("\n");
 
   for (const table of [

@@ -6,7 +6,7 @@ Live site: https://pawsome3d.com  (formerly mypets.cc)
 
 ## Features
 
-- **3D pet avatars** — photos → a 3D avatar via Tripo3D, with a default-off authenticated Blender pipeline for measured body/facial rigging and fused accessory print derivatives.
+- **Customer-gated 3D models** — five approved reference views → an untextured base GLB → optional texture → optional body rig. Every artifact is mirrored into private storage, validated, and shown for approval before the next paid stage starts. Customers can choose HD or measured low-triangle SmartMesh output.
 - **Fur Bin showcase** — a default-off private model library and public-derivative showcase with immutable versions, measured capability badges, moderation, and rollback.
 - **Scaled building lab** — calibrated text/image proposals, low-cost visual Shell and higher-cost IFC/BIM choices, and verification before and after construction. The durable v2 release path remains disabled until live worker/UI acceptance.
 - **AR virtual pet (WebXR / ARCore)** — place your avatar on real surfaces on Android Chrome; plane + mesh detection, drift‑free `XRAnchor` placement, and footprint center‑of‑gravity grounding so the pet plants on its feet. iOS falls back to the 8th Wall engine. The AR view is driven by an autonomous **behavior brain** (drives, hormones, reinforcement) with voice‑command training, gesture reinforcement, semantic‑scan navigation, and disc/agility trials — see `AR_PET_SIM_SPEC.md`.
@@ -14,63 +14,23 @@ Live site: https://pawsome3d.com  (formerly mypets.cc)
 - **Community** — local info (nearby parks, weather, pet‑recall news), a live pet inspiration board (dog.ceo + dogapi.dog) with user‑uploaded memories, and a coming‑soon roadmap.
 - **Credits** — server‑backed ledger with earn/spend history, persisted daily bonus, per‑day‑capped share rewards, and Stripe credit‑pack purchases (webhook + redirect‑confirm double safety net).
 - **Profile** — avatar thumbnail uploader + a personal photo library; photos uploaded in the avatar builder persist here automatically.
-- **Animation Studio Tooling** — A multi-actor Three.js studio with layered animation, blend spaces, emote scheduling, Theatre camera control, project persistence, Director scripts, CC0 clip discovery, IK, recording, and live ElevenLabs/Rhubarb lip-sync preview. The current production baseline is Animator Phase 2; later rigging, LOD, frame-accurate sequencing, realtime ML, and agentic batch phases remain incomplete as documented in `PHASED_IMPLEMENTATION.md`.
+- **Animation Studio Tooling** — A separate multi-actor Three.js studio with layered animation, blend spaces, emote scheduling, Theatre camera control, project persistence, Director scripts, IK, recording, and live ElevenLabs/Rhubarb lip-sync preview.
 - **Randy AI** — Gemini‑powered pet guide (spec for a 3D talking head in `RANDY_AI_SPEC.md`).
 
-## Current release candidate
+## Current model-generator release
 
-The schema 30 acceptance-correction release adds fail-closed full-body human
-reference checks, durable create-pipeline recovery, authenticated Blender print
-repair/validation, a visible real Voice Test, and a visible Scaled BIM preview.
-Shop no longer routes the legacy marketplace or manual print-request panels;
-physical manufacturing checkout remains in Create. Durable BIM and the other
-Phase 2-9 dark-launch features remain disabled. Deploy the Render Blender worker
-before installing the matching Hostinger archive because both sides of the worker
-contract changed. Live-product debugging is deferred to the next release pass.
+The current generator is documented by three source-of-truth files:
 
-## Animator implementation status
+- `docs/current/MODEL_GENERATOR_REVIEW_2026-07-28.md`
+- `docs/current/MODEL_GENERATOR_ARCHITECTURE_SNAPSHOT_2026-07-28.md`
+- `docs/current/MODEL_GENERATOR_BUILD_PLAN_2026-07-28.md`
 
-The active phase definitions are in `PHASED_IMPLEMENTATION.md`; `handoff.md` records the audited next-agent state.
-
-| Phase | Status | Current boundary |
-|---|---|---|
-| 0 Foundations | Complete | Contracts, availability guards, doctor, skills/personas |
-| 1 Layered runtime | Complete | Layered mixer, masks, blend space, EmoteQueue, behavior bridge |
-| 2 Lip-sync | Complete | Rhubarb Tier B, Tier A fallback, viseme player, live ElevenLabs preview, production UI |
-| 3 Auto-rig | Partial foundation | Provider-free profile selection, bone masks, selective-rig planning, deterministic manifests, and corpus acceptance policy are tested; worker/Blender integration, production `/rig`, manual overrides, and the real acceptance corpus remain open |
-| 4 Retargeting | Partial foundation | Existing clip/retarget paths do not satisfy the current plan's expanded library and QA exit gate |
-| 5 Mesh processing | Scaffold | Tested Euler/LOD policy helpers are not wired into production geometry processing |
-| 6 Sequencer/capture | Partial foundation | Theatre/capture modules exist; deterministic export, image sequence, audio lane, and `/bake` do not |
-| 7 Realtime/ML | Scaffold | DSP primitives exist; live MFCC, ML rigging, reconstruction, and event classification do not |
-| 8 Agentic batch | Scaffold | Manifest validation is dry-run-only; dispatch, retries, and aggregate QA are not implemented |
-
-Older commits labeled “Phase 8/8.1 Animation Studio” use a previous numbering scheme. They provide Theatre/studio foundations but do not complete the current Phase 8 Agentic Operations scope. A phase is complete only when its production path and stated exit fixture pass, not when helper files or unit tests exist.
-
-## Stabilization and AR hardening status
-
-The active stabilization work is on `stabilize/ar-hardening-foundation`. P0, P1,
-P2, and Animator Phase 3 remain **partial** until every exit gate in
-`AR_PET_SIM_HARDENING_PLAN_V2.md` passes. Production rigging remains disabled by
-default with `PETSIM_RIG_ENABLED=false`.
-
-Current local evidence:
-
-- 508/508 tests pass in the combined coverage run.
-- Dedicated AR tests: 136/136; image-input security tests: 7/7; production-router
-  contracts: 18/18; IFC worker tests: 5/5.
-- Coverage baseline: 73.39% lines, 83.94% branches, and 72.45% functions.
-- TypeScript, the production client/server build, dependency audit, and required
-  Animator Doctor checks pass.
-- Classify and semantic-scan routes reject malformed, mismatched, oversized, or
-  structurally unsafe JPEG/PNG/WebP data before quota/provider calls.
-- Rigging derives its provider task from the owned avatar and validates results before
-  upload or persistence, but remains disabled pending the later hardening gates.
-
-Remaining release gates include a green remote CI run, protected `main`, complete
-production-app route coverage, trusted rate buckets, safe remote fetching, the
-maximum-input memory profile, response-schema enforcement, and the real Animator
-ten-mesh acceptance corpus. See `handoff.md`, `docs/P1_STATUS.md`, and
-`docs/P2_IMPLEMENTATION_PLAN.md` for the exact evidence and blockers.
+The product no longer presents a single opaque generation action. Order creation
+is free; approving the exact reference set starts the paid base stage. Base,
+texture, and body-rig results are immutable, separately validated, and separately
+approved. Facial rigging is not sold because this provider path has not met the
+documented 75% reliability threshold. “Humanoid intelligence” selects a humanoid
+body-rig profile only; it does not claim to embed AI behavior inside a GLB.
 
 ## Tech stack
 

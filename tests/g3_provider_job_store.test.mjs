@@ -27,12 +27,12 @@ function makeFakePool() {
 
       if (s.includes("INSERT INTO PROVIDER_GENERATION_JOBS")) {
         const [job_id, order_id, provider_id, provider_version, provider_task_handle,
-               model, config_hash, cancelled, glb_url] = params;
+               model, config_hash, cancelled, glb_url, stage] = params;
         // ON DUPLICATE KEY UPDATE job_id = job_id  => existing row untouched
         if (!rows.has(job_id)) {
           rows.set(job_id, {
             job_id, order_id, provider_id, provider_version, provider_task_handle,
-            model, config_hash, cancelled, glb_url, created_ms: Date.now(),
+            model, config_hash, cancelled, glb_url, stage, created_ms: Date.now(),
           });
         }
         return [{ affectedRows: 1 }];
@@ -112,6 +112,16 @@ test("G3 durable ProviderJobStore", async (t) => {
     assert.strictEqual(got.providerTaskHandle, "handle-1");
     assert.strictEqual(got.cancelled, false, "boolean is decoded from TINYINT");
     assert.strictEqual(typeof got.createdAt, "number");
+  });
+
+  await t.test("round-trips the gated generation stage", async () => {
+    const pool = makeFakePool();
+    const store = new MySqlProviderJobStore(() => pool);
+
+    await store.put({ ...RECORD, stage: "texture" });
+    const got = await store.get(RECORD.jobId);
+
+    assert.strictEqual(got.stage, "texture");
   });
 
   await t.test("unknown job returns undefined, not a throw", async () => {

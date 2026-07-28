@@ -28,6 +28,13 @@ test("migration 29 backs owner-scoped durable BIM idempotency", async (t) => {
   try {
     await admin.query(`CREATE DATABASE \`${database}\``);
     pool = mysql.createPool({ ...config, database, connectionLimit: 3 });
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        phone VARCHAR(32) PRIMARY KEY,
+        password_hash VARCHAR(255) NULL,
+        credits INT NOT NULL DEFAULT 0
+      )
+    `);
     await runMigrations(pool);
 
     const repository = new DurableBimRepository(pool);

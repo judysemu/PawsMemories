@@ -3,36 +3,35 @@ import fs from "node:fs";
 import { test } from "node:test";
 import { CREDIT_PRICES, createModelCost, riggingAddonCost } from "../src/pricing.ts";
 
-// P3/P4 contract: optional rigging (+ facial) on the create flow.
-// See PAWSOME3D_REDRESS_PLAN.md §5 and docs/ADR-001-pawsome3d-redress.md.
+// Body rigging remains optional. Facial rigging is fail-closed until its
+// measured release cohort reaches 75%.
 
 test("pricing invariant: base + rig add-on equals the published Rigged 3D Avatar price", () => {
   assert.equal(CREDIT_PRICES.STATIC_3D_PHOTO + CREDIT_PRICES.RIG_ADDON, CREDIT_PRICES.RIGGED_3D_AVATAR);
 });
 
-test("createModelCost covers all three checkout totals", () => {
+test("createModelCost never charges the removed facial option", () => {
   assert.equal(createModelCost(undefined), 45);
   assert.equal(createModelCost({ enabled: false, facial: false }), 45);
   assert.equal(createModelCost({ enabled: true, facial: false }), 80);
-  assert.equal(createModelCost({ enabled: true, facial: true }), 100);
-  // Facial without rigging is not purchasable
+  assert.equal(createModelCost({ enabled: true, facial: true }), 80);
   assert.equal(createModelCost({ enabled: false, facial: true }), 45);
 });
 
 test("riggingAddonCost is exactly the refundable portion on static fallback", () => {
   assert.equal(riggingAddonCost(undefined), 0);
   assert.equal(riggingAddonCost({ enabled: true, facial: false }), 35);
-  assert.equal(riggingAddonCost({ enabled: true, facial: true }), 55);
+  assert.equal(riggingAddonCost({ enabled: true, facial: true }), 35);
 });
 
-test("customize screen offers both checkboxes and persists the selection", () => {
+test("customize screen offers body rigging and removes facial purchase", () => {
   const src = fs.readFileSync("src/components/create-flow/CreateCustomizeScreen.tsx", "utf8");
   assert.match(src, /Rig this model for animation/);
-  assert.match(src, /Include facial rig/);
   assert.match(src, /CREDIT_PRICES\.RIG_ADDON/);
-  assert.match(src, /CREDIT_PRICES\.FACIAL_RIG_ADDON/);
-  // Facial is gated on the rigging checkbox
-  assert.match(src, /disabled=\{!rigEnabled\}/);
+  assert.doesNotMatch(src, /Include facial rig/);
+  assert.doesNotMatch(src, /CREDIT_PRICES\.FACIAL_RIG_ADDON/);
+  assert.match(src, /facial: false/);
+  assert.match(src, /at least 75% success/);
   // Selection lands in customizationState (covered by the validation MD5 hash)
   assert.match(src, /rigging\s*\n?\s*\}/);
 });
@@ -81,7 +80,7 @@ test("job status enum supports the rig lifecycle", () => {
   assert.match(db, /rig_report/);
 });
 
-test("P4: viseme pass runs only when the facial rig is purchased", () => {
+test("legacy pipeline capability remains inert behind the fail-closed selection", () => {
   const orchestrator = fs.readFileSync("agent/graph/orchestrator.ts", "utf8");
   assert.match(orchestrator, /options\?: \{ facialVisemes\?: boolean \}/);
   const finalize = fs.readFileSync("agent/graph/nodes/finalize.ts", "utf8");
@@ -90,6 +89,8 @@ test("P4: viseme pass runs only when the facial rig is purchased", () => {
   assert.match(act, /state\.facialVisemes !== false/);
   const server = fs.readFileSync("server.ts", "utf8");
   assert.match(server, /facialVisemes: !!rigging\.facial/);
+  const recovery = fs.readFileSync("server/pipeline-rig-recovery.ts", "utf8");
+  assert.match(recovery, /return \{ enabled: selection\.enabled === true, facial: false \}/);
   // Legacy avatar path keeps visemes on by default (no options argument)
   const types = fs.readFileSync("agent/graph/nodes/types.ts", "utf8");
   assert.match(types, /options\?\.facialVisemes !== false/);

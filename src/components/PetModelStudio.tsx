@@ -2,313 +2,721 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { authedFetch } from "../api";
 import PetModelViewer from "./PetModelViewer";
 
-/**
- * Unified 3D modeler (Tripo/Meshy-style studio) for CUSTOM_RIGGED_PET_GLB_V1.
- *
- * One surface, two ways to buy the GLB:
- *   - "Do it for me"  — the full pipeline runs automatically to a rigged,
- *      idle+walk-animated model (the staged Tripo pipeline in the adapter).
- *   - "Step by step"  — the same pipeline presented as gated stages. Per-stage
- *      user gating + intermediate previews require the backend pause hook
- *      (PET_GLB_STEP_MODE), which is the next backend slice; today the timeline
- *      is live but advances automatically. Flagged honestly, not faked.
- */
-
-type OrderState =
-  | "draft" | "awaiting_payment" | "paid" | "awaiting_references" | "references_received"
-  | "queued" | "generating" | "validating" | "repair_required" | "awaiting_human_review"
-  | "approved" | "delivering" | "delivered" | "failed" | "refund_pending" | "refunded" | "cancelled";
-
-interface Order {
-  orderUuid: string;
-  state: OrderState;
-  approvedVersionId: number | null;
-  creditsReserved: number;
-  creditsDisposition: string;
-}
+type MeshProfile = "hd" | "smart_mesh";
+type SubjectProfile = "pet" | "humanoid";
+type TextureQuality = "standard" | "detailed";
+type StageKind = "reference" | "base" | "texture" | "rig_check" | "rig";
 
 interface Product {
-  sku: string;
   name: string;
   deliverables: string[];
-  operatorApprovalRequired: boolean;
+  prices: { base: number; texture: number; rig: number; currency: string };
+  meshProfiles: Record<MeshProfile, {
+    faceLimit: number;
+    maxTriangles: number;
+    modelVersion: string;
+  }>;
+  facialRig: {
+    available: false;
+    minimumSuccessRate: number;
+    reason: string;
+  };
   referenceRequirements: { required: string[]; guidance: string[] };
 }
 
-const VIEW_LABELS: Record<string, string> = {
-  front: "Front", left: "Left side", right: "Right side",
-  rear: "Rear", three_quarter: "Three-quarter / elevated",
-};
+interface ValidationReport {
+  operatorReady: boolean;
+  triangleCount?: number;
+  checks: Array<{
+    id: string;
+    passed: boolean | null;
+    detail: string;
+  }>;
+  reasonCodes: string[];
+}
 
-/** Build pipeline stages, mapped from order state → a friendly timeline. */
-const STAGES = [
-  { key: "base", label: "Base model", states: ["queued", "generating"] },
-  { key: "rig", label: "Rig", states: ["generating"] },
-  { key: "animate", label: "Idle + walk", states: ["generating", "validating"] },
-  { key: "review", label: "Quality review", states: ["validating", "awaiting_human_review", "repair_required"] },
-  { key: "ready", label: "Ready", states: ["approved", "delivering", "delivered"] },
+interface StageAttempt {
+  attemptUuid: string;
+  stage: StageKind;
+  attemptNumber: number;
+  state: "awaiting_customer_approval" | "queued" | "processing" | "approved" | "rejected" | "failed";
+  artifactSha256: string | null;
+  assetVersionId: number | null;
+  validationReport: ValidationReport | null;
+  validationReportSha256: string | null;
+  capabilityReport: { riggable: boolean; rigType: string | null } | null;
+  priceCredits: number;
+  creditsDisposition: "none" | "charged" | "refunded";
+  rejectionReason: string | null;
+  failureCode: string | null;
+}
+
+interface Order {
+  orderUuid: string;
+  state: string;
+  meshProfile: MeshProfile;
+  subjectProfile: SubjectProfile;
+  includeTexture: boolean;
+  includeRig: boolean;
+  textureQuality: TextureQuality;
+  styleDirection: string | null;
+  referenceManifest: Record<string, string> | null;
+  creditsReserved: number;
+  approvedVersionId: number | null;
+  finalCustomerVersionId: number | null;
+}
+
+interface OrderView {
+  order: Order;
+  currentStage: StageAttempt | null;
+  progress?: number;
+  quote: { base: number; texture: number; rig: number; total: number };
+  meshPolicy: { faceLimit: number; maxTriangles: number };
+  facialRig: Product["facialRig"];
+}
+
+const REFERENCE_FIELDS = [
+  ["frontUrl", "Front"],
+  ["leftUrl", "Left side"],
+  ["rearUrl", "Rear"],
+  ["rightUrl", "Right side"],
+  ["threeQuarterUrl", "Three-quarter"],
 ] as const;
 
-const STAGE_ORDER: OrderState[] = [
-  "queued", "generating", "validating", "awaiting_human_review", "approved", "delivering", "delivered",
-];
+const STYLE_PRESETS = [
+  { id: "reference", label: "Reference-faithful", text: "" },
+  { id: "soft", label: "Soft stylized", text: "Soft stylized finish while preserving the reference colors and markings." },
+  { id: "toy", label: "Toy collectible", text: "Premium collectible toy finish with clean color separation and soft material response." },
+  { id: "studio", label: "Studio realistic", text: "Studio-realistic fur and material finish faithful to the reference photography." },
+] as const;
 
-const CUSTOMER_STAGE: Partial<Record<OrderState, string>> = {
-  draft: "Starting your order",
-  awaiting_payment: "Awaiting payment",
-  paid: "Payment received",
-  awaiting_references: "Waiting for your photos",
-  references_received: "Photos received",
-  queued: "Queued for modelling",
-  generating: "Building your model",
-  validating: "Running quality checks",
-  repair_required: "Corrections in progress",
-  awaiting_human_review: "In review by our team",
-  approved: "Approved — preparing your download",
-  delivering: "Preparing your download",
-  delivered: "Ready to download",
-  failed: "Something went wrong",
-  refund_pending: "Refund in progress",
-  refunded: "Refunded",
-  cancelled: "Cancelled",
+const STAGE_LABELS: Record<StageKind, string> = {
+  reference: "Reference images",
+  base: "Blank base mesh",
+  texture: "Texture",
+  rig_check: "Rig readiness",
+  rig: "Rig",
 };
+
+function idempotencyKey(): string {
+  return crypto.randomUUID();
+}
 
 export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
-  const [order, setOrder] = useState<Order | null>(null);
-  const [mode, setMode] = useState<"auto" | "steps">("auto");
-  const [refs, setRefs] = useState<Record<string, string>>({});
+  const [view, setView] = useState<OrderView | null>(null);
+  const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
+  const [operatorQueue, setOperatorQueue] = useState<OrderView[] | null>(null);
+  const [operatorSelection, setOperatorSelection] = useState<OrderView | null>(null);
+  const [operatorPreviewUrl, setOperatorPreviewUrl] = useState<string | null>(null);
+  const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
+  const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
+  const [includeTexture, setIncludeTexture] = useState(true);
+  const [includeRig, setIncludeRig] = useState(false);
+  const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
+  const [stylePreset, setStylePreset] = useState("reference");
+  const [styleDirection, setStyleDirection] = useState("");
+  const [references, setReferences] = useState<Record<string, string>>({});
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [clip, setClip] = useState<"idle" | "walk">("idle");
 
   useEffect(() => {
-    authedFetch("/api/pet-glb/product")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Product unavailable"))))
-      .then(setProduct)
-      .catch((e) => setError(e.message));
+    Promise.all([
+      authedFetch("/api/pet-glb/product"),
+      authedFetch("/api/pet-glb/orders?limit=12"),
+      authedFetch("/api/pet-glb/operator/queue"),
+    ])
+      .then(async ([productResponse, ordersResponse, operatorResponse]) => {
+        const productBody = await productResponse.json();
+        if (!productResponse.ok) throw new Error(productBody?.message || "Model generator is unavailable.");
+        setProduct(productBody);
+        if (ordersResponse.ok) setRecentOrders(await ordersResponse.json());
+        if (operatorResponse.ok) setOperatorQueue(await operatorResponse.json());
+      })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Model generator is unavailable."));
   }, []);
+
+  useEffect(() => {
+    setPreviewUrl(null);
+    setRejectionReason("");
+  }, [view?.currentStage?.attemptUuid]);
+
+  useEffect(() => {
+    if (!includeTexture) {
+      setIncludeRig(false);
+      setStylePreset("reference");
+      setStyleDirection("");
+    }
+  }, [includeTexture]);
 
   const call = useCallback(async (path: string, init?: RequestInit) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await authedFetch(path, init);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.message || body?.error || "Request failed");
+      const response = await authedFetch(path, init);
+      const text = await response.text();
+      let body: any = {};
+      try { body = text ? JSON.parse(text) : {}; }
+      catch { throw new Error(`Server returned an unreadable response (${response.status}).`); }
+      if (!response.ok) throw new Error(body?.message || body?.error || "Request failed.");
       return body;
-    } catch (e: any) {
-      setError(e.message);
-      throw e;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Request failed.";
+      setError(message);
+      throw cause;
     } finally {
       setBusy(false);
     }
   }, []);
 
-  const startOrder = () => call("/api/pet-glb/orders", { method: "POST" }).then(setOrder).catch(() => {});
-  const payWithCredits = () =>
-    order && call(`/api/pet-glb/orders/${order.orderUuid}/pay`, { method: "POST" }).then(setOrder).catch(() => {});
+  const selectedStyle = styleDirection.trim() || STYLE_PRESETS.find((preset) => preset.id === stylePreset)?.text || "";
 
-  const submitReferences = () => {
-    if (!order) return;
-    const references = {
-      frontUrl: refs.front, leftUrl: refs.left, rightUrl: refs.right,
-      rearUrl: refs.rear, threeQuarterUrl: refs.three_quarter,
-    };
-    call(`/api/pet-glb/orders/${order.orderUuid}/generate`, {
+  const total = useMemo(() => {
+    if (!product) return 0;
+    return product.prices.base
+      + (includeTexture ? product.prices.texture : 0)
+      + (includeRig ? product.prices.rig : 0);
+  }, [product, includeTexture, includeRig]);
+
+  const applyView = useCallback((next: OrderView) => {
+    setView(next);
+    setRecentOrders((current) => [
+      next,
+      ...current.filter((item) => item.order.orderUuid !== next.order.orderUuid),
+    ]);
+  }, []);
+
+  const start = () => call("/api/pet-glb/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      meshProfile,
+      subjectProfile,
+      includeTexture,
+      includeRig,
+      textureQuality,
+      styleDirection: selectedStyle || null,
+      facialRig: false,
+    }),
+  }).then(applyView).catch(() => {});
+
+  const saveReferences = () => {
+    if (!view) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/references`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ references }),
-    }).then(setOrder).catch(() => {});
+    }).then(applyView).catch(() => {});
   };
 
-  const refresh = () =>
-    order && call(`/api/pet-glb/orders/${order.orderUuid}/poll`, { method: "POST" })
-      .then((r) => setOrder(r.order ?? r)).catch(() => {});
+  const approve = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage?.artifactSha256) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey(),
+        attemptUuid: stage.attemptUuid,
+        artifactSha256: stage.artifactSha256,
+        assetVersionId: stage.assetVersionId,
+        reportSha256: stage.validationReportSha256,
+      }),
+    }).then(applyView).catch(() => {});
+  };
 
-  const download = () =>
-    order && call(`/api/pet-glb/orders/${order.orderUuid}/download`, { method: "POST" })
-      .then((r) => setDownloadUrl(r.url)).catch(() => {});
+  const poll = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || stage.stage === "reference") return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/poll`, {
+      method: "POST",
+    }).then(applyView).catch(() => {});
+  };
 
-  const allRefsPresent = product?.referenceRequirements.required.every((k) => refs[k]?.trim()) ?? false;
+  const loadPreview = () => {
+    if (!view) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/current/preview`)
+      .then((body) => setPreviewUrl(body.url))
+      .catch(() => {});
+  };
 
-  const activeStageIndex = useMemo(() => {
-    if (!order) return -1;
-    const i = STAGE_ORDER.indexOf(order.state);
-    if (i < 0) return -1;
-    // Map fine order-state to the 5-stage studio timeline.
-    if (order.state === "approved" || order.state === "delivering" || order.state === "delivered") return 4;
-    if (order.state === "validating" || order.state === "awaiting_human_review" || order.state === "repair_required") return 3;
-    if (order.state === "generating") return 2;
-    return 0;
-  }, [order]);
+  const reject = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || rejectionReason.trim().length < 3) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey(),
+        attemptUuid: stage.attemptUuid,
+        reason: rejectionReason.trim(),
+      }),
+    }).then(applyView).catch(() => {});
+  };
 
-  if (error && !product) return <div className="p-6 text-sm text-red-500">{error}</div>;
-  if (!product) return <div className="p-6 text-sm opacity-70">Loading studio…</div>;
+  const retry = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || stage.stage === "reference") return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/retry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey(),
+        attemptUuid: stage.attemptUuid,
+      }),
+    }).then(applyView).catch(() => {});
+  };
 
-  const modelReady = order?.state === "approved" || order?.state === "delivered";
+  const download = () => {
+    if (!view) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/download`, { method: "POST" })
+      .then((body) => setDownloadUrl(body.url))
+      .catch(() => {});
+  };
+
+  const inspectOperatorOrder = (candidate: OrderView) => {
+    setOperatorSelection(candidate);
+    setOperatorPreviewUrl(null);
+    call(`/api/pet-glb/operator/orders/${candidate.order.orderUuid}/preview`)
+      .then((body) => setOperatorPreviewUrl(body.url))
+      .catch(() => {});
+  };
+
+  const releaseOperatorOrder = () => {
+    const candidate = operatorSelection;
+    const versionId = candidate?.order.finalCustomerVersionId;
+    if (!candidate || !versionId) return;
+    call(`/api/pet-glb/operator/orders/${candidate.order.orderUuid}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        versionId,
+        note: "Exact customer-approved version inspected and released.",
+      }),
+    })
+      .then(() => {
+        setOperatorQueue((current) => current?.filter(
+          (item) => item.order.orderUuid !== candidate.order.orderUuid,
+        ) ?? null);
+        setOperatorSelection(null);
+        setOperatorPreviewUrl(null);
+      })
+      .catch(() => {});
+  };
+
+  if (!product && !error) return <div className="p-6 text-sm opacity-70">Loading model generator…</div>;
+  if (!product) return <div className="p-6 text-sm text-red-500">{error}</div>;
+
+  const stage = view?.currentStage;
+  const allReferencesReady = REFERENCE_FIELDS.every(([key]) => references[key]?.trim());
+  const validationPasses = stage?.validationReport?.operatorReady !== false;
+  const canApprove = stage?.state === "awaiting_customer_approval"
+    && Boolean(stage.artifactSha256)
+    && validationPasses
+    && (stage.stage !== "rig_check" || stage.capabilityReport?.riggable === true);
+  const selectedStages: StageKind[] = [
+    "reference",
+    "base",
+    ...(view?.order.includeTexture ?? includeTexture ? ["texture" as const] : []),
+    ...(view?.order.includeRig ?? includeRig ? ["rig_check" as const, "rig" as const] : []),
+  ];
 
   return (
-    <div className="mx-auto max-w-5xl p-6 space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">{product.name}</h1>
-          <p className="text-sm opacity-70">
-            {product.deliverables.join(" · ")}
-          </p>
-        </div>
-        <div className="inline-flex rounded-lg border p-1 text-sm">
-          <button
-            onClick={() => setMode("auto")}
-            className={`rounded-md px-3 py-1 ${mode === "auto" ? "bg-blue-600 text-white" : "opacity-70"}`}
-          >
-            Do it for me
-          </button>
-          <button
-            onClick={() => setMode("steps")}
-            className={`rounded-md px-3 py-1 ${mode === "steps" ? "bg-blue-600 text-white" : "opacity-70"}`}
-          >
-            Step by step
-          </button>
-        </div>
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <header className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Customer-gated GLB studio</p>
+        <h1 className="text-3xl font-semibold">{product.name}</h1>
+        <p className="max-w-3xl text-sm opacity-70">
+          Nothing advances automatically. You approve the references, blank mesh, texture, and rig before the next paid stage starts.
+        </p>
       </header>
 
-      <div className="grid gap-6 md:grid-cols-[1.3fr_1fr]">
-        {/* ── 3D stage ─────────────────────────────────────────────── */}
-        <section className="rounded-xl border bg-black/5 dark:bg-white/5 min-h-[360px] flex flex-col">
-          <div className="flex-1 flex items-center justify-center p-2">
-            {modelReady && downloadUrl ? (
-              <PetModelViewer
-                src={downloadUrl}
-                animationName={clip}
-                alt="Your rigged pet model"
-                className="w-full h-[360px]"
-              />
+      {!view ? (
+        <div className="grid gap-5 lg:grid-cols-[1.4fr_0.8fr]">
+          <section className="space-y-5 rounded-3xl border border-white/15 bg-white/[0.07] p-5 backdrop-blur-xl">
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold">Mesh profile</legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(["hd", "smart_mesh"] as const).map((profile) => (
+                  <button
+                    key={profile}
+                    type="button"
+                    onClick={() => setMeshProfile(profile)}
+                    className={`rounded-2xl border p-4 text-left transition ${meshProfile === profile ? "border-cyan-300 bg-cyan-400/15" : "border-white/15 bg-black/10"}`}
+                  >
+                    <span className="font-medium">{profile === "hd" ? "HD" : "SmartMesh"}</span>
+                    <span className="mt-1 block text-xs opacity-65">
+                      {profile === "hd"
+                        ? `Up to ${product.meshProfiles.hd.maxTriangles.toLocaleString()} measured triangles`
+                        : `Lightweight · max ${product.meshProfiles.smart_mesh.maxTriangles.toLocaleString()} measured triangles`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold">Character profile</legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={() => setSubjectProfile("pet")}
+                  className={`rounded-2xl border p-4 text-left ${subjectProfile === "pet" ? "border-cyan-300 bg-cyan-400/15" : "border-white/15"}`}>
+                  <span className="font-medium">Pet / animal</span>
+                  <span className="mt-1 block text-xs opacity-65">Quadruped rig profile when rigging is selected.</span>
+                </button>
+                <button type="button" onClick={() => setSubjectProfile("humanoid")}
+                  className={`rounded-2xl border p-4 text-left ${subjectProfile === "humanoid" ? "border-cyan-300 bg-cyan-400/15" : "border-white/15"}`}>
+                  <span className="font-medium">Humanoid character</span>
+                  <span className="mt-1 block text-xs opacity-65">Biped, intelligence-runtime-ready rig profile. AI behavior is not embedded in the GLB.</span>
+                </button>
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold">Add-on stages</legend>
+              <label className="flex items-start gap-3 rounded-2xl border border-white/15 p-4">
+                <input type="checkbox" checked={includeTexture} onChange={(event) => setIncludeTexture(event.target.checked)} className="mt-1" />
+                <span>
+                  <span className="font-medium">Texture · {product.prices.texture} PupCoins</span>
+                  <span className="block text-xs opacity-65">Charged only after you approve the blank base mesh.</span>
+                </span>
+              </label>
+              <label className={`flex items-start gap-3 rounded-2xl border p-4 ${includeTexture ? "border-white/15" : "border-white/5 opacity-45"}`}>
+                <input type="checkbox" checked={includeRig} disabled={!includeTexture} onChange={(event) => setIncludeRig(event.target.checked)} className="mt-1" />
+                <span>
+                  <span className="font-medium">Rig · {product.prices.rig} PupCoins</span>
+                  <span className="block text-xs opacity-65">A real pre-rig check runs first. Rigging is charged only after compatibility is confirmed and you approve it.</span>
+                </span>
+              </label>
+            </fieldset>
+
+            {includeTexture && (
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-semibold">Texture direction</legend>
+                <div className="flex flex-wrap gap-2">
+                  {STYLE_PRESETS.map((preset) => (
+                    <button key={preset.id} type="button" onClick={() => setStylePreset(preset.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs ${stylePreset === preset.id ? "border-cyan-300 bg-cyan-400/15" : "border-white/15"}`}>
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={styleDirection}
+                  onChange={(event) => setStyleDirection(event.target.value.slice(0, 400))}
+                  placeholder="Optional texture/material direction. This will not change the approved body geometry."
+                  className="min-h-24 w-full rounded-2xl border border-white/15 bg-black/15 p-3 text-sm"
+                />
+                <div className="flex items-center justify-between text-xs opacity-60">
+                  <label>
+                    Quality{" "}
+                    <select value={textureQuality} onChange={(event) => setTextureQuality(event.target.value as TextureQuality)}
+                      className="rounded border border-white/15 bg-black/30 px-2 py-1">
+                      <option value="standard">Standard</option>
+                      <option value="detailed">Detailed</option>
+                    </select>
+                  </label>
+                  <span>{styleDirection.length}/400</span>
+                </div>
+              </fieldset>
+            )}
+          </section>
+
+          <aside className="h-fit space-y-4 rounded-3xl border border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
+            <h2 className="font-semibold">Price by approval</h2>
+            <PriceRow label="Blank base mesh" value={product.prices.base} />
+            <PriceRow label="Texture" value={includeTexture ? product.prices.texture : 0} muted={!includeTexture} />
+            <PriceRow label="Rig" value={includeRig ? product.prices.rig : 0} muted={!includeRig} />
+            <div className="border-t border-white/15 pt-3">
+              <PriceRow label="Maximum total" value={total} strong />
+            </div>
+            <p className="text-xs opacity-60">Creating the order is free. The base charge happens only when you approve your reference set.</p>
+            <button onClick={start} disabled={busy} className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50">
+              {busy ? "Creating…" : "Start gated build"}
+            </button>
+            <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs">
+              Facial blendshape rigging is not for sale. It returns only after at least {Math.round(product.facialRig.minimumSuccessRate * 100)}% measured reliability.
+            </div>
+            {recentOrders.length > 0 && (
+              <div className="space-y-2 border-t border-white/15 pt-4">
+                <h2 className="text-sm font-semibold">Your model builds</h2>
+                {recentOrders.slice(0, 6).map((item) => (
+                  <button
+                    key={item.order.orderUuid}
+                    type="button"
+                    onClick={() => setView(item)}
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 px-3 py-2 text-left text-xs"
+                  >
+                    <span>{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} · {item.order.subjectProfile}</span>
+                    <span className="max-w-28 truncate opacity-60">{item.order.state.replaceAll("_", " ")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {operatorQueue !== null && (
+              <div className="space-y-2 border-t border-white/15 pt-4">
+                <h2 className="text-sm font-semibold">Operator release queue</h2>
+                {operatorQueue.length === 0 ? (
+                  <p className="text-xs opacity-60">No customer-approved models are waiting.</p>
+                ) : operatorQueue.map((item) => (
+                  <button
+                    key={item.order.orderUuid}
+                    type="button"
+                    onClick={() => inspectOperatorOrder(item)}
+                    className="flex w-full items-center justify-between rounded-xl border border-amber-300/20 px-3 py-2 text-left text-xs"
+                  >
+                    <span>{item.order.orderUuid.slice(0, 8)} · {item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"}</span>
+                    <span className="opacity-60">Inspect</span>
+                  </button>
+                ))}
+                {operatorSelection && (
+                  <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-3">
+                    <div className="text-xs">
+                      Exact version <strong>{operatorSelection.order.finalCustomerVersionId}</strong>
+                      {operatorSelection.currentStage?.validationReport?.triangleCount !== undefined
+                        ? ` · ${operatorSelection.currentStage.validationReport.triangleCount.toLocaleString()} triangles`
+                        : ""}
+                    </div>
+                    {operatorSelection.order.referenceManifest && (
+                      <div className="grid grid-cols-5 gap-1">
+                        {REFERENCE_FIELDS.map(([key, label]) => (
+                          <img
+                            key={key}
+                            src={operatorSelection.order.referenceManifest?.[key]}
+                            alt={`${label} operator reference`}
+                            className="aspect-square w-full rounded-md object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <div className="text-xs opacity-70">
+                      {operatorSelection.order.subjectProfile} · maximum charged {operatorSelection.quote.total} PupCoins
+                    </div>
+                    {operatorSelection.currentStage?.validationReport?.checks.map((check) => (
+                      <div key={check.id} className="flex gap-2 text-xs">
+                        <span className={check.passed === true ? "text-emerald-300" : "text-red-300"}>
+                          {check.passed === true ? "✓" : "×"}
+                        </span>
+                        <span>{check.detail}</span>
+                      </div>
+                    ))}
+                    {operatorPreviewUrl ? (
+                      <PetModelViewer
+                        src={operatorPreviewUrl}
+                        alt="Operator final-version preview"
+                        className="h-64 w-full overflow-hidden rounded-xl"
+                      />
+                    ) : (
+                      <p className="text-xs opacity-60">Loading the private final version…</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={releaseOperatorOrder}
+                      disabled={busy || !operatorPreviewUrl || !operatorSelection.order.finalCustomerVersionId}
+                      className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40"
+                    >
+                      Approve exact version & release
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </aside>
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
+          <section className="min-h-[480px] overflow-hidden rounded-3xl border border-white/15 bg-black/20 backdrop-blur-xl">
+            {stage?.stage === "reference" && view.order.referenceManifest ? (
+              <div className="grid h-full grid-cols-2 gap-3 p-4 sm:grid-cols-3">
+                {REFERENCE_FIELDS.map(([key, label]) => (
+                  <figure key={key} className="overflow-hidden rounded-2xl border border-white/15 bg-black/20">
+                    <img src={view.order.referenceManifest?.[key]} alt={`${label} reference`} className="aspect-square h-auto w-full object-cover" />
+                    <figcaption className="px-3 py-2 text-xs">{label}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            ) : previewUrl ? (
+              <PetModelViewer src={previewUrl} alt={`${stage ? STAGE_LABELS[stage.stage] : "Model"} preview`} className="h-[520px] w-full" />
             ) : (
-              <div className="text-center text-sm opacity-60 px-6">
-                {order ? (CUSTOMER_STAGE[order.state] ?? order.state) : "Your model will appear here."}
-                <div className="mt-4 text-xs opacity-70">
-                  Grey base mesh → textured → rigged → idle + walk animation
+              <div className="flex min-h-[480px] items-center justify-center p-8 text-center">
+                <div className="max-w-md space-y-3">
+                  <div className="text-lg font-medium">{stage ? STAGE_LABELS[stage.stage] : "Final review"}</div>
+                  <p className="text-sm opacity-65">
+                    {stage?.state === "processing" || stage?.state === "queued"
+                      ? `This stage is running${view.progress !== undefined ? ` · ${view.progress}%` : ""}.`
+                      : stage?.assetVersionId
+                        ? "The GLB is stored privately. Load its short-lived preview when you are ready to inspect it."
+                        : "Complete the current controls to continue."}
+                  </p>
+                  {stage?.assetVersionId && (
+                    <button onClick={loadPreview} disabled={busy} className="rounded-2xl border border-cyan-300/40 px-4 py-2 text-sm">
+                      Load secure 3D preview
+                    </button>
+                  )}
                 </div>
               </div>
             )}
-          </div>
-          {modelReady && downloadUrl && (
-            <div className="flex items-center justify-center gap-2 border-t p-2 text-sm">
-              <span className="opacity-60">Animation:</span>
-              {(["idle", "walk"] as const).map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setClip(c)}
-                  className={`rounded-md px-3 py-1 capitalize ${clip === c ? "bg-emerald-600 text-white" : "border"}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+          </section>
 
-        {/* ── Controls ─────────────────────────────────────────────── */}
-        <section className="space-y-4">
-          {/* Pipeline timeline */}
-          {order && STAGE_ORDER.includes(order.state) && (
-            <ol className="space-y-1 text-sm">
-              {STAGES.map((s, i) => {
-                const done = i < activeStageIndex;
-                const active = i === activeStageIndex;
+          <aside className="space-y-4">
+            <ol className="space-y-2 rounded-3xl border border-white/15 bg-white/[0.07] p-4 backdrop-blur-xl">
+              {selectedStages.map((kind) => {
+                const active = stage?.stage === kind;
+                const stageIndex = selectedStages.indexOf(kind);
+                const activeIndex = stage ? selectedStages.indexOf(stage.stage) : selectedStages.length;
+                const done = stageIndex < activeIndex || (active && stage?.state === "approved");
                 return (
-                  <li key={s.key} className="flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${done ? "bg-emerald-500" : active ? "bg-blue-500 animate-pulse" : "bg-gray-300"}`} />
-                    <span className={active ? "font-medium" : done ? "opacity-60" : "opacity-40"}>{s.label}</span>
+                  <li key={kind} className="flex items-center gap-3 text-sm">
+                    <span className={`h-3 w-3 rounded-full ${done ? "bg-emerald-400" : active ? "animate-pulse bg-cyan-300" : "bg-white/20"}`} />
+                    <span className={active ? "font-semibold" : done ? "opacity-65" : "opacity-40"}>{STAGE_LABELS[kind]}</span>
                   </li>
                 );
               })}
+              <li className="flex items-center gap-3 text-sm">
+                <span className={`h-3 w-3 rounded-full ${view.order.state === "approved" || view.order.state === "delivered" ? "bg-emerald-400" : "bg-white/20"}`} />
+                <span className="opacity-65">Final quality review</span>
+              </li>
             </ol>
-          )}
 
-          {!order && (
-            <div className="space-y-2">
-              <button onClick={startOrder} disabled={busy}
-                className="w-full rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-                {busy ? "Starting…" : mode === "auto" ? "Build my pet — do it for me" : "Start step-by-step build"}
-              </button>
-              <p className="text-xs opacity-60">
-                {mode === "auto"
-                  ? "We run every step automatically and deliver a rigged, animated model."
-                  : "You approve each stage — base mesh, texture, rig, animation — as it completes."}
-              </p>
-            </div>
-          )}
-
-          {order && (
-            <div className="rounded-md border px-3 py-2 text-sm">
-              <div className="font-medium">{CUSTOMER_STAGE[order.state] ?? order.state}</div>
-              <div className="opacity-60 text-xs mt-1">
-                Order {order.orderUuid.slice(0, 8)} · {order.creditsReserved} credits {order.creditsDisposition}
+            {view.order.state === "awaiting_references" && (
+              <div className="space-y-3 rounded-3xl border border-white/15 bg-white/[0.07] p-4">
+                <h2 className="font-semibold">Add five reference images</h2>
+                <p className="text-xs opacity-60">Use secure HTTPS image links. You will see and approve every image before the base charge.</p>
+                {REFERENCE_FIELDS.map(([key, label]) => (
+                  <label key={key} className="block text-xs">
+                    <span className="mb-1 block opacity-75">{label}</span>
+                    <input type="url" value={references[key] || ""} onChange={(event) => setReferences((current) => ({ ...current, [key]: event.target.value }))}
+                      className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2" placeholder="https://…" />
+                  </label>
+                ))}
+                <button onClick={saveReferences} disabled={busy || !allReferencesReady}
+                  className="w-full rounded-2xl bg-cyan-500 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-40">
+                  Review these images
+                </button>
               </div>
-            </div>
-          )}
+            )}
 
-          {order?.state === "awaiting_payment" && (
-            <div className="space-y-2">
-              <button onClick={payWithCredits} disabled={busy}
-                className="w-full rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-                {busy ? "Processing…" : `Pay ${order.creditsReserved} credits`}
+            {stage && (
+              <div className="space-y-3 rounded-3xl border border-white/15 bg-white/[0.07] p-4 backdrop-blur-xl">
+                <div>
+                  <h2 className="font-semibold">{STAGE_LABELS[stage.stage]}</h2>
+                  <p className="text-xs opacity-60">
+                    Attempt {stage.attemptNumber}
+                    {stage.priceCredits > 0 ? ` · ${stage.priceCredits} PupCoins ${stage.creditsDisposition}` : " · no charge"}
+                  </p>
+                </div>
+
+                {(stage.state === "queued" || stage.state === "processing") && stage.stage !== "reference" && (
+                  <button onClick={poll} disabled={busy} className="w-full rounded-2xl border border-cyan-300/40 px-4 py-2.5">
+                    {busy ? "Checking…" : "Check stage progress"}
+                  </button>
+                )}
+
+                {stage.validationReport && (
+                  <div className="space-y-2 text-xs">
+                    {stage.validationReport.triangleCount !== undefined && (
+                      <div className="rounded-xl bg-black/20 px-3 py-2">
+                        Measured triangles: <strong>{stage.validationReport.triangleCount.toLocaleString()}</strong>
+                        {" · "}limit {view.meshPolicy.maxTriangles.toLocaleString()}
+                      </div>
+                    )}
+                    {stage.validationReport.checks.map((check) => (
+                      <div key={check.id} className="flex gap-2">
+                        <span className={check.passed === true ? "text-emerald-300" : "text-red-300"}>{check.passed === true ? "✓" : "×"}</span>
+                        <span>{check.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {stage.stage === "rig_check" && stage.capabilityReport && (
+                  <div className={`rounded-xl px-3 py-2 text-xs ${stage.capabilityReport.riggable ? "bg-emerald-400/10" : "bg-red-400/10"}`}>
+                    {stage.capabilityReport.riggable
+                      ? `Compatible ${stage.capabilityReport.rigType} rig confirmed.`
+                      : "Rig compatibility was not confirmed. You will not be charged for rigging."}
+                  </div>
+                )}
+
+                {canApprove && (
+                  <button onClick={approve} disabled={busy} className="w-full rounded-2xl bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-50">
+                    {stage.stage === "reference"
+                      ? `Approve images & build base · ${view.quote.base} PupCoins`
+                      : stage.stage === "base" && view.order.includeTexture
+                        ? `Approve base & add texture · ${view.quote.texture} PupCoins`
+                        : stage.stage === "rig_check"
+                          ? `Approve rigging · ${view.quote.rig} PupCoins`
+                          : `Approve ${STAGE_LABELS[stage.stage]}`}
+                  </button>
+                )}
+
+                {stage.state === "awaiting_customer_approval" && (
+                  <div className="space-y-2 border-t border-white/10 pt-3">
+                    <textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value.slice(0, 500))}
+                      className="min-h-20 w-full rounded-xl border border-white/15 bg-black/20 p-2 text-xs"
+                      placeholder="What must be corrected?" />
+                    <button onClick={reject} disabled={busy || rejectionReason.trim().length < 3}
+                      className="w-full rounded-xl border border-red-300/30 px-3 py-2 text-xs disabled:opacity-40">
+                      Request remake
+                    </button>
+                  </div>
+                )}
+
+                {stage.state === "rejected" && stage.stage !== "reference" && (
+                  <button onClick={retry} disabled={busy} className="w-full rounded-2xl bg-cyan-500 px-4 py-2.5 font-semibold text-slate-950">
+                    Retry {STAGE_LABELS[stage.stage]}
+                    {stage.attemptNumber > 1 ? " · 5 PupCoins" : " · first retry free"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {view.order.state === "stage_rejected" && stage?.stage === "reference" && (
+              <button onClick={() => setView({ ...view, order: { ...view.order, state: "awaiting_references" } })}
+                className="w-full rounded-2xl border border-cyan-300/40 px-4 py-2.5">
+                Update reference links
               </button>
-              <p className="text-xs opacity-60">Paid from your credit balance. You upload photos next.</p>
+            )}
+
+            {view.order.state === "awaiting_human_review" && (
+              <div className="rounded-3xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm">
+                Your exact approved GLB is in final quality review. No later version can be substituted.
+              </div>
+            )}
+
+            {(view.order.state === "approved" || view.order.state === "delivered") && (
+              <div className="space-y-3 rounded-3xl border border-emerald-300/25 bg-emerald-300/10 p-4">
+                <h2 className="font-semibold">Your model is ready</h2>
+                <button onClick={download} disabled={busy} className="w-full rounded-2xl bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950">
+                  Create secure download link
+                </button>
+                {downloadUrl && <a href={downloadUrl} download className="block text-center text-sm underline">Download approved .glb</a>}
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-white/10 px-3 py-2 text-xs opacity-65">
+              Order {view.order.orderUuid.slice(0, 8)} · {view.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} · {view.order.subjectProfile}
             </div>
-          )}
+          </aside>
+        </div>
+      )}
 
-          {order && ["paid", "awaiting_references", "references_received"].includes(order.state) && (
-            <div className="space-y-3">
-              <h2 className="font-medium text-sm">Upload your photos</h2>
-              {product.referenceRequirements.required.map((key) => (
-                <label key={key} className="block text-sm">
-                  <span className="block mb-1 opacity-80">{VIEW_LABELS[key] ?? key}</span>
-                  <input type="url" placeholder="https://…" value={refs[key] ?? ""}
-                    onChange={(e) => setRefs((p) => ({ ...p, [key]: e.target.value }))}
-                    className="w-full rounded border px-2 py-1" />
-                </label>
-              ))}
-              <button onClick={submitReferences} disabled={busy || !allRefsPresent}
-                className="w-full rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50">
-                {busy ? "Submitting…" : "Build my model"}
-              </button>
-              {!allRefsPresent && <p className="text-xs opacity-60">All five views are required.</p>}
-            </div>
-          )}
+      {error && <div role="alert" className="rounded-2xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">{error}</div>}
+      {view && (
+        <button type="button" onClick={() => setView(null)} className="text-sm opacity-65 underline">
+          Back to model builds
+        </button>
+      )}
+    </div>
+  );
+}
 
-          {order && ["queued", "generating", "validating", "repair_required", "awaiting_human_review", "delivering"].includes(order.state) && (
-            <button onClick={refresh} disabled={busy}
-              className="w-full rounded-md border px-4 py-2 disabled:opacity-50">
-              {busy ? "Checking…" : "Check progress"}
-            </button>
-          )}
-
-          {modelReady && (
-            <button onClick={download} disabled={busy}
-              className="w-full rounded-md bg-emerald-600 px-4 py-2 text-white disabled:opacity-50">
-              {busy ? "Preparing…" : "Load & download my model"}
-            </button>
-          )}
-
-          {downloadUrl && (
-            <p className="text-sm">
-              <a href={downloadUrl} className="text-blue-600 underline" download>Download .glb</a>{" "}
-              <span className="opacity-60 text-xs">(link expires in 15 minutes)</span>
-            </p>
-          )}
-
-          {product.operatorApprovalRequired && (
-            <p className="text-xs rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2">
-              Every model is reviewed by our team before delivery.
-            </p>
-          )}
-          {error && <p className="text-sm text-red-500">{error}</p>}
-        </section>
-      </div>
+function PriceRow({ label, value, muted, strong }: { label: string; value: number; muted?: boolean; strong?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between text-sm ${muted ? "opacity-40" : ""} ${strong ? "font-semibold" : ""}`}>
+      <span>{label}</span>
+      <span>{value} PupCoins</span>
     </div>
   );
 }

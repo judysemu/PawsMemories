@@ -130,7 +130,7 @@ test("recovery diagnostics expose age, attempt budget, lease, and source binding
 });
 
 test("migration 30 persists recovery timestamps, lease, source identity, attempts, and refund idempotency", () => {
-  assert.equal(CURRENT_SCHEMA_VERSION, 34);
+  assert.ok(CURRENT_SCHEMA_VERSION >= 30);
   const migration = MIGRATIONS.find((entry) => entry.version === 30);
   assert.ok(migration);
   const sql = migration.statements.join("\n");

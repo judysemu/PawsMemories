@@ -26,8 +26,8 @@ export class MySqlProviderJobStore implements ProviderJobStore {
     await pool.query(
       `INSERT INTO provider_generation_jobs
          (job_id, order_id, provider_id, provider_version, provider_task_handle,
-          model, config_hash, cancelled, glb_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+          model, config_hash, cancelled, glb_url, stage, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
        ON DUPLICATE KEY UPDATE job_id = job_id`,
       [
         record.jobId,
@@ -39,6 +39,7 @@ export class MySqlProviderJobStore implements ProviderJobStore {
         record.configHash,
         record.cancelled ? 1 : 0,
         record.glbUrl ?? null,
+        record.stage ?? null,
       ],
     );
   }

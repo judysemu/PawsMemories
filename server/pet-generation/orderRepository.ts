@@ -1,6 +1,13 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 import { PetGenerationError } from "./provider";
+import type {
+  MeshProfile,
+  PetGlbOrderConfiguration,
+  PetGlbStageKind,
+  SubjectProfile,
+  TextureQuality,
+} from "./types";
 
 export type PetGlbOrderState =
   | "draft"
@@ -19,7 +26,22 @@ export type PetGlbOrderState =
   | "failed"
   | "refund_pending"
   | "refunded"
-  | "cancelled";
+  | "cancelled"
+  | "awaiting_reference_approval"
+  | "base_queued"
+  | "base_generating"
+  | "awaiting_base_approval"
+  | "texture_queued"
+  | "texture_generating"
+  | "awaiting_texture_approval"
+  | "rig_checking"
+  | "awaiting_rig_purchase"
+  | "rig_queued"
+  | "rig_generating"
+  | "awaiting_rig_approval"
+  | "stage_rejected"
+  | "stage_failed"
+  | "recovery_required";
 
 export type ActorType = "system" | "customer" | "operator";
 
@@ -38,6 +60,17 @@ export interface PetGlbOrder {
   deliveredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  meshProfile: MeshProfile;
+  subjectProfile: SubjectProfile;
+  includeTexture: boolean;
+  includeRig: boolean;
+  textureQuality: TextureQuality;
+  styleDirection: string | null;
+  referenceManifest: Record<string, string> | null;
+  referenceManifestHash: string | null;
+  currentStage: PetGlbStageKind | null;
+  currentStageAttemptId: number | null;
+  finalCustomerVersionId: number | null;
 }
 
 export interface TransitionContext {
@@ -54,10 +87,10 @@ export interface TransitionContext {
  * delivered; those require an operator (enforced in approve()).
  */
 const LEGAL: Record<PetGlbOrderState, PetGlbOrderState[]> = {
-  draft: ["awaiting_payment", "cancelled"],
+  draft: ["awaiting_payment", "awaiting_references", "cancelled"],
   awaiting_payment: ["paid", "cancelled", "failed"],
   paid: ["awaiting_references", "references_received", "refund_pending", "cancelled"],
-  awaiting_references: ["references_received", "refund_pending", "cancelled"],
+  awaiting_references: ["references_received", "awaiting_reference_approval", "refund_pending", "cancelled"],
   references_received: ["queued", "refund_pending", "cancelled"],
   queued: ["generating", "failed", "cancelled"],
   generating: ["validating", "failed", "cancelled"],
@@ -71,6 +104,21 @@ const LEGAL: Record<PetGlbOrderState, PetGlbOrderState[]> = {
   refund_pending: ["refunded", "failed"],
   refunded: [],
   cancelled: [],
+  awaiting_reference_approval: ["base_queued", "stage_rejected", "cancelled"],
+  base_queued: ["base_generating", "stage_failed", "recovery_required", "cancelled"],
+  base_generating: ["awaiting_base_approval", "stage_failed", "recovery_required", "cancelled"],
+  awaiting_base_approval: ["texture_queued", "rig_checking", "awaiting_human_review", "stage_rejected", "cancelled"],
+  texture_queued: ["texture_generating", "stage_failed", "recovery_required", "cancelled"],
+  texture_generating: ["awaiting_texture_approval", "stage_failed", "recovery_required", "cancelled"],
+  awaiting_texture_approval: ["rig_checking", "awaiting_human_review", "stage_rejected", "cancelled"],
+  rig_checking: ["awaiting_rig_purchase", "stage_failed", "recovery_required", "cancelled"],
+  awaiting_rig_purchase: ["rig_queued", "stage_rejected", "cancelled"],
+  rig_queued: ["rig_generating", "stage_failed", "recovery_required", "cancelled"],
+  rig_generating: ["awaiting_rig_approval", "stage_failed", "recovery_required", "cancelled"],
+  awaiting_rig_approval: ["awaiting_human_review", "stage_rejected", "cancelled"],
+  stage_rejected: ["base_queued", "texture_queued", "rig_checking", "rig_queued", "cancelled"],
+  stage_failed: ["base_queued", "texture_queued", "rig_checking", "rig_queued", "refund_pending", "cancelled"],
+  recovery_required: ["base_generating", "texture_generating", "rig_checking", "rig_generating", "stage_failed"],
 };
 
 function mapRow(r: any): PetGlbOrder {
@@ -89,6 +137,19 @@ function mapRow(r: any): PetGlbOrder {
     deliveredAt: r.delivered_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    meshProfile: (r.mesh_profile || "hd") as MeshProfile,
+    subjectProfile: (r.subject_profile || "pet") as SubjectProfile,
+    includeTexture: r.include_texture === undefined ? true : Boolean(r.include_texture),
+    includeRig: Boolean(r.include_rig),
+    textureQuality: (r.texture_quality || "standard") as TextureQuality,
+    styleDirection: r.style_direction ?? null,
+    referenceManifest: typeof r.reference_manifest_json === "string"
+      ? JSON.parse(r.reference_manifest_json)
+      : r.reference_manifest_json ?? null,
+    referenceManifestHash: r.reference_manifest_hash ?? null,
+    currentStage: r.current_stage ?? null,
+    currentStageAttemptId: r.current_stage_attempt_id ? Number(r.current_stage_attempt_id) : null,
+    finalCustomerVersionId: r.final_customer_version_id ? Number(r.final_customer_version_id) : null,
   };
 }
 
@@ -109,6 +170,40 @@ export class PetGlbOrderRepository {
     return created;
   }
 
+  async createConfigured(
+    ownerPhone: string,
+    sku: string,
+    configuration: PetGlbOrderConfiguration,
+  ): Promise<PetGlbOrder> {
+    const orderUuid = crypto.randomUUID();
+    const pool = this.getPool();
+    await pool.query(
+      `INSERT INTO pet_glb_orders
+         (order_uuid, owner_phone, sku, state, credits_reserved, credits_disposition,
+          mesh_profile, subject_profile, include_texture, include_rig, texture_quality, style_direction)
+       VALUES (?, ?, ?, 'awaiting_references', 0, 'none', ?, ?, ?, ?, ?, ?)`,
+      [
+        orderUuid,
+        ownerPhone,
+        sku,
+        configuration.meshProfile,
+        configuration.subjectProfile,
+        configuration.includeTexture ? 1 : 0,
+        configuration.includeRig ? 1 : 0,
+        configuration.textureQuality,
+        configuration.styleDirection,
+      ],
+    );
+    const created = await this.findByUuid(orderUuid);
+    if (!created) throw new PetGenerationError("ORDER_CREATE_FAILED", "Order insert did not persist");
+    await this.writeEvent(pool, created.id, null, "awaiting_references", {
+      actorType: "customer",
+      actorId: ownerPhone,
+      reason: "configured_order_created",
+    });
+    return created;
+  }
+
   async findByUuid(orderUuid: string): Promise<PetGlbOrder | undefined> {
     const [rows] = await this.getPool().query(
       `SELECT * FROM pet_glb_orders WHERE order_uuid = ? LIMIT 1`,
@@ -116,6 +211,18 @@ export class PetGlbOrderRepository {
     );
     const arr = rows as any[];
     return arr.length ? mapRow(arr[0]) : undefined;
+  }
+
+  async listByOwner(ownerPhone: string, limit = 20): Promise<PetGlbOrder[]> {
+    const bounded = Math.max(1, Math.min(50, Math.trunc(limit)));
+    const [rows] = await this.getPool().query(
+      `SELECT * FROM pet_glb_orders
+        WHERE owner_phone = ?
+        ORDER BY updated_at DESC
+        LIMIT ?`,
+      [ownerPhone, bounded],
+    );
+    return (rows as any[]).map(mapRow);
   }
 
   /**

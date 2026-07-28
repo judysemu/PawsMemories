@@ -20,6 +20,36 @@ export interface PetModelGenerationInput {
    * slot"). Recorded, not hidden. Consumed once G12 replaces the provider.
    */
   threeQuarterUrl: string;
+  meshProfile?: MeshProfile;
+  subjectProfile?: SubjectProfile;
+}
+
+export type MeshProfile = "hd" | "smart_mesh";
+export type SubjectProfile = "pet" | "humanoid";
+export type TextureQuality = "standard" | "detailed";
+export type PetGlbStageKind = "reference" | "base" | "texture" | "rig_check" | "rig";
+export type PetGlbModelStageKind = "base" | "texture" | "rig";
+
+export interface PetGlbOrderConfiguration {
+  meshProfile: MeshProfile;
+  subjectProfile: SubjectProfile;
+  includeTexture: boolean;
+  includeRig: boolean;
+  textureQuality: TextureQuality;
+  styleDirection: string | null;
+}
+
+export interface RigCapability {
+  riggable: boolean;
+  rigType:
+    | "biped"
+    | "quadruped"
+    | "hexapod"
+    | "octopod"
+    | "avian"
+    | "serpentine"
+    | "aquatic"
+    | null;
 }
 
 export type GenerationJobStatus =
@@ -36,6 +66,8 @@ export interface GenerationJob {
   progress?: number;
   /** Reason code on failure/cancellation. Never a raw provider error blob. */
   reason?: string;
+  /** Provider-neutral result of a real pre-rig capability task. */
+  capability?: RigCapability;
 }
 
 export interface ArtifactBlob {
@@ -75,7 +107,7 @@ export interface ProviderJobRecord {
    * the task handles and URLs are Tripo-issued and resolved during polling.
    * Absent on single-shot (non-animated) jobs.
    */
-  stage?: "base" | "rig" | "idle" | "walk" | "ready";
+  stage?: "base" | "texture" | "rig_check" | "rig" | "idle" | "walk" | "ready";
   rigTaskHandle?: string;
   idleTaskHandle?: string;
   walkTaskHandle?: string;

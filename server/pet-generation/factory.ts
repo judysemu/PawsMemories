@@ -53,10 +53,9 @@ export function createProviderForSku(
       new TripoModelBuildAdapter(),
       options.store ?? new InMemoryJobStore(),
       binding.providerVersion,
-      // Run the animated pipeline (base → rig → idle/walk → merge) so the
-      // delivered GLB carries real idle+walk clips. Opt out with
-      // PET_GLB_ANIMATE=0 for a bare single-shot model.
-      { animate: process.env.PET_GLB_ANIMATE !== "0" },
+      // This paid product is customer-gated. Automatic chaining would skip
+      // paid approvals, so every provider task is started explicitly.
+      { animate: false },
     );
   }
 

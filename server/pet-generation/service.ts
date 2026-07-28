@@ -3,10 +3,29 @@ import type mysql from "mysql2/promise";
 import { createProviderForSku } from "./factory";
 import { MySqlProviderJobStore } from "./jobStore";
 import { PetGlbOrderRepository, type PetGlbOrder } from "./orderRepository";
-import { validatePetGlb, type ValidationReport } from "./validation";
+import { validatePetGlb, validatePetGlbStage, type ValidationReport } from "./validation";
 import { CUSTOM_RIGGED_PET_GLB_V1 } from "./skuRegistry";
 import { PetGenerationError } from "./provider";
-import type { PetModelGenerationInput } from "./types";
+import type {
+  PetGlbModelStageKind,
+  PetGlbOrderConfiguration,
+  PetGlbStageKind,
+  PetModelGenerationInput,
+} from "./types";
+import {
+  canonicalHash,
+  FACIAL_RIG_POLICY,
+  meshProfilePolicy,
+  productQuote,
+  rigTypeForSubject,
+  stagePrice,
+} from "./contracts";
+import {
+  PetGlbStageRepository,
+  type ExactStageApproval,
+  type PetGlbStageAttempt,
+} from "./stageRepository";
+import { CREDIT_PRICES } from "../../src/pricing";
 
 export interface PetGlbServiceDeps {
   getPool: () => mysql.Pool;
@@ -20,6 +39,7 @@ export interface PetGlbServiceDeps {
     sha256: string;
     validationReport: ValidationReport;
     metadata: Record<string, unknown>;
+    stage?: PetGlbModelStageKind;
   }) => Promise<{ assetId: number; versionId: number }>;
   /** Issues a short-lived authenticated download URL for an approved version. */
   signDownload: (versionId: number, ownerPhone: string, ttlSeconds: number) => Promise<string>;
@@ -36,13 +56,444 @@ export function quoteCredits(viewCount: number, baseCredits = 10): number {
 
 export class PetGlbService {
   private readonly orders: PetGlbOrderRepository;
+  private readonly stages: PetGlbStageRepository;
 
   constructor(private readonly deps: PetGlbServiceDeps) {
     this.orders = new PetGlbOrderRepository(deps.getPool);
+    this.stages = new PetGlbStageRepository(deps.getPool);
   }
 
   get repository(): PetGlbOrderRepository {
     return this.orders;
+  }
+
+  get stageRepository(): PetGlbStageRepository {
+    return this.stages;
+  }
+
+  // ── Customer-gated product ───────────────────────────────────────────────
+
+  async createConfiguredOrder(
+    ownerPhone: string,
+    configuration: PetGlbOrderConfiguration,
+  ): Promise<PetGlbOrderView> {
+    const order = await this.orders.createConfigured(
+      ownerPhone,
+      CUSTOM_RIGGED_PET_GLB_V1,
+      configuration,
+    );
+    return this.buildView(order);
+  }
+
+  async getOrderView(orderUuid: string, ownerPhone: string): Promise<PetGlbOrderView> {
+    return this.buildView(await this.requireOwned(orderUuid, ownerPhone));
+  }
+
+  async listOrderViews(ownerPhone: string, limit = 20): Promise<PetGlbOrderView[]> {
+    const orders = await this.orders.listByOwner(ownerPhone, limit);
+    return Promise.all(orders.map((order) => this.buildView(order)));
+  }
+
+  async submitReferenceManifest(
+    orderUuid: string,
+    ownerPhone: string,
+    manifest: PetModelGenerationInput,
+  ): Promise<PetGlbOrderView> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    const inputHash = canonicalHash({
+      manifest,
+      meshProfile: order.meshProfile,
+      subjectProfile: order.subjectProfile,
+      includeTexture: order.includeTexture,
+      includeRig: order.includeRig,
+      textureQuality: order.textureQuality,
+      styleDirection: order.styleDirection,
+    });
+    await this.stages.saveReferenceManifest(
+      order.id,
+      ownerPhone,
+      { ...manifest } as Record<string, string>,
+      inputHash,
+    );
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  async approveCustomerStage(
+    orderUuid: string,
+    ownerPhone: string,
+    approval: ExactStageApproval,
+  ): Promise<PetGlbOrderView> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    const current = await this.stages.findCurrent(order.id);
+    if (!current) throw new PetGenerationError("STAGE_NOT_FOUND", "Order has no current stage");
+
+    const nextStage = this.nextStage(order, current.stage);
+    const nextInputHash = nextStage
+      ? canonicalHash({
+          orderUuid,
+          nextStage,
+          sourceAttemptUuid: current.attemptUuid,
+          sourceArtifactSha256: current.artifactSha256,
+          meshProfile: order.meshProfile,
+          subjectProfile: order.subjectProfile,
+          textureQuality: order.textureQuality,
+          styleDirection: order.styleDirection,
+        })
+      : null;
+
+    const queued = await this.stages.approveAndQueueNext({
+      orderId: order.id,
+      ownerPhone,
+      approval,
+      nextStage,
+      nextInputHash,
+      nextPriceCredits: nextStage ? stagePrice(nextStage) : 0,
+    });
+
+    if (queued.next) {
+      await this.startQueuedStage(orderUuid, ownerPhone, queued.next);
+    }
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  async pollCustomerStage(
+    orderUuid: string,
+    ownerPhone: string,
+    requestedStage: PetGlbStageKind,
+  ): Promise<PetGlbOrderView> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    let attempt = await this.stages.findCurrent(order.id);
+    if (!attempt || attempt.stage !== requestedStage) {
+      throw new PetGenerationError("STALE_STAGE", "Requested stage is not current");
+    }
+    if (attempt.state === "recovery_required") {
+      if (
+        attempt.stage !== "reference"
+        && attempt.stage !== "rig_check"
+        && attempt.assetId
+        && attempt.assetVersionId
+        && attempt.validationReport
+        && attempt.validationReportSha256
+      ) {
+        await this.stages.recoverPersistedModelStage(order.id, attempt.id);
+        return this.buildView((await this.orders.findByUuid(orderUuid))!);
+      }
+      attempt = await this.stages.resumeProviderRecovery(order.id, attempt.id);
+    }
+    let completionClaimed = false;
+    if (attempt.state === "persisting") {
+      // Another request normally owns the active completion claim. The
+      // repository returns true only when its bounded stale interval elapsed.
+      completionClaimed = await this.stages.claimCompletion(order.id, attempt.id);
+      if (!completionClaimed) return this.buildView(order, attempt);
+      attempt = { ...attempt, state: "persisting" };
+    }
+    if ((!completionClaimed && attempt.state !== "processing") || !attempt.providerJobId) {
+      return this.buildView(order);
+    }
+
+    const provider = this.provider();
+    const job = await provider.getJob(attempt.providerJobId);
+    if (job.status === "failed" || job.status === "cancelled") {
+      await this.stages.failAndRefund(
+        order.id,
+        attempt.id,
+        ownerPhone,
+        job.reason || job.status.toUpperCase(),
+      );
+      return this.buildView((await this.orders.findByUuid(orderUuid))!);
+    }
+    if (job.status !== "completed") return this.buildView(order, attempt, job.progress);
+
+    if (attempt.stage === "reference") {
+      throw new PetGenerationError("INVALID_POLL_STAGE", "Reference approval has no provider job");
+    }
+    const claimed = completionClaimed || await this.stages.claimCompletion(order.id, attempt.id);
+    if (!claimed) {
+      return this.buildView((await this.orders.findByUuid(orderUuid))!);
+    }
+
+    if (attempt.stage === "rig_check") {
+      try {
+        const expected = rigTypeForSubject(order.subjectProfile);
+        const capability = job.capability || { riggable: false, rigType: null };
+        const verified = {
+          riggable: capability.riggable && capability.rigType === expected,
+          rigType: capability.rigType,
+        };
+        await this.stages.completeRigCheck(
+          order.id,
+          attempt.id,
+          verified,
+          canonicalHash(verified),
+        );
+      } catch (error) {
+        await this.stages.markRecoveryRequired({
+          orderId: order.id,
+          attemptId: attempt.id,
+          providerJobId: attempt.providerJobId,
+          failureCode: "RIG_CHECK_FINALIZE_FAILED",
+        });
+        throw error;
+      }
+      return this.buildView((await this.orders.findByUuid(orderUuid))!);
+    }
+
+    let persisted: {
+      assetId: number;
+      versionId: number;
+      artifactSha256: string;
+      report: ValidationReport;
+      reportSha256: string;
+    } | null = null;
+    try {
+      const artifacts = await provider.fetchArtifacts(attempt.providerJobId);
+      const report = validatePetGlbStage(artifacts.glb.data, {
+        stage: attempt.stage,
+        meshProfile: order.meshProfile,
+        rigProfileJoints: attempt.stage === "rig" ? this.deps.rigProfileJoints : undefined,
+      });
+      const reportSha256 = canonicalHash(report);
+      const { assetId, versionId } = await this.deps.persistVersion({
+        ownerPhone: order.ownerPhone,
+        assetId: order.assetId,
+        glb: artifacts.glb.data,
+        sha256: artifacts.glb.sha256,
+        validationReport: report,
+        stage: attempt.stage,
+        metadata: {
+          ...artifacts.metadata,
+          orderUuid,
+          stage: attempt.stage,
+          stageAttemptUuid: attempt.attemptUuid,
+          meshProfile: order.meshProfile,
+          subjectProfile: order.subjectProfile,
+          styleDirection: order.styleDirection,
+          triangleCount: report.triangleCount,
+        },
+      });
+      persisted = {
+        assetId,
+        versionId,
+        artifactSha256: artifacts.glb.sha256,
+        report,
+        reportSha256,
+      };
+      await this.stages.completeModelStage({
+        orderId: order.id,
+        attemptId: attempt.id,
+        stage: attempt.stage,
+        assetId,
+        assetVersionId: versionId,
+        artifactSha256: artifacts.glb.sha256,
+        report,
+        reportSha256,
+      });
+    } catch (error) {
+      if (persisted) {
+        await this.stages.markPersistedRecovery({
+          orderId: order.id,
+          attemptId: attempt.id,
+          providerJobId: attempt.providerJobId,
+          assetId: persisted.assetId,
+          assetVersionId: persisted.versionId,
+          artifactSha256: persisted.artifactSha256,
+          report: persisted.report,
+          reportSha256: persisted.reportSha256,
+        });
+      } else {
+        await this.stages.failAndRefund(
+          order.id,
+          attempt.id,
+          ownerPhone,
+          error instanceof PetGenerationError ? error.code : "STAGE_PERSIST_FAILED",
+        );
+      }
+      throw error;
+    }
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  async previewCurrentStage(
+    orderUuid: string,
+    ownerPhone: string,
+  ): Promise<{ url: string; versionId: number; expiresInSeconds: number }> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    const current = await this.stages.findCurrent(order.id);
+    if (!current?.assetVersionId) {
+      throw new PetGenerationError("NO_STAGE_ARTIFACT", "Current stage has no previewable GLB");
+    }
+    return {
+      url: await this.deps.signDownload(current.assetVersionId, ownerPhone, DOWNLOAD_TTL_SECONDS),
+      versionId: current.assetVersionId,
+      expiresInSeconds: DOWNLOAD_TTL_SECONDS,
+    };
+  }
+
+  async rejectCustomerStage(
+    orderUuid: string,
+    ownerPhone: string,
+    input: { attemptUuid: string; reason: string; idempotencyKey: string },
+  ): Promise<PetGlbOrderView> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    await this.stages.rejectCurrent(
+      order.id,
+      ownerPhone,
+      input.attemptUuid,
+      input.reason,
+      input.idempotencyKey,
+    );
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  async retryCustomerStage(
+    orderUuid: string,
+    ownerPhone: string,
+    input: { attemptUuid: string; idempotencyKey: string },
+  ): Promise<PetGlbOrderView> {
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    const current = await this.stages.findCurrent(order.id);
+    if (!current || current.attemptUuid !== input.attemptUuid) {
+      throw new PetGenerationError("STALE_STAGE", "Retry does not match the current stage");
+    }
+    const retryPrice = current.attemptNumber === 1
+      ? CREDIT_PRICES.FIRST_REGENERATION
+      : CREDIT_PRICES.ADDITIONAL_REGENERATION;
+    const retry = await this.stages.queueRetry({
+      orderId: order.id,
+      ownerPhone,
+      attemptUuid: input.attemptUuid,
+      idempotencyKey: input.idempotencyKey,
+      inputHash: canonicalHash({
+        retryOf: current.attemptUuid,
+        stage: current.stage,
+        nextAttemptNumber: current.attemptNumber + 1,
+        sourceAttemptId: current.sourceAttemptId,
+      }),
+      priceCredits: retryPrice,
+    });
+    await this.startQueuedStage(orderUuid, ownerPhone, retry);
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  private provider() {
+    return createProviderForSku(CUSTOM_RIGGED_PET_GLB_V1, {
+      store: new MySqlProviderJobStore(this.deps.getPool),
+    });
+  }
+
+  private async startQueuedStage(
+    orderUuid: string,
+    ownerPhone: string,
+    attempt: PetGlbStageAttempt,
+  ): Promise<void> {
+    if (attempt.state !== "queued") return;
+    const order = await this.requireOwned(orderUuid, ownerPhone);
+    const provider = this.provider();
+    let startedJobId: string | null = null;
+    try {
+      let job;
+      if (attempt.stage === "base") {
+        if (!order.referenceManifest) {
+          throw new PetGenerationError("REFERENCES_MISSING", "Approved references are missing");
+        }
+        job = await provider.createBaseJob({
+          ...(order.referenceManifest as unknown as PetModelGenerationInput),
+          meshProfile: order.meshProfile,
+          subjectProfile: order.subjectProfile,
+        });
+      } else {
+        const source = await this.resolveSourceModelAttempt(attempt);
+        if (!source.providerJobId) {
+          throw new PetGenerationError("SOURCE_JOB_MISSING", "Approved source stage has no provider job");
+        }
+        if (attempt.stage === "texture") {
+          job = await provider.createTextureJob(source.providerJobId, {
+            styleDirection: order.styleDirection,
+            quality: order.textureQuality,
+          });
+        } else if (attempt.stage === "rig_check") {
+          job = await provider.createRigCheckJob(source.providerJobId);
+        } else if (attempt.stage === "rig") {
+          job = await provider.createRigJob(source.providerJobId, order.subjectProfile);
+        } else {
+          throw new PetGenerationError("UNSUPPORTED_STAGE", `Cannot start ${attempt.stage}`);
+        }
+      }
+      startedJobId = job.id;
+      await this.stages.attachProviderJob(order.id, attempt.id, job.id);
+    } catch (error: any) {
+      if (startedJobId) {
+        await this.stages.markRecoveryRequired({
+          orderId: order.id,
+          attemptId: attempt.id,
+          providerJobId: startedJobId,
+          failureCode: "PROVIDER_JOB_ATTACH_FAILED",
+        });
+      } else {
+        await this.stages.failAndRefund(
+          order.id,
+          attempt.id,
+          ownerPhone,
+          error instanceof PetGenerationError ? error.code : "PROVIDER_START_FAILED",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async resolveSourceModelAttempt(attempt: PetGlbStageAttempt): Promise<PetGlbStageAttempt> {
+    if (!attempt.sourceAttemptId) {
+      throw new PetGenerationError("SOURCE_STAGE_MISSING", "Stage has no approved source");
+    }
+    let source = await this.stages.findById(attempt.sourceAttemptId);
+    if (!source) throw new PetGenerationError("SOURCE_STAGE_MISSING", "Source stage was not found");
+    // Rig is queued from the approved rig-check. The provider must receive the
+    // model that the rig check inspected, not the rig-check task itself.
+    if (source.stage === "rig_check") {
+      if (!source.sourceAttemptId) {
+        throw new PetGenerationError("SOURCE_STAGE_MISSING", "Rig check has no source model");
+      }
+      source = await this.stages.findById(source.sourceAttemptId);
+      if (!source) throw new PetGenerationError("SOURCE_STAGE_MISSING", "Rig source model was not found");
+    }
+    if (source.state !== "approved") {
+      throw new PetGenerationError("SOURCE_NOT_APPROVED", "Next stage source is not customer-approved");
+    }
+    return source;
+  }
+
+  private nextStage(
+    order: PetGlbOrder,
+    current: PetGlbStageKind,
+  ): Exclude<PetGlbStageKind, "reference"> | null {
+    if (current === "reference") return "base";
+    if (current === "base") {
+      if (order.includeTexture) return "texture";
+      if (order.includeRig) return "rig_check";
+      return null;
+    }
+    if (current === "texture") return order.includeRig ? "rig_check" : null;
+    if (current === "rig_check") return "rig";
+    return null;
+  }
+
+  private async buildView(
+    order: PetGlbOrder,
+    currentOverride?: PetGlbStageAttempt | null,
+    progress?: number,
+  ): Promise<PetGlbOrderView> {
+    const current = currentOverride === undefined
+      ? await this.stages.findCurrent(order.id)
+      : currentOverride;
+    return {
+      order,
+      currentStage: current,
+      progress,
+      quote: productQuote(order),
+      meshPolicy: meshProfilePolicy(order.meshProfile),
+      facialRig: FACIAL_RIG_POLICY,
+    };
   }
 
   // ── 1. Order creation + credit reservation ────────────────────────────────
@@ -243,6 +694,12 @@ export class PetGlbService {
   async approve(orderUuid: string, actorPhone: string, versionId: number, note?: string): Promise<PetGlbOrder> {
     await this.assertOperator(actorPhone);
     const order = await this.mustFind(orderUuid);
+    if (!order.finalCustomerVersionId || order.finalCustomerVersionId !== versionId) {
+      throw new PetGenerationError(
+        "APPROVAL_REJECTED",
+        "Operator approval must bind the exact customer-approved final version",
+      );
+    }
     return this.orders.approve(order.id, versionId, actorPhone, note);
   }
 
@@ -256,9 +713,33 @@ export class PetGlbService {
     });
   }
 
-  async operatorQueue(actorPhone: string, limit = 50): Promise<PetGlbOrder[]> {
+  async operatorQueue(actorPhone: string, limit = 50): Promise<PetGlbOrderView[]> {
     await this.assertOperator(actorPhone);
-    return this.orders.listByState("awaiting_human_review", limit);
+    const orders = await this.orders.listByState("awaiting_human_review", limit);
+    return Promise.all(orders.map((order) => this.buildView(order)));
+  }
+
+  async operatorPreview(
+    orderUuid: string,
+    actorPhone: string,
+  ): Promise<{ url: string; versionId: number; expiresInSeconds: number }> {
+    await this.assertOperator(actorPhone);
+    const order = await this.mustFind(orderUuid);
+    if (!order.finalCustomerVersionId) {
+      throw new PetGenerationError(
+        "NO_FINAL_ASSET",
+        "The customer has not approved a final version",
+      );
+    }
+    return {
+      url: await this.deps.signDownload(
+        order.finalCustomerVersionId,
+        order.ownerPhone,
+        DOWNLOAD_TTL_SECONDS,
+      ),
+      versionId: order.finalCustomerVersionId,
+      expiresInSeconds: DOWNLOAD_TTL_SECONDS,
+    };
   }
 
   // ── 7. Delivery — exactly once, hash-bound ────────────────────────────────
@@ -310,6 +791,15 @@ export class PetGlbService {
       throw new PetGenerationError("NOT_OPERATOR", "Operator role required");
     }
   }
+}
+
+export interface PetGlbOrderView {
+  order: PetGlbOrder;
+  currentStage: PetGlbStageAttempt | null;
+  progress?: number;
+  quote: ReturnType<typeof productQuote>;
+  meshPolicy: ReturnType<typeof meshProfilePolicy>;
+  facialRig: typeof FACIAL_RIG_POLICY;
 }
 
 export function newRequestId(): string {

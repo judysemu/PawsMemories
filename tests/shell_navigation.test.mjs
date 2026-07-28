@@ -3,11 +3,12 @@ import { test } from "node:test";
 import { Screen } from "../src/types.ts";
 import { MOBILE_NAV, SIDEBAR_NAV, TOP_PRIMARY_NAV, SHELL_ICON_NAV } from "../src/shellNavigation.ts";
 
-test("top panel exposes Create, Voice Test, Pawprints", () => {
+test("top panel exposes Create, Voice Test, Pawprints, and the staged 3D Model studio", () => {
   assert.deepEqual(TOP_PRIMARY_NAV.map(({ screen }) => screen), [
     Screen.CREATE,
     Screen.VOICE_TEST,
     Screen.PAWPRINTS,
+    Screen.PET_GLB,
   ]);
 });
 

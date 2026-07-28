@@ -49,6 +49,13 @@ test("Phase 1 Production Service Suite", async (t) => {
   await adminConn.end();
 
   const pool = mysql.createPool({ host: mysqlHost, port: mysqlPort, user: mysqlUser, password: mysqlPassword, database: testDbName, connectionLimit: 5 });
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      phone VARCHAR(32) PRIMARY KEY,
+      password_hash VARCHAR(255) NULL,
+      credits INT NOT NULL DEFAULT 0
+    )
+  `);
   await runMigrations(pool);
 
   t.after(async () => {

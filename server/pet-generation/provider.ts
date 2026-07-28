@@ -3,6 +3,8 @@ import type {
   GenerationJob,
   GenerationArtifacts,
   ProviderJobRecord,
+  SubjectProfile,
+  TextureQuality,
 } from "./types";
 
 /**
@@ -11,6 +13,13 @@ import type {
  */
 export interface PetModelGenerationProvider {
   createJob(input: PetModelGenerationInput): Promise<GenerationJob>;
+  createBaseJob(input: PetModelGenerationInput): Promise<GenerationJob>;
+  createTextureJob(
+    sourceJobId: string,
+    options: { styleDirection?: string | null; quality: TextureQuality },
+  ): Promise<GenerationJob>;
+  createRigCheckJob(sourceJobId: string): Promise<GenerationJob>;
+  createRigJob(sourceJobId: string, subjectProfile: SubjectProfile): Promise<GenerationJob>;
   getJob(jobId: string): Promise<GenerationJob>;
   cancelJob(jobId: string): Promise<void>;
   fetchArtifacts(jobId: string): Promise<GenerationArtifacts>;

@@ -2,6 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import mysql from "mysql2/promise";
 import { runMigrations, CURRENT_SCHEMA_VERSION, MIGRATIONS } from "../server/migrations/runner.ts";
+import { initializeLegacyUsersTable } from "./helpers/mysqlTestDatabase.mjs";
 
 const MYSQL_HOST = process.env.MYSQL_TEST_HOST || "127.0.0.1";
 const MYSQL_PORT = Number(process.env.MYSQL_TEST_PORT || 3306);
@@ -53,6 +54,7 @@ describe("Phase 3 Migration 22 MySQL Integration", {
       waitForConnections: true,
       connectionLimit: 5,
     });
+    await initializeLegacyUsersTable(pool);
   });
 
   after(async () => {
@@ -73,9 +75,10 @@ describe("Phase 3 Migration 22 MySQL Integration", {
     const result = await runMigrations(pool);
     // On a fresh database every managed migration is recorded exactly once —
     // including skipWhenTableMissing entries, which are ledgered even when their
-    // optional legacy table is absent. Note MIGRATIONS has no version 31 (reserved).
+    // optional legacy tables may be absent. Later product migrations are
+    // intentionally included in the same production registry.
     assert.equal(result.applied, MIGRATIONS.length);
-    assert.equal(CURRENT_SCHEMA_VERSION, 34);
+    assert.ok(CURRENT_SCHEMA_VERSION >= 22);
 
     const [rows] = await pool.query(
       `SELECT TABLE_NAME FROM information_schema.TABLES

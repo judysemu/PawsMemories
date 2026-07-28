@@ -70,6 +70,13 @@ test("Phase 2 Real MySQL 8.4 Migrations 20-21 Test Suite", async (t) => {
   await t.test("1. Migrations 20-21 create and harden reference session tables", async () => {
     const pool = getTestPool();
     try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          phone VARCHAR(32) PRIMARY KEY,
+          password_hash VARCHAR(255) NULL,
+          credits INT NOT NULL DEFAULT 0
+        )
+      `);
       const res = await runMigrations(pool);
       assert.ok(res.applied >= 1, "Must apply migrations up to version 21");
       assert.ok(CURRENT_SCHEMA_VERSION >= 21);

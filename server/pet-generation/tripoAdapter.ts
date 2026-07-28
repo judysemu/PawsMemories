@@ -15,9 +15,18 @@ import type {
   GenerationArtifacts,
   GenerationJobStatus,
   ProviderJobRecord,
+  SubjectProfile,
+  TextureQuality,
 } from "./types";
 import { mergeIdleWalk } from "./animationMerge";
-import { startRig, startRetarget, pollTripoTask } from "../../tripo";
+import {
+  startPreRigCheck,
+  startRig,
+  startRetarget,
+  startTextureModel,
+  pollTripoTask,
+} from "../../tripo";
+import { meshProfilePolicy, rigTypeForSubject } from "./contracts";
 
 function sha256(data: Buffer): string {
   return crypto.createHash("sha256").update(data).digest("hex");
@@ -93,6 +102,10 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
   }
 
   async createJob(input: PetModelGenerationInput): Promise<GenerationJob> {
+    return this.createBaseJob(input);
+  }
+
+  async createBaseJob(input: PetModelGenerationInput): Promise<GenerationJob> {
     // 5 canonical views -> Tripo's 4-slot contract. threeQuarterUrl is
     // deliberately not forwarded; see types.ts.
     const providerInput = {
@@ -101,6 +114,17 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       rightUrl: input.rightUrl,
       rearUrl: input.rearUrl,
       threeQuarterUrl: input.threeQuarterUrl,
+      geometry: (() => {
+        const policy = meshProfilePolicy(input.meshProfile || "hd");
+        return {
+          faceLimit: policy.faceLimit,
+          texture: false,
+          pbr: false,
+          modelVersion: policy.modelVersion,
+          smartLowPoly: policy.smartLowPoly,
+          geometryQuality: policy.geometryQuality,
+        };
+      })(),
     };
 
     const configHash = this.hashInput(input);
@@ -115,11 +139,44 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       model: result.model,
       configHash,
       cancelled: false,
+      stage: "base",
       createdAt: Date.now(),
     });
 
     // Provider handle is NOT returned.
     return { id: jobId, status: "pending" };
+  }
+
+  async createTextureJob(
+    sourceJobId: string,
+    options: { styleDirection?: string | null; quality: TextureQuality },
+  ): Promise<GenerationJob> {
+    const source = await this.requireRecord(sourceJobId);
+    const taskHandle = await startTextureModel(source.providerTaskHandle, {
+      prompt: options.styleDirection || undefined,
+      quality: options.quality,
+      pbr: true,
+    });
+    return this.persistChainedJob(source, taskHandle, "texture", {
+      styleDirection: options.styleDirection || null,
+      quality: options.quality,
+    });
+  }
+
+  async createRigCheckJob(sourceJobId: string): Promise<GenerationJob> {
+    const source = await this.requireRecord(sourceJobId);
+    const taskHandle = await startPreRigCheck(source.providerTaskHandle);
+    return this.persistChainedJob(source, taskHandle, "rig_check", {});
+  }
+
+  async createRigJob(sourceJobId: string, subjectProfile: SubjectProfile): Promise<GenerationJob> {
+    const source = await this.requireRecord(sourceJobId);
+    const rigType = rigTypeForSubject(subjectProfile);
+    const taskHandle = await startRig(source.providerTaskHandle, {
+      rigType,
+      modelVersion: process.env.TRIPO_RIG_MODEL_VERSION || "v2.5-20260210",
+    });
+    return this.persistChainedJob(source, taskHandle, "rig", { subjectProfile, rigType });
   }
 
   async getJob(jobId: string): Promise<GenerationJob> {
@@ -149,6 +206,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       status,
       ...(poll.progress !== undefined ? { progress: poll.progress } : {}),
       ...(poll.error ? { reason: "PROVIDER_ERROR" } : {}),
+      ...(poll.capability ? { capability: poll.capability } : {}),
     };
   }
 
@@ -232,6 +290,9 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
     }
 
     if (this.animate) return this.fetchAnimatedArtifacts(record, jobId);
+    if (record.stage === "rig_check") {
+      throw new PetGenerationError("NO_ARTIFACT", "A rig capability check does not produce a GLB");
+    }
 
     let glbUrl = record.glbUrl;
     if (!glbUrl) {
@@ -262,6 +323,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
         model: record.model,
         configHash: record.configHash,
         threeQuarterViewConsumed: false,
+        stage: record.stage || "base",
       },
     };
   }
@@ -309,6 +371,33 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       throw new PetGenerationError("JOB_NOT_FOUND", `Job not found: ${jobId}`);
     }
     return record;
+  }
+
+  private async persistChainedJob(
+    source: ProviderJobRecord,
+    providerTaskHandle: string,
+    stage: "texture" | "rig_check" | "rig",
+    configuration: Record<string, unknown>,
+  ): Promise<GenerationJob> {
+    const jobId = crypto.randomUUID();
+    const configHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ source: source.configHash, stage, configuration }))
+      .digest("hex");
+    await this.store.put({
+      jobId,
+      providerId: source.providerId,
+      providerVersion: stage === "rig"
+        ? process.env.TRIPO_RIG_MODEL_VERSION || "v2.5-20260210"
+        : source.providerVersion,
+      providerTaskHandle,
+      model: source.model,
+      configHash,
+      cancelled: false,
+      stage,
+      createdAt: Date.now(),
+    });
+    return { id: jobId, status: "pending" };
   }
 
   private hashInput(input: PetModelGenerationInput): string {

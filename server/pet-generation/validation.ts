@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import type { MeshProfile, PetGlbModelStageKind } from "./types";
+import { meshProfilePolicy } from "./contracts";
 
 /**
  * Deterministic GLB validators for CUSTOM_RIGGED_PET_GLB_V1.
@@ -23,7 +25,7 @@ export interface CheckResult {
 }
 
 export interface ValidationReport {
-  schemaVersion: "pawsome.pet-glb-validation.v1";
+  schemaVersion: "pawsome.pet-glb-validation.v1" | "pawsome.pet-glb-validation.v2";
   fileHash: string;
   fileSize: number;
   checks: CheckResult[];
@@ -33,6 +35,9 @@ export interface ValidationReport {
   reasonCodes: string[];
   unmeasuredCount: number;
   createdAt: string;
+  stage?: PetGlbModelStageKind;
+  meshProfile?: MeshProfile;
+  triangleCount?: number;
 }
 
 const GLB_MAGIC = 0x46546c67; // "glTF"
@@ -299,6 +304,183 @@ export function validatePetGlb(
     operatorReady,
     reasonCodes: [...new Set(reasonCodes)],
     unmeasuredCount: checks.filter((c) => c.passed === null).length,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Stage-aware validator for the customer-gated product.
+ *
+ * A correct blank base must not be rejected for lacking textures or a skin,
+ * and a rig must not be accepted merely because a GLB parsed. Each stage adds
+ * requirements without borrowing requirements from later products such as
+ * animation.
+ */
+export function validatePetGlbStage(
+  buf: Buffer,
+  opts: {
+    stage: PetGlbModelStageKind;
+    meshProfile: MeshProfile;
+    rigProfileJoints?: string[];
+  },
+): ValidationReport {
+  const checks: CheckResult[] = [];
+  const reasonCodes: string[] = [];
+  const fileHash = crypto.createHash("sha256").update(buf).digest("hex");
+  const policy = meshProfilePolicy(opts.meshProfile);
+
+  let parsed: ParsedGlb | null = null;
+  try {
+    parsed = parseGlb(buf);
+    checks.push({
+      id: "glb_parses", channel: "X", critical: true, passed: true,
+      detail: "glTF 2.0 container parsed",
+    });
+  } catch (error: any) {
+    checks.push({
+      id: "glb_parses", channel: "X", critical: true, passed: false,
+      detail: error.message,
+    });
+    reasonCodes.push("EXPORT_INVALID");
+  }
+
+  let triangleCount = 0;
+  const json = parsed?.json;
+  if (json) {
+    const meshes = Array.isArray(json.meshes) ? json.meshes : [];
+    const accessors = Array.isArray(json.accessors) ? json.accessors : [];
+    const nodes = Array.isArray(json.nodes) ? json.nodes : [];
+    const skins = Array.isArray(json.skins) ? json.skins : [];
+    const materials = Array.isArray(json.materials) ? json.materials : [];
+    const textures = Array.isArray(json.textures) ? json.textures : [];
+    const images = Array.isArray(json.images) ? json.images : [];
+
+    for (const mesh of meshes) {
+      for (const primitive of mesh.primitives || []) {
+        const indexAccessor = primitive.indices !== undefined ? accessors[primitive.indices] : null;
+        const positionAccessor = primitive.attributes?.POSITION !== undefined
+          ? accessors[primitive.attributes.POSITION]
+          : null;
+        const vertexOrIndexCount = Number(indexAccessor?.count || positionAccessor?.count || 0);
+        const mode = primitive.mode ?? 4;
+        if (mode === 4) triangleCount += Math.floor(vertexOrIndexCount / 3);
+        else if (mode === 5 || mode === 6) triangleCount += Math.max(0, vertexOrIndexCount - 2);
+      }
+    }
+
+    const scenePass = Array.isArray(json.scenes) && json.scenes.length > 0;
+    checks.push({
+      id: "scene_exists", channel: "X", critical: true, passed: scenePass,
+      detail: `${(json.scenes || []).length} scene(s)`,
+    });
+    const meshPass = meshes.length > 0 && triangleCount > 0;
+    checks.push({
+      id: "mesh_exists", channel: "T", critical: true, passed: meshPass,
+      detail: `${meshes.length} mesh(es), ${triangleCount} measured triangles`,
+      measured: { meshes: meshes.length, triangles: triangleCount },
+    });
+    const budgetPass = triangleCount > 0 && triangleCount <= policy.maxTriangles;
+    checks.push({
+      id: "triangle_budget", channel: "T", critical: true, passed: budgetPass,
+      detail: `${triangleCount} / ${policy.maxTriangles} maximum for ${opts.meshProfile}`,
+      measured: { triangles: triangleCount, budget: policy.maxTriangles },
+    });
+    if (!budgetPass) reasonCodes.push("TRIANGLE_BUDGET_EXCEEDED");
+
+    const buffers = Array.isArray(json.buffers) ? json.buffers : [];
+    const externalBuffers = buffers.filter((buffer: any) =>
+      typeof buffer.uri === "string" && !buffer.uri.startsWith("data:"));
+    const buffersPass = externalBuffers.length === 0;
+    checks.push({
+      id: "buffers_self_contained", channel: "X", critical: true, passed: buffersPass,
+      detail: buffersPass ? "all buffers are embedded" : `${externalBuffers.length} external buffers`,
+    });
+    if (!buffersPass) reasonCodes.push("EXTERNAL_BUFFER");
+
+    if (opts.stage === "texture" || opts.stage === "rig") {
+      const texturePass = materials.length > 0 && (textures.length > 0 || images.length > 0);
+      checks.push({
+        id: "texture_present", channel: "M", critical: true, passed: texturePass,
+        detail: `${materials.length} material(s), ${textures.length} texture(s), ${images.length} image(s)`,
+        measured: { materials: materials.length, textures: textures.length, images: images.length },
+      });
+      if (!texturePass) reasonCodes.push("TEXTURE_MISSING");
+    }
+
+    if (opts.stage === "rig") {
+      const jointCount = skins.reduce((sum: number, skin: any) => sum + (skin.joints?.length || 0), 0);
+      const skinPass = skins.length > 0 && jointCount > 0;
+      checks.push({
+        id: "skin_exists", channel: "R", critical: true, passed: skinPass,
+        detail: `${skins.length} skin(s), ${jointCount} joint(s)`,
+        measured: { skins: skins.length, joints: jointCount },
+      });
+
+      let skinnedPrimitives = 0;
+      let weightedPrimitives = 0;
+      for (const mesh of meshes) {
+        for (const primitive of mesh.primitives || []) {
+          if (primitive.attributes?.JOINTS_0 !== undefined) {
+            skinnedPrimitives++;
+            if (primitive.attributes?.WEIGHTS_0 !== undefined) weightedPrimitives++;
+          }
+        }
+      }
+      const weightsPass = skinnedPrimitives > 0 && skinnedPrimitives === weightedPrimitives;
+      checks.push({
+        id: "skin_weights_present", channel: "R", critical: true, passed: weightsPass,
+        detail: `${weightedPrimitives}/${skinnedPrimitives} skinned primitives include weights`,
+        measured: { skinnedPrimitives, weightedPrimitives },
+      });
+
+      const profile = opts.rigProfileJoints || [];
+      if (profile.length) {
+        const present = new Set<string>();
+        for (const skin of skins) {
+          for (const joint of skin.joints || []) {
+            const name = nodes[joint]?.name;
+            if (name) present.add(String(name).toLowerCase());
+          }
+        }
+        const missing = profile.filter((joint) => !present.has(joint.toLowerCase()));
+        checks.push({
+          id: "rig_joint_coverage", channel: "R", critical: true,
+          passed: missing.length === 0,
+          detail: missing.length ? `missing joints: ${missing.join(", ")}` : `all ${profile.length} required joints present`,
+          measured: { required: profile.length, missing: missing.length },
+        });
+      }
+
+      if (!skinPass) reasonCodes.push("RIG_HIERARCHY");
+      if (!weightsPass) reasonCodes.push("RIG_WEIGHTS");
+    }
+  } else {
+    for (const id of ["scene_exists", "mesh_exists", "triangle_budget", "buffers_self_contained"]) {
+      checks.push({
+        id, channel: id.includes("mesh") || id.includes("triangle") ? "T" : "X",
+        critical: true, passed: null, detail: "UNMEASURED — GLB did not parse",
+      });
+    }
+  }
+
+  const criticalFailures = checks.filter((check) => check.critical && check.passed !== true);
+  const hardGates = Object.fromEntries(
+    checks.filter((check) => check.critical).map((check) => [check.id, check.passed === true]),
+  );
+  if (criticalFailures.some((check) => check.passed === null)) reasonCodes.push("UNMEASURED");
+
+  return {
+    schemaVersion: "pawsome.pet-glb-validation.v2",
+    stage: opts.stage,
+    meshProfile: opts.meshProfile,
+    triangleCount,
+    fileHash,
+    fileSize: buf.length,
+    checks,
+    hardGates,
+    operatorReady: criticalFailures.length === 0,
+    reasonCodes: [...new Set(reasonCodes)],
+    unmeasuredCount: checks.filter((check) => check.passed === null).length,
     createdAt: new Date().toISOString(),
   };
 }

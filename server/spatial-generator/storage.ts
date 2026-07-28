@@ -17,10 +17,17 @@ export interface StorageUploadResult {
 }
 
 export class SpatialStorage {
-  private readonly pool: mysql.Pool;
+  private readonly injectedPool?: mysql.Pool;
 
   constructor(pool?: mysql.Pool) {
-    this.pool = pool || getPool();
+    // Keep module import side-effect free. The spatial generator is dark-launched
+    // and must not require a database merely because server.ts imports its
+    // routes (notably DB_DISABLED contract tests and readiness startup).
+    this.injectedPool = pool;
+  }
+
+  private dbPool(): mysql.Pool {
+    return this.injectedPool || getPool();
   }
 
   private generateObjectKey(role: SpatialArtifactRole, jobUuid: string, attemptNumber: number, mimeType: string): string {
@@ -149,7 +156,7 @@ export class SpatialStorage {
 
   async deleteArtifact(assetId: number, assetVersionId: number): Promise<void> {
     // Get asset details first
-    const conn = await this.pool.getConnection();
+    const conn = await this.dbPool().getConnection();
     try {
       const [rows] = await conn.query(
         "SELECT a.asset_uuid, av.object_key FROM assets a JOIN asset_versions av ON av.asset_id = a.id WHERE a.id = ? AND av.id = ?",
@@ -166,7 +173,7 @@ export class SpatialStorage {
   }
 
   async getSignedUrl(assetId: number, assetVersionId: number, ttlSeconds = 900): Promise<string> {
-    const conn = await this.pool.getConnection();
+    const conn = await this.dbPool().getConnection();
     try {
       const [rows] = await conn.query(
         "SELECT a.asset_uuid, av.object_key FROM assets a JOIN asset_versions av ON av.asset_id = a.id WHERE a.id = ? AND av.id = ?",

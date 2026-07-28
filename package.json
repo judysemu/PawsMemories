@@ -15,7 +15,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
-    "test": "tsx --test tests/*.test.mjs",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.mjs",
     "test:ifc": "PYTHONPATH=blender-worker/ifc_worker python3 -m unittest discover -s blender-worker/ifc_worker/tests -v",
     "fixtures:bim": "tsx scripts/generate-bim-fixtures.mjs && PYTHONPATH=blender-worker/ifc_worker python3 scripts/generate-ifc-fixtures.py",
     "test:brain": "tsx --test tests/brain_*.test.mjs",

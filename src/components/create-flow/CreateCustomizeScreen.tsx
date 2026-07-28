@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Screen } from "../../types";
 import { useCreateFlow } from "./CreateFlowContext";
-import { ChevronLeft, ChevronRight, Check, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { CREDIT_PRICES, createModelCost } from "../../pricing";
 
 interface CreateCustomizeScreenProps {
@@ -13,9 +13,11 @@ export default function CreateCustomizeScreen({ onNavigate }: CreateCustomizeScr
   const [pose, setPose] = useState(state.customizationState?.pose || "Sitting");
   const [engraving, setEngraving] = useState(state.customizationState?.engraving || "");
   const [rigEnabled, setRigEnabled] = useState<boolean>(!!state.customizationState?.rigging?.enabled);
-  const [rigFacial, setRigFacial] = useState<boolean>(!!state.customizationState?.rigging?.facial);
 
-  const rigging = { enabled: rigEnabled, facial: rigEnabled && rigFacial };
+  // Facial blendshapes are deliberately unavailable until a versioned
+  // acceptance cohort proves at least 75% success. Cached older selections
+  // are normalized to false and cannot be re-purchased from this screen.
+  const rigging = { enabled: rigEnabled, facial: false };
   const totalCost = createModelCost(rigging);
 
   const handleNext = () => {
@@ -108,47 +110,11 @@ export default function CreateCustomizeScreen({ onNavigate }: CreateCustomizeScr
                 </span>
                 <span className="font-black text-primary whitespace-nowrap">+{CREDIT_PRICES.RIG_ADDON}</span>
               </label>
-              <label className={`mt-3 flex items-start gap-3 p-4 rounded-xl border-2 bg-surface transition-all ${rigEnabled ? "border-outline-variant cursor-pointer hover:border-primary/50" : "border-outline-variant/40 opacity-50 cursor-not-allowed"}`}>
-                <input
-                  type="checkbox"
-                  checked={rigEnabled && rigFacial}
-                  disabled={!rigEnabled}
-                  onChange={(e) => setRigFacial(e.target.checked)}
-                  className="mt-1 w-5 h-5 accent-[var(--md-sys-color-primary,#6750a4)]"
-                />
-                <span className="flex-1">
-                  <span className="font-bold text-on-surface block">
-                    Include facial rig
-                    <span className="ml-2 align-middle rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                      Early access
-                    </span>
-                  </span>
-                  <span className="text-sm text-on-surface-variant">Viseme blendshapes for lip-sync and expressions.</span>
-                </span>
-                <span className="font-black text-primary whitespace-nowrap">+{CREDIT_PRICES.FACIAL_RIG_ADDON}</span>
-              </label>
-
-              {/* Pre-purchase disclosure — MUST stay above the checkout step.
-                  The facial pass only canonicalizes viseme morph targets that the
-                  model provider actually returned; it never fabricates mouth
-                  shapes by deforming the head mesh (see agent/graph/nodes/
-                  facialVisemes.ts). Providers frequently return no morphs at all,
-                  in which case the model falls back to jaw-only motion and the
-                  add-on is still charged. Since we do not refund that case, the
-                  user has to be told before they are billed, not after. */}
-              {rigEnabled && rigFacial && (
-                <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                  <p className="text-[13px] leading-snug text-on-surface">
-                    <span className="font-black">Facial rigging is in early development and isn&apos;t guaranteed.</span>{" "}
-                    It depends on the 3D model coming back with usable mouth shapes, which
-                    doesn&apos;t always happen. If it can&apos;t be applied, your model still
-                    animates with jaw movement — but{" "}
-                    <span className="font-bold">this add-on is charged either way and isn&apos;t refunded.</span>{" "}
-                    Skip it if you&apos;d rather not take that chance.
-                  </p>
-                </div>
-              )}
+              <div className="mt-3 rounded-xl border border-outline-variant bg-surface-container/60 p-3 text-sm text-on-surface-variant">
+                Facial blendshape rigging is unavailable and is not charged. It
+                will return only after a measured production cohort reaches at
+                least 75% success.
+              </div>
               <div className="mt-3 text-right text-sm font-bold text-on-surface">
                 Total: <span className="text-primary">{totalCost} PupCoins</span>
               </div>

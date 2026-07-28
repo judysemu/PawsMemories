@@ -13,6 +13,14 @@ export interface ModelBuildProviderInput {
   rightUrl: string;
   rearUrl: string;
   threeQuarterUrl: string;
+  geometry?: {
+    faceLimit: number;
+    texture: boolean;
+    pbr: boolean;
+    modelVersion: string;
+    smartLowPoly?: boolean;
+    geometryQuality?: "standard" | "detailed";
+  };
 }
 
 export interface ModelBuildProviderResult {
@@ -26,6 +34,12 @@ export interface ModelBuildPollResult {
   glbUrl?: string;
   error?: string;
   progress?: number;
+  capability?: {
+    riggable: boolean;
+    rigType:
+      | "biped" | "quadruped" | "hexapod" | "octopod"
+      | "avian" | "serpentine" | "aquatic" | null;
+  };
 }
 
 export interface ModelBuildProvider {
@@ -107,6 +121,7 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
         back: input.rearUrl,
         right: input.rightUrl,
       },
+      geometry: input.geometry,
     };
 
     const taskHandle = await startImageTo3D(tripoInput);
@@ -114,7 +129,7 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
     return {
       providerTaskHandle: taskHandle,
       provider: "tripo",
-      model: process.env.TRIPO_MODEL_VERSION || "default",
+      model: input.geometry?.modelVersion || process.env.TRIPO_MODEL_VERSION || "default",
     };
   }
 
@@ -128,6 +143,7 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
       glbUrl: result.glbUrl,
       error: result.error,
       progress: result.progress,
+      capability: result.capability,
     };
   }
 

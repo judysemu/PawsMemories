@@ -55,7 +55,7 @@ export async function buildPetGlbDeps(
     isOperator: (phone) => isUserOperator(getPool, phone),
     rigProfileJoints,
 
-    async persistVersion({ ownerPhone, assetId, glb, sha256, validationReport, metadata }) {
+    async persistVersion({ ownerPhone, assetId, glb, sha256, validationReport, metadata, stage }) {
       const pool = getPool();
 
       // 1. Immutable object key — includes the content hash, so an approved
@@ -69,7 +69,7 @@ export async function buildPetGlbDeps(
         const assetUuid = crypto.randomUUID();
         const [res] = await pool.query(
           `INSERT INTO assets (asset_uuid, owner_id, asset_type, visibility, status)
-           VALUES (?, ?, 'model_rigged_glb', 'private', 'active')`,
+           VALUES (?, ?, 'model_generated_glb', 'private', 'active')`,
           [assetUuid, ownerPhone],
         );
         resolvedAssetId = (res as any).insertId;
@@ -94,7 +94,7 @@ export async function buildPetGlbDeps(
           sha256,
           glb.length,
           objectKey,
-          JSON.stringify({ ...metadata, validationReport }),
+          JSON.stringify({ ...metadata, stage: stage || "legacy", validationReport }),
           String((metadata as any).providerId || "unknown"),
         ],
       );
