@@ -1,10 +1,53 @@
-# Animation Agent Chain — idle + walk authoring for the paid pet GLB
+# Interactive 3D modeler + idle/walk animation for the paid pet GLB
 
-Status: **DRAFT / Phase 1.** Owner-directed approach (2026-07-27): author the
-idle/walk skeletal animation via a **Blender-driven agent chain** guided by real
-animation-guidance documents and prompts. This is the piece that makes the
-first paid pet GLB an *organic* sale rather than the `PET_GLB_VERIFY_MODE`
-bypass shipped as scaffolding.
+Status: **DRAFT.** Direction locked with owner 2026-07-27.
+
+**v1 animation path — Tripo-native (NOT the Blender chain).** Tripo already does
+quadruped auto-rig + preset animation, and the client code exists: `startRig`
+(`animate_rig`, UniRig quadruped) and `startRetarget` (`animate_retarget`,
+`preset:idle` / `preset:walk` / `preset:run`) in `tripo.ts`. Wiring these into
+the build pipeline yields real idle+walk skeletal clips, satisfies
+`validatePetGlb`'s `idle_present`/`walk_present` gates for real, and lets
+`PET_GLB_VERIFY_MODE` be deleted. This matches the owner decision "trust the
+Tripo rig." The Blender agent chain (below) is DEFERRED to a later custom-motion
+quality upgrade, not v1.
+
+**Product shape — one unified 3D modeler.** The UI presents a single 3D modeler
+(Tripo/Meshy-style studio). The customer buys the GLB either:
+- **Step by step** — Tripo's pipeline is exposed as user-gated stages; the build
+  pauses after each and the customer selects the next move.
+- **"Do it for me"** — the full pipeline runs automatically to a rigged +
+  idle/walk-animated GLB.
+
+### Tripo pipeline stages (each a gated step in step-by-step mode)
+1. **Base model** (grey) — `multiview_to_model` with `texture:false` → bare grey
+   structure.
+2. **Texture** — `texture:true`, PBR, `texture_quality:"detailed"`.
+3. **Triangular topo** — Tripo's native triangulated output (do NOT set
+   `quad:true` — it forces FBX). Exposed as the "topo" step.
+4. **Retopo / segmentation** — follow-on tasks.
+5. **Rig** — `animate_rig` (UniRig quadruped; `spec:"tripo"`).
+6. **Animate** — `animate_retarget` `preset:idle` and `preset:walk`.
+
+### Known complexity — clip merge
+`animate_retarget` returns ONE animation per call, so `idle` and `walk` arrive as
+TWO separate GLBs. `validatePetGlb` requires BOTH clips in ONE delivered GLB, so
+a merge step is needed (mesh/skin from the rig output + both AnimationClips).
+Options: `gltf-transform` merge, the existing Three.js `retargetUtils` path, or a
+Blender worker merge. This merge is the one genuinely new piece for v1 animation.
+
+### Retry rule (owner, 2026-07-27)
+Paid retry = **20 credits, inputs LOCKED** (same prompt + images; cosmetic
+re-roll). Distinct from the free internal/system retry. Contradicts arch
+invariant #4 — implement as a separate customer-paid-reroll path, not by relaxing
+the no-double-charge guard.
+
+---
+
+## DEFERRED — Blender agent chain (later custom-motion upgrade)
+
+Kept for when Tripo presets are not enough. Original approach: author idle/walk
+via a Blender-driven agent chain guided by animation-guidance documents/prompts.
 
 ## Why this exists
 
