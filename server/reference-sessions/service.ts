@@ -105,7 +105,9 @@ export class ReferenceSessionService {
     let sourceObjectKey: string | null = null;
     if (validated.inputMode === "photo") {
       const imageBuffer = decodeBase64Image(validated.sourceImageBase64!);
-      const inspected = await inspectReferenceImage(imageBuffer, validated.sourceMimeType!);
+      // User uploads only need to decode safely. Gemini generates the canonical
+      // high-resolution approval views, which retain the stricter 1024px gate.
+      const inspected = await inspectReferenceImage(imageBuffer, validated.sourceMimeType!, 1);
       const stored = await storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
       sourceObjectKey = stored.objectKey;
       try {
@@ -151,7 +153,7 @@ export class ReferenceSessionService {
     assertMultiviewApprovalEnabled();
     const pool = this.getPoolFn();
     const imageBuffer = decodeBase64Image(imageBase64);
-    const inspected = await inspectReferenceImage(imageBuffer, mimeType);
+    const inspected = await inspectReferenceImage(imageBuffer, mimeType, 1);
     const connection = await pool.getConnection();
     let storedKey: string | null = null;
     let registeredAssetId: number | null = null;

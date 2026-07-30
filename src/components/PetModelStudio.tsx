@@ -11,6 +11,7 @@ type MeshProfile = "hd" | "smart_mesh";
 type SubjectProfile = "pet" | "humanoid";
 type TextureQuality = "standard" | "detailed";
 type StageKind = "reference" | "base" | "texture" | "rig_check" | "rig";
+type CollarSizeClass = "kitten_toy" | "cat_mini" | "medium_dog" | "large_dog";
 
 interface Product {
   name: string;
@@ -134,6 +135,12 @@ export default function PetModelStudio() {
   const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("multi");
   const [autoContinue, setAutoContinue] = useState(false);
   const [printHeight, setPrintHeight] = useState(100);
+  const [collarSizeClass, setCollarSizeClass] = useState<CollarSizeClass>("medium_dog");
+  const [neckCircumferenceMm, setNeckCircumferenceMm] = useState(400);
+  const [collarWidthMm, setCollarWidthMm] = useState(25);
+  const [collarClearanceMm, setCollarClearanceMm] = useState(10);
+  const [collarColor, setCollarColor] = useState("#2563eb");
+  const [collarJob, setCollarJob] = useState<{ jobUuid?: string; state?: string } | null>(null);
   const [references, setReferences] = useState<Record<string, string>>({});
   const [referenceSession, setReferenceSession] = useState<{ sessionUuid: string; manifestHash: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -367,6 +374,28 @@ export default function PetModelStudio() {
     call(`/api/pet-glb/orders/${view.order.orderUuid}/download`, { method: "POST" })
       .then((body) => setDownloadUrl(body.url))
       .catch(() => {});
+  };
+
+  const buildCollar = () => {
+    const targetAssetVersionId = view?.order.approvedVersionId;
+    if (!targetAssetVersionId) return;
+    call("/api/spatial-generator/collar/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: `collar_${crypto.randomUUID()}`,
+        targetAssetVersionId,
+        sizeClass: collarSizeClass,
+        neckCircumferenceMm,
+        strapWidthMm: collarWidthMm,
+        clearanceMm: collarClearanceMm,
+        strapThicknessMm: 3,
+        color: collarColor,
+        includeBuckle: true,
+        includeDRing: true,
+        targetUse: "attachment",
+      }),
+    }).then(setCollarJob).catch(() => {});
   };
 
   const inspectOperatorOrder = (candidate: OrderView) => {
@@ -847,6 +876,71 @@ export default function PetModelStudio() {
                 className="w-full rounded-2xl border border-cyan-300/40 px-4 py-2.5">
                 Update reference links
               </button>
+            )}
+
+            {view.order.approvedVersionId && (
+              <div className="space-y-3 rounded-3xl border border-violet-300/25 bg-violet-300/10 p-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-violet-200">Mesh accessory builder</p>
+                  <h2 className="mt-1 font-semibold">Fit a collar</h2>
+                  <p className="mt-1 text-xs opacity-65">Uses the approved model and real millimeter measurements. No additional image is required.</p>
+                </div>
+                <label className="block text-xs">
+                  <span className="mb-1 block opacity-70">Pet size</span>
+                  <select value={collarSizeClass} onChange={(event) => {
+                    const next = event.target.value as CollarSizeClass;
+                    setCollarSizeClass(next);
+                    const defaults = {
+                      kitten_toy: [200, 9], cat_mini: [265, 11], medium_dog: [400, 22], large_dog: [490, 32],
+                    } as const;
+                    setNeckCircumferenceMm(defaults[next][0]);
+                    setCollarWidthMm(defaults[next][1]);
+                  }} className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2">
+                    <option value="kitten_toy">Kitten / Toy breed</option>
+                    <option value="cat_mini">Adult cat / Mini dog</option>
+                    <option value="medium_dog">Medium dog</option>
+                    <option value="large_dog">Large dog</option>
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs">
+                    <span className="mb-1 block opacity-70">Neck circumference</span>
+                    <input type="number" min="100" max="700" value={neckCircumferenceMm}
+                      onChange={(event) => setNeckCircumferenceMm(Number(event.target.value))}
+                      className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2" />
+                    <span className="opacity-45">millimeters</span>
+                  </label>
+                  <label className="text-xs">
+                    <span className="mb-1 block opacity-70">Strap width</span>
+                    <input type="number" min="8" max="38" value={collarWidthMm}
+                      onChange={(event) => setCollarWidthMm(Number(event.target.value))}
+                      className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2" />
+                    <span className="opacity-45">millimeters</span>
+                  </label>
+                </div>
+                <label className="block text-xs">
+                  <span className="mb-1 flex justify-between opacity-70"><span>Fur / two-finger clearance</span><strong>{collarClearanceMm} mm</strong></span>
+                  <input type="range" min="5" max="15" step="1" value={collarClearanceMm}
+                    onChange={(event) => setCollarClearanceMm(Number(event.target.value))} className="w-full" />
+                </label>
+                <label className="flex items-center justify-between text-xs">
+                  <span className="opacity-70">Strap color</span>
+                  <input type="color" value={collarColor} onChange={(event) => setCollarColor(event.target.value)}
+                    className="h-8 w-12 rounded border border-white/15 bg-transparent" />
+                </label>
+                <div className="rounded-xl bg-black/20 p-3 text-xs opacity-70">
+                  Includes a rigid buckle and D-ring. The flexible strap follows upper-neck bones; metal hardware remains rigid.
+                </div>
+                <button type="button" onClick={buildCollar} disabled={busy}
+                  className="w-full rounded-2xl bg-violet-400 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-40">
+                  {busy ? "Starting collar build…" : "Build collar draft"}
+                </button>
+                {collarJob && (
+                  <p className="text-xs text-emerald-200">
+                    Collar job {collarJob.jobUuid?.slice(0, 8) || "created"} · {collarJob.state || "queued"}. Review is required before final export.
+                  </p>
+                )}
+              </div>
             )}
 
             {view.order.state === "awaiting_human_review" && (

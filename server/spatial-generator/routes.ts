@@ -18,6 +18,7 @@ import {
 } from "./schemas";
 import { SpatialGeneratorService, SpatialGeneratorServiceError } from "./service";
 import { DeterministicMathSolver } from "./service";
+import { CollarBuildSchema, COLLAR_SIZE_PRESETS, collarSpatialJob } from "./collar";
 
 function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -81,6 +82,29 @@ export function createSpatialGeneratorRouter(
     message: { error: "Too many poll requests" },
     standardHeaders: true,
     legacyHeaders: false,
+  });
+
+  router.get("/collar/presets", (_req, res) => {
+    res.json({ presets: COLLAR_SIZE_PRESETS, clearanceRangeMm: [5, 15] });
+  });
+
+  router.post("/collar/jobs", jobCreateLimiter, async (req: Request, res: Response) => {
+    const userPhone = getRequestUserPhone(req);
+    if (!userPhone) return res.status(401).json({ error: "Unauthorized" });
+    const parsed = CollarBuildSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid collar measurements", details: parsed.error.flatten() });
+    }
+    try {
+      const job = await getService().startJob(userPhone, collarSpatialJob(parsed.data));
+      return res.status(202).json(job);
+    } catch (error) {
+      if (error instanceof SpatialGeneratorServiceError) {
+        return res.status(400).json({ error: error.code, message: error.message });
+      }
+      console.error("Collar job creation failed:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // ─── POST /api/spatial-generator/jobs ──────────────────────────────────────

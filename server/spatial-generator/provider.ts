@@ -39,7 +39,7 @@ async function layer8Request<T>(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LAYER8_API_KEY}`,
+        "X-API-Key": LAYER8_API_KEY,
         Accept: "application/json",
       },
       body: JSON.stringify(payload),
@@ -147,8 +147,8 @@ export async function checkLayer8Health(): Promise<{
   }
 
   try {
-    const response = await fetch(`${LAYER8_BASE}/health`, {
-      headers: { Authorization: `Bearer ${LAYER8_API_KEY}` },
+    const response = await fetch(`${LAYER8_BASE}/v1/spatial/health`, {
+      headers: { "X-API-Key": LAYER8_API_KEY },
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return { spatialObserve: false, spatialPlan: false, spatialMath: false, spatialVerify: false };

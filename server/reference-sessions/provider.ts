@@ -19,6 +19,7 @@ export interface ReferenceImageProvider {
 export async function inspectReferenceImage(
   imageBuffer: Buffer,
   declaredMimeType: string,
+  minimumDimensionPx = MIN_REFERENCE_DIMENSION_PX,
 ): Promise<{ mimeType: string; widthPx: number; heightPx: number }> {
   if (!ALLOWED_IMAGE_MIME.has(declaredMimeType)) throw new Error(`Unsupported reference image MIME type: ${declaredMimeType}`);
   if (imageBuffer.byteLength === 0 || imageBuffer.byteLength > MAX_REFERENCE_IMAGE_BYTES) {
@@ -29,8 +30,8 @@ export async function inspectReferenceImage(
   const heightPx = Number(metadata.height || 0);
   const actualMime = metadata.format === "jpeg" ? "image/jpeg" : metadata.format === "png" ? "image/png" : metadata.format === "webp" ? "image/webp" : "";
   if (!actualMime || actualMime !== declaredMimeType) throw new Error("Reference image bytes do not match the declared MIME type.");
-  if (widthPx < MIN_REFERENCE_DIMENSION_PX || heightPx < MIN_REFERENCE_DIMENSION_PX) {
-    throw new Error(`Reference images must be at least ${MIN_REFERENCE_DIMENSION_PX}x${MIN_REFERENCE_DIMENSION_PX}px.`);
+  if (widthPx < minimumDimensionPx || heightPx < minimumDimensionPx) {
+    throw new Error(`Reference images must be at least ${minimumDimensionPx}x${minimumDimensionPx}px.`);
   }
   return { mimeType: actualMime, widthPx, heightPx };
 }

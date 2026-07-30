@@ -10,6 +10,10 @@ import {
 test("reference image inspection trusts decoded bytes, not claimed dimensions", async () => {
   const onePixel = await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).png().toBuffer();
   await assert.rejects(() => inspectReferenceImage(onePixel, "image/png"), /at least 1024x1024/);
+  assert.deepEqual(
+    await inspectReferenceImage(onePixel, "image/png", 1),
+    { mimeType: "image/png", widthPx: 1, heightPx: 1 },
+  );
   await assert.rejects(() => inspectReferenceImage(onePixel, "image/jpeg"), /do not match/);
 });
 

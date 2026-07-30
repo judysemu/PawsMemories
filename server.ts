@@ -7761,13 +7761,18 @@ async function startServer() {
     // Read once — this file only changes on deploy.
     const INDEX_HTML = fs.readFileSync(indexHtmlPath, 'utf8');
 
-    app.get('*', (req, res) => {
+    const serveSpaShell = (req: express.Request, res: express.Response) => {
       if (ASSET_EXT.test(req.path)) {
         return res.status(404).type("txt").send("Not found");
       }
       res.setHeader("Cache-Control", "no-cache");
-      res.type("html").send(injectMeta(INDEX_HTML, req.path));
-    });
+      return res.type("html").send(injectMeta(INDEX_HTML, req.path));
+    };
+    // Hostinger's Express router does not include "/" in the "*" match used
+    // below, even though deeper SPA routes are matched. Keep the homepage
+    // explicit so a successful deployment cannot return "Cannot GET /".
+    app.get("/", serveSpaShell);
+    app.get("*", serveSpaShell);
   }
 
   let shuttingDown = false;
