@@ -49,6 +49,14 @@ import WarehouseMode from "./components/WarehouseMode";
 import { MOBILE_NAV, SIDEBAR_NAV, SHELL_ICON_NAV } from "./shellNavigation";
 import { syncSeoMetadata } from "./seo";
 import PetModelStudio from "./components/PetModelStudio";
+import DogModelsPage from "./components/landing/DogModelsPage";
+import CatModelsPage from "./components/landing/CatModelsPage";
+import PetProfessionalsPage from "./components/landing/PetProfessionalsPage";
+import GlbGuidePage from "./components/landing/GlbGuidePage";
+import DenverPage from "./components/landing/DenverPage";
+import PhiladelphiaPage from "./components/landing/PhiladelphiaPage";
+import GuidesHubPage from "./components/landing/GuidesHubPage";
+import ProductPage from "./components/ProductPage";
 
 const EMPTY_PROFILE: UserProfile = { fullName: "", email: "", credits: 0, treats: 0, isAdmin: false, city: "", ageVerified: false, acceptedTermsVersion: null, currentTermsVersion: undefined, requiresTermsAcceptance: false };
 
@@ -75,7 +83,14 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
   [Screen.CREATE_VALIDATE]: "/create/validate",
   [Screen.CREATE_CHECKOUT]: "/create/checkout",
   [Screen.LANDING_MODELS]: "/3d-pet-models",
-  [Screen.LANDING_DOGS]: "/custom-dog-figurines",
+  [Screen.LANDING_DOGS]: "/dog-3d-models",
+  [Screen.LANDING_CATS]: "/cat-3d-models",
+  [Screen.LANDING_PROFESSIONALS]: "/pet-professionals",
+  [Screen.LANDING_GLB_GUIDE]: "/glb-pet-models-guide",
+  [Screen.LANDING_DENVER]: "/denver",
+  [Screen.LANDING_PHILADELPHIA]: "/philadelphia",
+  [Screen.GUIDES_HUB]: "/guides",
+  [Screen.PRODUCT_VIEW]: "/product",
   [Screen.LANDING_MEMORIALS]: "/pet-memorial-models",
   [Screen.HOW_IT_WORKS]: "/how-it-works",
   [Screen.PRICING]: "/pricing",
@@ -93,6 +108,9 @@ function screenFromPath(pathname: string): Screen | null {
   // Retired marketplace surfaces fall through to the safe Shop landing page.
   if (normalized === "/marketplace" || normalized === "/admin/marketplace") return Screen.STORE;
   if (normalized === "/home" || normalized === "/") return Screen.DASHBOARD;
+  if (normalized === "/custom-dog-figurines" || normalized === "/dog-3d-models") return Screen.LANDING_DOGS;
+  if (normalized.startsWith("/product/")) return Screen.PRODUCT_VIEW;
+  if (normalized.startsWith("/guides/")) return Screen.GUIDES_HUB;
   const entry = Object.entries(SCREEN_PATHS).find(([, path]) => path === normalized);
   return entry ? entry[0] as Screen : null;
 }
@@ -739,14 +757,79 @@ export default function App() {
       <CreateFlowProvider>
       <main className={`flex min-w-0 flex-grow flex-col items-center justify-center pt-16 pb-24 md:pb-0 ${isAuthed ? 'relative w-full md:ml-64 md:w-[calc(100%-16rem)]' : 'w-full'}`}>
         {/* Render public screens regardless of auth state */}
-        {[Screen.DASHBOARD, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) && (
+        {[Screen.DASHBOARD, Screen.LANDING_MODELS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) && (
           <HomePage
             userProfile={userProfile}
             onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
-            onOpenShop={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.STORE)}
+            onOpenShop={() => setCurrentScreen(Screen.PRICING)}
             onOpenPawprints={() => setCurrentScreen(Screen.PAWPRINTS)}
-            onOpenFurball={() => setCurrentScreen(Screen.CREATE)} /* RD-6: Furball3D gated; route to Create */
+            onOpenFurball={() => setCurrentScreen(Screen.CREATE)}
             onOpenFidos={() => setCurrentScreen(Screen.PAWLISHER)}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_DOGS && (
+          <DogModelsPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+            onSelectProduct={(slug) => {
+              window.history.pushState({}, "", `/product/${slug}`);
+              setCurrentScreen(Screen.PRODUCT_VIEW);
+            }}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_CATS && (
+          <CatModelsPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+            onSelectProduct={(slug) => {
+              window.history.pushState({}, "", `/product/${slug}`);
+              setCurrentScreen(Screen.PRODUCT_VIEW);
+            }}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_PROFESSIONALS && (
+          <PetProfessionalsPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_GLB_GUIDE && (
+          <GlbGuidePage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_DENVER && (
+          <DenverPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+          />
+        )}
+
+        {currentScreen === Screen.LANDING_PHILADELPHIA && (
+          <PhiladelphiaPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+          />
+        )}
+
+        {currentScreen === Screen.GUIDES_HUB && (
+          <GuidesHubPage
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
+          />
+        )}
+
+        {currentScreen === Screen.PRODUCT_VIEW && (
+          <ProductPage
+            productSlug={window.location.pathname.replace("/product/", "") || "shiba-inu-glb"}
+            onOpenCreate={() => !isAuthed ? setCurrentScreen(Screen.SIGN_UP) : setCurrentScreen(Screen.CREATE)}
+            onOpenPricing={() => setCurrentScreen(Screen.PRICING)}
           />
         )}
 
@@ -798,7 +881,9 @@ export default function App() {
         )}
 
         {/* When not authenticated and screen is not public, render sign-up. */}
-        {!isAuthed && ![Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) ? (
+        {!isAuthed && ![
+          Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_CATS, Screen.LANDING_PROFESSIONALS, Screen.LANDING_GLB_GUIDE, Screen.LANDING_DENVER, Screen.LANDING_PHILADELPHIA, Screen.GUIDES_HUB, Screen.PRODUCT_VIEW, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING
+        ].includes(currentScreen) ? (
           <SignUp onAuthenticated={handleAuthenticated} />
         ) : (
           isAuthed && (

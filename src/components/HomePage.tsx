@@ -91,13 +91,10 @@ export default function HomePage({
                 Pawsome3D
               </p>
               <h1 className="text-3xl font-black leading-tight tracking-tight text-on-surface sm:text-4xl lg:text-5xl">
-                Create a memory that{" "}
-                <span className="text-primary">lasts forever</span>{" "}
-                <span role="img" aria-label="paw print">🐾</span>
+                Affordable 3D Pet Models in <span className="text-primary">GLB Format</span>
               </h1>
-              <p className="mt-4 max-w-lg text-sm leading-relaxed text-on-surface-variant md:text-base">
-                Upload a photo, personalize the model, and print a one-of-a-kind keepsake
-                that celebrates every wag and purr.
+              <p className="mt-4 max-w-xl text-sm leading-relaxed text-on-surface-variant md:text-base">
+                Pawsome3D makes digital 3D pet models more affordable for pet owners and pet-industry professionals. Browse our GLB pet models, choose the option that fits your needs, and purchase your model online.
               </p>
 
               {/* CTAs */}
@@ -109,7 +106,7 @@ export default function HomePage({
                   className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-8 py-4 text-sm font-black text-on-primary shadow-lg transition-all hover:brightness-105 hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/30 active:scale-95 disabled:opacity-50"
                 >
                   <Sparkles size={16} className="fill-on-primary" />
-                  Create My 3D Model
+                  Shop 3D Pet Models
                   <ArrowRight size={16} />
                 </button>
                 <button
@@ -118,7 +115,7 @@ export default function HomePage({
                   onClick={onOpenShop}
                   className="glass-button flex items-center justify-center gap-2 rounded-2xl px-7 py-4 text-sm font-bold text-on-surface transition-all hover:text-primary"
                 >
-                  Shop status
+                  View Pricing
                   <ArrowRight size={14} />
                 </button>
               </div>
@@ -129,16 +126,38 @@ export default function HomePage({
               <div className="dog-float">
                 <img
                   src="/brand/furball3d.jpg"
-                  alt="3D pet model showcase"
+                  alt="Affordable 3D Pet Models in GLB Format"
                   className="h-48 w-48 rounded-3xl object-cover shadow-2xl ring-2 ring-white/40 sm:h-56 sm:w-56 md:h-72 md:w-72"
                 />
               </div>
               <div className="absolute -bottom-3 -right-3 flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[10px] font-black text-on-primary shadow-lg">
                 <Printer size={12} />
-                Print-ready
+                GLB &amp; Print-Ready
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ─────────────── SUPPORTING HEADING & COPY SECTION ─────────────── */}
+      <section className="mt-12 px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl glass-card p-8 rounded-3xl text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-6 border border-primary/20 bg-primary/5">
+          <div className="flex-1">
+            <h2 className="text-2xl font-black tracking-tight text-on-surface">
+              3D Pet Models Without the Premium Price
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-on-surface-variant max-w-2xl">
+              Get a versatile GLB pet model at a price designed to be accessible. Pawsome3D serves individual pet owners, pet businesses, creators, and professionals throughout the United States, including Denver and Philadelphia.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenCreate}
+            className="shrink-0 flex items-center gap-2 rounded-2xl bg-primary px-7 py-3.5 text-sm font-black text-on-primary shadow-md hover:bg-primary/90 transition-all active:scale-95"
+          >
+            Explore All Models
+            <ArrowRight size={16} />
+          </button>
         </div>
       </section>
 

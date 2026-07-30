@@ -136,3 +136,32 @@ test("injection does not corrupt the rest of the document", () => {
   );
   assert.equal(html.length > 0, true);
 });
+
+test("priority keyword map routes inject proper titles and descriptions", () => {
+  const priorityRoutes = [
+    "/",
+    "/dog-3d-models",
+    "/cat-3d-models",
+    "/pet-professionals",
+    "/glb-pet-models-guide",
+    "/denver",
+    "/philadelphia",
+    "/pricing",
+    "/guides"
+  ];
+  for (const route of priorityRoutes) {
+    const html = injectMeta(TEMPLATE, route);
+    assert.ok(title(html).length > 10, `${route} must have descriptive title`);
+    assert.ok(description(html).length > 20, `${route} must have descriptive meta description`);
+  }
+});
+
+test("dynamic product page injection produces valid title and Product JSON-LD", () => {
+  const html = injectMeta(TEMPLATE, "/product/shiba-inu-glb");
+  assert.equal(canonical(html), "https://pawsome3d.com/product/shiba-inu-glb");
+  assert.ok(title(html).includes("Shiba Inu Glb"));
+  assert.ok(html.includes('id="schema-product"'), "product pages must include product schema");
+  assert.ok(html.includes('"@type":"Product"'), "product schema must contain @type Product");
+  assert.ok(html.includes('"@type":"Organization"'), "sitewide org schema must be injected");
+});
+

@@ -4,16 +4,48 @@ const BRAND = "Pawsome3D";
 
 const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> = {
   [Screen.DASHBOARD]: {
-    title: `Custom 3D Pet Models Made to Keep | ${BRAND}`,
-    desc: "Turn pet photos into personalized 3D models, validate the design, and order a physical keepsake."
+    title: `Affordable 3D Pet Models in GLB Format | ${BRAND}`,
+    desc: "Shop affordable 3D pet models in GLB format for pet owners and pet-industry professionals. Browse available models and purchase online from Pawsome3D."
+  },
+  [Screen.LANDING_DOGS]: {
+    title: `Dog 3D Models in GLB Format | ${BRAND}`,
+    desc: "Download affordable dog 3D models in GLB format for personal and commercial use. Browse 3D dog models for pet businesses, creators, and dog lovers nationwide."
+  },
+  [Screen.LANDING_CATS]: {
+    title: `Cat 3D Models in GLB Format | ${BRAND}`,
+    desc: "Explore affordable cat 3D models in GLB format. Download 3D cat models GLB for pet apps, e-commerce, AR, and personalized pet keepsakes."
+  },
+  [Screen.LANDING_PROFESSIONALS]: {
+    title: `3D Pet Models for Businesses & Pet Industry | ${BRAND}`,
+    desc: "High-quality 3D pet models for businesses, groomers, veterinarians, and pet brands. Commercial-use GLB files ready for websites, 3D renderers, and AR."
+  },
+  [Screen.LANDING_GLB_GUIDE]: {
+    title: `GLB Pet Model Guide: What is a GLB File & How to Use It | ${BRAND}`,
+    desc: "Learn what a GLB pet model is, how pet GLB files work, and how to view or use 3D animal models in Blender, Unity, and web apps."
+  },
+  [Screen.LANDING_DENVER]: {
+    title: `3D Pet Models Denver | Local Pet Business & 3D Models | ${BRAND}`,
+    desc: "Affordable 3D pet models in Denver. Serving Denver pet owners, local veterinary clinics, groomers, and pet industry professionals with instant GLB file delivery."
+  },
+  [Screen.LANDING_PHILADELPHIA]: {
+    title: `3D Pet Models Philadelphia | Local Pet Industry Solutions | ${BRAND}`,
+    desc: "Affordable 3D pet models in Philadelphia. Serving Philly pet owners, local pet brands, groomers, and creative studios with versatile GLB pet models."
+  },
+  [Screen.PRICING]: {
+    title: `Affordable Pet 3D Models & Pricing | ${BRAND}`,
+    desc: "Transparent 3D pet model pricing for personal and commercial GLB files. Find affordable pet 3D models for owners, businesses, and creators."
+  },
+  [Screen.GUIDES_HUB]: {
+    title: `3D Pet Model Guides, Tutorials & Answers | ${BRAND}`,
+    desc: "Browse expert guides on GLB pet models, 3D file formats, Blender integration, AR viewing, and commercial 3D animal model usage."
+  },
+  [Screen.PRODUCT_VIEW]: {
+    title: `GLB 3D Pet Model | ${BRAND}`,
+    desc: "Download high quality 3D pet models in binary glTF (.GLB) format. Fully textured and ready for WebGL, AR, Blender, and 3D printing."
   },
   [Screen.LANDING_MODELS]: {
     title: `Custom 3D Printed Pet Models | ${BRAND}`,
     desc: "Create a personalized 3D pet model from photos and prepare it for printing as a meaningful keepsake."
-  },
-  [Screen.LANDING_DOGS]: {
-    title: `Custom Dog Figurines from Your Photos | ${BRAND}`,
-    desc: "Create a personalized dog figurine with breed, pose, collar, tag, and memorial options."
   },
   [Screen.LANDING_MEMORIALS]: {
     title: `Pet Memorial Models and Keepsakes | ${BRAND}`,
@@ -26,10 +58,6 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
   [Screen.HOW_IT_WORKS]: {
     title: `How Custom 3D Pet Models Work | ${BRAND}`,
     desc: "Upload photos, personalize the model, check printability, and order your physical pet keepsake."
-  },
-  [Screen.PRICING]: {
-    title: `3D Pet Model and Pawprint Pricing | ${BRAND}`,
-    desc: "See how model creation, customization, Pawprints, and physical printing are priced."
   },
   [Screen.CREATE]: {
     title: `Create Your Custom 3D Pet Model | ${BRAND}`,
