@@ -406,8 +406,13 @@ export async function fetchModelLibrary(): Promise<ModelLibraryItem[]> {
 }
 
 export interface FulfillmentReadiness {
-  modelPrinting: { provider: "slant3d"; available: boolean };
-  pawprintPrinting: { provider: "printful"; available: boolean; productCount: number };
+  /**
+   * `blockers` names absent server dependencies (e.g. "stripe",
+   * "printful_api_key") so a surface can explain *why* ordering is paused
+   * instead of only that it is. Never contains secret names or values.
+   */
+  modelPrinting: { provider: "slant3d"; available: boolean; blockers?: string[] };
+  pawprintPrinting: { provider: "printful"; available: boolean; productCount: number; blockers?: string[] };
 }
 
 export async function fetchFulfillmentReadiness(): Promise<FulfillmentReadiness> {

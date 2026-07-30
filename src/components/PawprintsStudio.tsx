@@ -50,6 +50,12 @@ interface PawprintPrintProduct {
   widthIn: number;
   heightIn: number;
   priceCents?: number;
+  /**
+   * False for showcase formats returned while Printful has no variant IDs
+   * configured. Such a row is displayed but can never be ordered — the server
+   * rejects any code that has no real, server-owned Printful variant.
+   */
+  orderable?: boolean;
 }
 
 interface ShippingForm {
@@ -571,7 +577,13 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
               <div className="mt-2 flex gap-2"><input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} placeholder="friend@example.com" className="min-h-11 min-w-0 flex-1 rounded-xl border border-outline-variant bg-surface px-3 text-sm" /><button type="button" disabled={sending || !savedCreationId || !recipientEmail.trim()} onClick={async () => { setSending(true); setError(""); try { const response = await authedFetch("/api/pawprints/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creationId: savedCreationId, email: recipientEmail }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send the Pawprint."); setRecipientEmail(""); } catch (caught: any) { setError(caught.message || "Could not send the Pawprint."); } finally { setSending(false); } }} className="min-h-11 rounded-xl bg-primary px-4 text-xs font-black text-on-primary disabled:opacity-40">{sending ? "Sending…" : "Send"}</button></div>
               <p className="mt-2 text-[10px] text-on-surface-variant">The email includes the ${CREDIT_PRICES.PAWPRINT} PupCoins creation price.</p>
             </div>
-            {printProducts.length > 0 && <div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
+            {/* Rendered unconditionally. This block used to be hidden whenever
+                the product list was empty, so a deployment that had a valid
+                Printful key but no variant IDs configured showed the customer
+                no physical-print option at all — indistinguishable from the
+                feature not existing. The disabled state below is the correct
+                signal instead. */}
+            {<div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
               <div className="flex items-center gap-2"><Printer size={17} className="text-primary" /><h2 className="text-sm font-black">Order a physical Pawprint</h2></div>
               <label className="mt-3 block text-xs font-bold text-on-surface-variant">Print format</label>
               <select value={printProductCode} onChange={(event) => setPrintProductCode(event.target.value)} disabled={!printAvailable} className="mt-1 min-h-11 w-full rounded-xl border border-outline-variant bg-surface px-3 text-sm disabled:opacity-50">
@@ -587,7 +599,7 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
                 <input aria-label="Shipping postal code" placeholder="Postal code" value={shipping.zip} onChange={(event) => setShipping((current) => ({ ...current, zip: event.target.value }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
                 <input aria-label="Shipping country" placeholder="Country" maxLength={2} value={shipping.country_code} onChange={(event) => setShipping((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
               </div>
-              {!printAvailable && <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-bold text-amber-700">Physical Pawprint ordering is being configured. Your finished digital Pawprint remains available to download and email.</p>}
+              {!printAvailable && <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-bold text-amber-700">These are the formats we print. Physical Pawprint ordering is being switched on shortly — your finished digital Pawprint is ready to download and email right now.</p>}
               <button type="button" onClick={() => void submitPrintOrder()} disabled={printBusy || !savedCreationId || !printAvailable} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-black text-on-primary disabled:cursor-not-allowed disabled:opacity-40">{printBusy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}{printBusy ? "Preparing print…" : !printAvailable ? "Printing unavailable" : printOrderMode === "payment" ? "Price & secure checkout" : "Create print order"}</button>
               {printOrder && <p className="mt-2 rounded-xl bg-primary/10 p-3 text-xs font-bold text-primary">Printful order {printOrder.id || "created"} · {printOrder.status}. You can return to this order from your FurBin.</p>}
               <p className="mt-2 text-[10px] text-on-surface-variant">The print file is prepared at 300 DPI. Printful receives a draft first; it enters production only after Stripe confirms your payment.</p>

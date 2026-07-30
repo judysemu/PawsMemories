@@ -1,0 +1,412 @@
+/**
+ * PrintShopScreen — the single storefront for everything Pawsome3D ships as a
+ * physical object.
+ *
+ * Two vendors sit behind this page and they are deliberately kept visually
+ * distinct, because they fail independently:
+ *
+ *   • Pawprints (paper/canvas art)  → Printful
+ *   • Pet figurines (3D printing)   → Slant 3D
+ *
+ * The page always renders both storefronts. When a vendor is not yet
+ * configured, its options are shown read-only with a "coming soon" notice
+ * rather than being hidden — hiding them was the previous behaviour and it made
+ * an unconfigured vendor indistinguishable from a feature that does not exist,
+ * for customers and for whoever was debugging the deployment.
+ *
+ * Ordering itself is never client-authoritative. Every price, variant and
+ * filament is resolved server-side; this page only collects intent and a
+ * shipping address, then hands off to a Stripe checkout the server creates.
+ */
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, Package, Printer, ShieldCheck, Truck } from "lucide-react";
+import {
+  createSlant3dCheckout,
+  fetchFulfillmentReadiness,
+  fetchModelLibrary,
+  type ModelLibraryItem,
+} from "../api";
+import { UserProfile } from "../types";
+
+interface PawprintFormat {
+  code: string;
+  label: string;
+  description: string;
+  widthIn: number;
+  heightIn: number;
+  priceCents?: number;
+  orderable?: boolean;
+}
+
+interface ShippingAddress {
+  name: string;
+  email: string;
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+}
+
+interface Props {
+  userProfile: UserProfile;
+  onOpenPawprints: () => void;
+}
+
+/** Minimum viable shipping payload. Vendors reject partial addresses outright. */
+function addressComplete(address: ShippingAddress): boolean {
+  return Boolean(
+    address.name.trim() && address.email.trim() && address.line1.trim()
+    && address.city.trim() && address.state.trim() && address.zip.trim()
+    && address.country.trim().length === 2,
+  );
+}
+
+function SectionShell({ title, subtitle, icon, badge, children }: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  badge: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[1.75rem] border border-outline-variant/35 bg-surface/80 p-5 shadow-lg backdrop-blur-xl sm:p-7">
+      <header className="mb-5 flex flex-wrap items-start gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-black text-on-surface">{title}</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">{subtitle}</p>
+        </div>
+        {badge}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function StatusBadge({ available }: { available: boolean }) {
+  return available ? (
+    <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700">
+      Shipping now
+    </span>
+  ) : (
+    <span className="rounded-full bg-amber-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700">
+      Coming soon
+    </span>
+  );
+}
+
+function ComingSoonNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-bold text-amber-700">
+      {children}
+    </p>
+  );
+}
+
+export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props) {
+  const [pawprintAvailable, setPawprintAvailable] = useState(false);
+  const [pawprintFormats, setPawprintFormats] = useState<PawprintFormat[]>([]);
+  const [modelPrintingAvailable, setModelPrintingAvailable] = useState(false);
+
+  const [models, setModels] = useState<ModelLibraryItem[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const [targetHeightMm, setTargetHeightMm] = useState(120);
+
+  const [shipping, setShipping] = useState<ShippingAddress>({
+    name: userProfile.fullName || "",
+    email: userProfile.email || "",
+    line1: "",
+    city: userProfile.city || "",
+    state: "",
+    zip: "",
+    country: "US",
+  });
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/pawprints/print-products")
+      .then((response) => response.json())
+      .then((data) => {
+        if (!active) return;
+        setPawprintFormats(Array.isArray(data.products) ? data.products : []);
+        setPawprintAvailable(data.available === true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPawprintFormats([]);
+        setPawprintAvailable(false);
+      });
+
+    fetchFulfillmentReadiness()
+      .then((readiness) => active && setModelPrintingAvailable(readiness.modelPrinting.available))
+      .catch(() => active && setModelPrintingAvailable(false));
+
+    // The model library is authenticated. A signed-out visitor still sees the
+    // storefront and its pricing, just not their own printable models.
+    if (userProfile.email) {
+      fetchModelLibrary()
+        .then((items) => {
+          if (!active) return;
+          const printable = items.filter((item) => item.rigged_model_url || item.model_url);
+          setModels(printable);
+          setSelectedModelId((current) => current ?? printable[0]?.id ?? null);
+        })
+        .catch(() => active && setModels([]))
+        .finally(() => active && setModelsLoading(false));
+    } else {
+      setModelsLoading(false);
+    }
+
+    return () => { active = false; };
+  }, [userProfile.email]);
+
+  const selectedModel = useMemo(
+    () => models.find((item) => item.id === selectedModelId) || null,
+    [models, selectedModelId],
+  );
+
+  const canOrderFigurine = Boolean(
+    modelPrintingAvailable && selectedModel
+    && selectedModel.source_type !== "marketplace_listing"
+    && addressComplete(shipping) && !busy,
+  );
+
+  const beginFigurineCheckout = async () => {
+    if (!selectedModel) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await createSlant3dCheckout({
+        sourceType: selectedModel.source_type as "creation" | "avatar",
+        sourceId: selectedModel.id,
+        targetHeightMm,
+        recipient: {
+          name: shipping.name.trim(),
+          email: shipping.email.trim(),
+          line1: shipping.line1.trim(),
+          city: shipping.city.trim(),
+          state: shipping.state.trim(),
+          zip: shipping.zip.trim(),
+          country: shipping.country.trim().toUpperCase(),
+        },
+      });
+      window.location.assign(result.checkoutUrl);
+    } catch (caught: any) {
+      setError(caught?.message || "This model could not be prepared for printing.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addressField = (
+    key: keyof ShippingAddress,
+    placeholder: string,
+    extra: { span?: boolean; maxLength?: number; type?: string; uppercase?: boolean } = {},
+  ) => (
+    <input
+      aria-label={placeholder}
+      type={extra.type || "text"}
+      placeholder={placeholder}
+      maxLength={extra.maxLength}
+      value={shipping[key]}
+      disabled={!modelPrintingAvailable}
+      onChange={(event) => setShipping((current) => ({
+        ...current,
+        [key]: extra.uppercase ? event.target.value.toUpperCase() : event.target.value,
+      }))}
+      className={`${extra.span ? "col-span-2 " : ""}min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm disabled:opacity-50`}
+    />
+  );
+
+  return (
+    <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-8">
+      <header className="mb-8 max-w-2xl">
+        <p className="text-xs font-black uppercase tracking-[.2em] text-primary">Print Shop</p>
+        <h1 className="mt-2 text-3xl font-black text-on-surface">Order your pet as a physical keepsake</h1>
+        <p className="mt-2 text-on-surface-variant">
+          Framed art prints and full-colour 3D figurines, produced by our print partners and shipped to your door.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs font-bold text-on-surface-variant">
+          <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-primary" /> Secure Stripe checkout</span>
+          <span className="flex items-center gap-1.5"><Truck size={14} className="text-primary" /> Tracked delivery</span>
+          <span className="flex items-center gap-1.5"><Package size={14} className="text-primary" /> Made to order</span>
+        </div>
+      </header>
+
+      {error && <p className="mb-6 rounded-xl bg-error/10 p-3 text-sm font-bold text-error">{error}</p>}
+
+      <div className="space-y-6">
+        {/* ── Printful: Pawprints art prints ──────────────────────────────── */}
+        <SectionShell
+          title="Pawprint art prints"
+          subtitle="Your Pawprint design on museum-quality poster paper or stretched canvas."
+          icon={<Printer size={20} />}
+          badge={<StatusBadge available={pawprintAvailable} />}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            {pawprintFormats.map((format) => (
+              <article key={format.code} className="rounded-2xl border border-outline-variant/40 bg-surface-container-low p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-on-surface">{format.label}</p>
+                    <p className="mt-1 text-xs text-on-surface-variant">{format.description}</p>
+                  </div>
+                  {format.priceCents ? (
+                    <span className="shrink-0 text-sm font-black text-primary">${(format.priceCents / 100).toFixed(2)}</span>
+                  ) : null}
+                </div>
+                <p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+                  {format.widthIn} × {format.heightIn} in · 300 DPI
+                </p>
+              </article>
+            ))}
+          </div>
+
+          {pawprintAvailable ? (
+            <>
+              <p className="mt-4 text-xs text-on-surface-variant">
+                Physical prints are ordered from the finished design. Create or open a Pawprint, then choose a print format at the final step.
+              </p>
+              <button
+                type="button"
+                onClick={onOpenPawprints}
+                className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-black text-on-primary"
+              >
+                <Printer size={17} /> Go to Pawprints Studio
+              </button>
+            </>
+          ) : (
+            <>
+              <ComingSoonNotice>
+                These are the formats we print. Physical Pawprint ordering is being switched on shortly — every Pawprint you create now stays saved and will be printable from your FurBin.
+              </ComingSoonNotice>
+              <button
+                type="button"
+                onClick={onOpenPawprints}
+                className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-primary/40 px-5 text-sm font-black text-primary"
+              >
+                Design a Pawprint now
+              </button>
+            </>
+          )}
+        </SectionShell>
+
+        {/* ── Slant 3D: printed figurines ─────────────────────────────────── */}
+        <SectionShell
+          title="3D printed figurines"
+          subtitle="Your pet's 3D model printed as a solid figurine and shipped to you."
+          icon={<Package size={20} />}
+          badge={<StatusBadge available={modelPrintingAvailable} />}
+        >
+          {!userProfile.email ? (
+            <p className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4 text-sm text-on-surface-variant">
+              Sign in to choose one of your 3D pet models to print.
+            </p>
+          ) : modelsLoading ? (
+            <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+              <Loader2 size={16} className="animate-spin" /> Loading your models…
+            </p>
+          ) : models.length === 0 ? (
+            <p className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4 text-sm text-on-surface-variant">
+              You don't have a finished 3D model yet. Create one and it will appear here ready to print.
+            </p>
+          ) : (
+            <>
+              <label className="text-xs font-black uppercase tracking-wide text-on-surface">Choose a model</label>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                {models.map((model) => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => setSelectedModelId(model.id)}
+                    className={`overflow-hidden rounded-2xl border text-left transition ${
+                      selectedModelId === model.id
+                        ? "border-primary ring-2 ring-primary/30"
+                        : "border-outline-variant/40 hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="aspect-square bg-surface-container-low">
+                      {model.image_url ? (
+                        <img src={model.image_url} alt={model.name || "Pet model"} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="grid h-full w-full place-items-center text-3xl opacity-40">🐾</span>
+                      )}
+                    </div>
+                    <p className="truncate p-2 text-xs font-black text-on-surface">{model.name || `Model #${model.id}`}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-5">
+                <label className="text-xs font-black uppercase tracking-wide text-on-surface">Printed height</label>
+                <div className="mt-2 flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="25"
+                    max="300"
+                    step="5"
+                    value={targetHeightMm}
+                    disabled={!modelPrintingAvailable}
+                    onChange={(event) => setTargetHeightMm(Number(event.target.value))}
+                    className="w-full"
+                  />
+                  <span className="w-20 text-right text-sm font-black text-primary">{targetHeightMm} mm</span>
+                </div>
+                <p className="mt-2 text-xs text-on-surface-variant">
+                  Your source model is never altered. A separate, uniformly scaled STL is produced and validated, the print partner
+                  returns production and delivery costs, and only then does a secure checkout open.
+                </p>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {addressField("name", "Full name", { span: true })}
+                {addressField("email", "Email", { span: true, type: "email" })}
+                {addressField("line1", "Street address", { span: true })}
+                {addressField("city", "City")}
+                {addressField("state", "State")}
+                {addressField("zip", "Postal code")}
+                {addressField("country", "Country", { maxLength: 2, uppercase: true })}
+              </div>
+
+              {!modelPrintingAvailable && (
+                <ComingSoonNotice>
+                  Figurine printing is being switched on shortly. Your models stay available to view and download in the meantime.
+                </ComingSoonNotice>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void beginFigurineCheckout()}
+                disabled={!canOrderFigurine}
+                className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-black text-on-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}
+                {busy
+                  ? "Preparing & quoting…"
+                  : !modelPrintingAvailable
+                    ? "Figurine printing unavailable"
+                    : "Price & secure checkout"}
+              </button>
+
+              {modelPrintingAvailable && !addressComplete(shipping) && (
+                <p className="mt-2 text-center text-[11px] text-on-surface-variant">
+                  Enter a complete shipping address to get your price.
+                </p>
+              )}
+            </>
+          )}
+        </SectionShell>
+      </div>
+
+      <p className="mt-8 text-center text-[11px] text-on-surface-variant">
+        Prices are confirmed at checkout and include production and delivery. Nothing enters production until payment is confirmed.
+      </p>
+    </main>
+  );
+}

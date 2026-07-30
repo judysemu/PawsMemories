@@ -40,6 +40,7 @@ import HelpModal from "./components/HelpModal";
 const PawprintsScreen = lazy(() => import("./components/PawprintsScreen"));
 const FidosStylesScreen = lazy(() => import("./components/FidosStylesScreen"));
 const FurBinScreen = lazy(() => import("./components/FurBinScreen"));
+const PrintShopScreen = lazy(() => import("./components/PrintShopScreen"));
 const WagsAdminPanel = lazy(() => import("./components/WagsAdminPanel"));
 const PetHealthScreen = lazy(() => import("./components/PetHealthScreen"));
 const WagsInboxScreen = lazy(() => import("./components/WagsInboxScreen"));
@@ -57,6 +58,7 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
   [Screen.MODELS]: "/furball3d",
   [Screen.ANIMATOR]: "/animator",
   [Screen.PAWPRINTS]: "/pawprints",
+  [Screen.PRINT_SHOP]: "/print-shop",
   [Screen.PET_GLB]: "/pet-glb",
   [Screen.PAWLISHER]: "/fidos-styles",
   [Screen.FURBIN]: "/fur-bin",
@@ -114,6 +116,7 @@ const getBackgroundImage = (screen: Screen) => {
     case Screen.BIM:
     case Screen.PET_GLB:
     case Screen.PAWPRINTS:
+    case Screen.PRINT_SHOP:
     case Screen.PAWLISHER:
     case Screen.FURBIN:
     case Screen.CREATE:
@@ -705,7 +708,7 @@ export default function App() {
 
       <div className="flex-grow flex w-full relative">
         {/* Desktop Sidebar */}
-        {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PET_GLB, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.ADMIN_WAGS, Screen.WAGS_INBOX, Screen.PET_HEALTH].includes(currentScreen) && (
+        {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.PET_GLB, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.ADMIN_WAGS, Screen.WAGS_INBOX, Screen.PET_HEALTH].includes(currentScreen) && (
           <aside className="fixed bottom-0 left-0 top-16 z-40 hidden w-64 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-outline-variant/20 bg-surface/85 py-5 shadow-xl backdrop-blur-xl dark:bg-surface-dim/85 md:flex">
             <nav className="mt-4 flex-1 space-y-2 px-4">
               {SIDEBAR_NAV.map((item) => {
@@ -788,8 +791,17 @@ export default function App() {
           </Suspense>
         )}
 
+        {/* Public storefront. Signed-out visitors see the formats and pricing;
+            the figurine picker asks them to sign in rather than disappearing,
+            so the page works as a landing surface as well as an ordering one. */}
+        {currentScreen === Screen.PRINT_SHOP && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
+            <PrintShopScreen userProfile={userProfile} onOpenPawprints={() => setCurrentScreen(Screen.PAWPRINTS)} />
+          </Suspense>
+        )}
+
         {/* When not authenticated and screen is not public, render sign-up. */}
-        {!isAuthed && ![Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) ? (
+        {!isAuthed && ![Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) ? (
           <SignUp onAuthenticated={handleAuthenticated} />
         ) : (
           isAuthed && (
@@ -955,6 +967,7 @@ export default function App() {
               </Suspense>
             )}
 
+
             {currentScreen === Screen.ANIMATOR && (
               <UnderConstructionLock
                 featureName="Animation Studio"
@@ -1008,7 +1021,7 @@ export default function App() {
       )}
 
       {/* Floating Bottom Navigator (only when signed in and past onboarding) */}
-      {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.WAGS_INBOX].includes(currentScreen) && (
+      {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.WAGS_INBOX].includes(currentScreen) && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 grid gap-1 rounded-t-2xl border-t border-outline-variant/30 bg-surface-container-lowest/90 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_0_rgba(68,42,34,0.08)] backdrop-blur-xl dark:bg-surface-dim/90 md:hidden"
           // Column count follows the nav length (+1 for Help) rather than being

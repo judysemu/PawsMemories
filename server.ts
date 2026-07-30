@@ -124,7 +124,7 @@ import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extrac
 import { confirmPrintfulOrderIfDraft, createPrintfulOrder, getPrintfulOrder, verifyPrintfulConfiguration } from "./server/printful";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
-import { publicPawprintPrintProducts, requirePawprintPrintProduct } from "./server/pawprintProducts";
+import { pawprintDisplayCatalog, publicPawprintPrintProducts, requirePawprintPrintProduct } from "./server/pawprintProducts";
 import { buildFulfillmentReadiness } from "./server/fulfillmentReadiness";
 import { buildRandySystemInstruction } from "./server/randy/prompt";
 import { RANDY_REGISTRY_VERSION } from "./server/randy/registry";
@@ -3251,11 +3251,26 @@ async function startServer() {
       && process.env.MEDIA_BUCKET_KEY && process.env.MEDIA_BUCKET_SECRET,
     );
     const available = Boolean(products.length > 0 && process.env.PRINTFUL_API_KEY && stripe && storageConfigured);
+
+    // Blockers name the missing dependency, never its value. This is what turns
+    // "printing is unavailable" from a dead end into something an operator can
+    // act on — the previous version returned an empty array with no reason, so
+    // a deployment missing only its variant IDs looked identical to one with no
+    // Printful account at all.
+    const blockers: string[] = [];
+    if (!process.env.PRINTFUL_API_KEY) blockers.push("printful_api_key");
+    if (!products.length) blockers.push("pawprint_print_products");
+    if (!stripe) blockers.push("stripe");
+    if (!storageConfigured) blockers.push("media_storage");
+
     res.json({
       provider: "printful",
       configured: products.length > 0,
       available,
-      products,
+      // Always a non-empty list so the studio can render real formats instead of
+      // silently collapsing the whole physical-print section.
+      products: pawprintDisplayCatalog(),
+      blockers,
       orderMode: "payment",
     });
   });
@@ -3270,14 +3285,34 @@ async function startServer() {
     );
     const workerConfigured = Boolean(process.env.BLENDER_WORKER_URL && process.env.WORKER_SHARED_SECRET);
     const pawprintProducts = publicPawprintPrintProducts();
-    res.json(buildFulfillmentReadiness({
+    const readiness = buildFulfillmentReadiness({
       stripeConfigured: Boolean(stripe),
       slantConfigured: slant3dConfigured(),
       printfulConfigured: Boolean(process.env.PRINTFUL_API_KEY),
       pawprintProductCount: pawprintProducts.length,
       storageConfigured,
       workerConfigured,
-    }));
+    });
+
+    // Dependency names only — no key names, no values. Lets the Print Shop tell
+    // a customer "coming soon" while an admin reading the same payload can see
+    // precisely which dependency is absent.
+    const modelBlockers: string[] = [];
+    if (!slant3dConfigured()) modelBlockers.push("slant3d_credentials");
+    if (!stripe) modelBlockers.push("stripe");
+    if (!storageConfigured) modelBlockers.push("media_storage");
+    if (!workerConfigured) modelBlockers.push("blender_worker");
+
+    const pawprintBlockers: string[] = [];
+    if (!process.env.PRINTFUL_API_KEY) pawprintBlockers.push("printful_api_key");
+    if (!pawprintProducts.length) pawprintBlockers.push("pawprint_print_products");
+    if (!stripe) pawprintBlockers.push("stripe");
+    if (!storageConfigured) pawprintBlockers.push("media_storage");
+
+    res.json({
+      modelPrinting: { ...readiness.modelPrinting, blockers: modelBlockers },
+      pawprintPrinting: { ...readiness.pawprintPrinting, blockers: pawprintBlockers },
+    });
   });
 
   app.get("/api/admin/fulfillment/verify", requireAuth, async (req: AuthedRequest, res) => {
@@ -3311,20 +3346,56 @@ async function startServer() {
       const slantResult = slant.status === "fulfilled" ? slant.value : null;
       const printfulResult = printful.status === "fulfilled" ? printful.value : null;
       const workerResult = worker.status === "fulfilled" ? worker.value : null;
+
+      // Surface *why* a vendor check failed. A rejected check previously
+      // collapsed to a bare `ready: false`, which cannot distinguish "no API key
+      // set" from "key set but rejected by the vendor" from "vendor timed out" —
+      // three problems with three different fixes.
+      const reasonFor = (settled: PromiseSettledResult<unknown>): string | null =>
+        settled.status === "rejected"
+          ? String((settled.reason as any)?.message || settled.reason || "check failed").slice(0, 300)
+          : null;
+
+      // Missing env vars are reported by name because this route is admin-only
+      // and already behind isUserAdmin. Values are never echoed.
+      const missingPrintful: string[] = [];
+      if (!process.env.PRINTFUL_API_KEY) missingPrintful.push("PRINTFUL_API_KEY");
+      if (!products.length) missingPrintful.push("PAWPRINT_PRINT_PRODUCTS_JSON (or PRINTFUL_PAWPRINT_VARIANT_ID)");
+
+      const missingSlant: string[] = [];
+      if (!process.env.SLANT3D_API_KEY) missingSlant.push("SLANT3D_API_KEY");
+      if (!process.env.SLANT3D_PLATFORM_ID) missingSlant.push("SLANT3D_PLATFORM_ID");
+      if (!process.env.SLANT3D_DEFAULT_FILAMENT_ID) missingSlant.push("SLANT3D_DEFAULT_FILAMENT_ID");
+
       const checks = {
-        stripe: { ready: stripeReady },
-        storage: { ready: storage },
+        stripe: {
+          ready: stripeReady,
+          missingEnv: [
+            ...(stripe ? [] : ["STRIPE_SECRET_KEY"]),
+            ...(stripeWebhookSecret ? [] : ["STRIPE_WEBHOOK_SECRET"]),
+          ],
+        },
+        storage: {
+          ready: storage,
+          missingEnv: ["MEDIA_BUCKET_NAME", "MEDIA_BUCKET_URL", "MEDIA_BUCKET_KEY", "MEDIA_BUCKET_SECRET"]
+            .filter((name) => !process.env[name]),
+        },
         slant3d: {
           ready: Boolean(slantResult?.authenticated && slantResult.platformValid && slantResult.filamentValid && slantResult.filamentAvailable),
+          missingEnv: missingSlant,
+          error: reasonFor(slant),
           ...(slantResult || {}),
         },
         printful: {
           ready: Boolean(printfulResult?.authenticated && printfulResult.ordersReadable && products.length > 0),
           productCount: products.length,
+          missingEnv: missingPrintful,
+          error: reasonFor(printful),
           ...(printfulResult || {}),
         },
         blenderWorker: {
           ready: Boolean(workerResult?.reachable && workerResult.bridgeConnected),
+          error: reasonFor(worker),
           ...(workerResult || {}),
         },
       };
