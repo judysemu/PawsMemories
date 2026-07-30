@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { authedFetch } from "../api";
 import PetModelViewer from "./PetModelViewer";
 
@@ -91,7 +91,7 @@ const STYLE_PRESETS = [
 ] as const;
 
 const STAGE_LABELS: Record<StageKind, string> = {
-  reference: "Reference images",
+  reference: "360° views",
   base: "Blank base mesh",
   texture: "Texture",
   rig_check: "Rig readiness",
@@ -116,6 +116,9 @@ export default function PetModelStudio() {
   const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
+  const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("multi");
+  const [autoContinue, setAutoContinue] = useState(false);
+  const [printHeight, setPrintHeight] = useState(100);
   const [references, setReferences] = useState<Record<string, string>>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -189,19 +192,47 @@ export default function PetModelStudio() {
     ]);
   }, []);
 
-  const start = () => call("/api/pet-glb/orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      meshProfile,
-      subjectProfile,
-      includeTexture,
-      includeRig,
-      textureQuality,
-      styleDirection: selectedStyle || null,
-      facialRig: false,
-    }),
-  }).then(applyView).catch(() => {});
+  const start = async () => {
+    try {
+      const created = await call("/api/pet-glb/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          meshProfile,
+          subjectProfile,
+          includeTexture,
+          includeRig,
+          textureQuality,
+          styleDirection: selectedStyle || null,
+          facialRig: false,
+        }),
+      }) as OrderView;
+      applyView(created);
+      if (allReferencesReady) {
+        const withReferences = await call(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ references }),
+        }) as OrderView;
+        applyView(withReferences);
+      }
+    } catch {
+      // call() owns the customer-safe error.
+    }
+  };
+
+  const loadReferenceFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []).slice(0, REFERENCE_FIELDS.length);
+    files.forEach((file, index) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const key = REFERENCE_FIELDS[index][0];
+        setReferences((current) => ({ ...current, [key]: String(reader.result || "") }));
+      };
+      reader.readAsDataURL(file);
+    });
+    event.target.value = "";
+  };
 
   const saveReferences = () => {
     if (!view) return;
@@ -325,27 +356,34 @@ export default function PetModelStudio() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
-      <header className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Customer-gated GLB studio</p>
-        <h1 className="text-3xl font-semibold">{product.name}</h1>
-        <p className="max-w-3xl text-sm opacity-70">
-          Nothing advances automatically. You approve the references, blank mesh, texture, and rig before the next paid stage starts.
+    <div className="mx-auto max-w-[1600px] space-y-5 p-3 sm:p-5">
+      <header className="flex flex-wrap items-end justify-between gap-4 rounded-3xl border border-white/10 bg-black/20 px-5 py-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Pawsome3D model lab</p>
+          <h1 className="mt-1 text-3xl font-semibold">{product.name}</h1>
+        </div>
+        <p className="max-w-xl text-sm opacity-70">
+          Build like a professional 3D studio, with one important pause: you approve the generated 360° views before the base mesh begins.
         </p>
       </header>
 
       {!view ? (
-        <div className="grid gap-5 lg:grid-cols-[1.4fr_0.8fr]">
-          <section className="space-y-5 rounded-3xl border border-white/15 bg-white/[0.07] p-5 backdrop-blur-xl">
+        <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_320px]">
+          <section className="space-y-5 rounded-3xl border border-white/15 bg-white/[0.07] p-4 backdrop-blur-xl">
+            <nav aria-label="Model tools" className="grid grid-cols-3 gap-2 border-b border-white/10 pb-4">
+              <button type="button" className="rounded-xl bg-cyan-400 px-3 py-2 text-xs font-bold text-slate-950">Model</button>
+              <button type="button" disabled className="rounded-xl border border-white/10 px-3 py-2 text-xs opacity-35">Texture</button>
+              <button type="button" disabled className="rounded-xl border border-white/10 px-3 py-2 text-xs opacity-35">Animate</button>
+            </nav>
             <fieldset className="space-y-3">
-              <legend className="text-sm font-semibold">Mesh profile</legend>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <legend className="text-sm font-semibold">1. Mesh</legend>
+              <div className="grid gap-2">
                 {(["hd", "smart_mesh"] as const).map((profile) => (
                   <button
                     key={profile}
                     type="button"
                     onClick={() => setMeshProfile(profile)}
-                    className={`rounded-2xl border p-4 text-left transition ${meshProfile === profile ? "border-cyan-300 bg-cyan-400/15" : "border-white/15 bg-black/10"}`}
+                    className={`rounded-2xl border p-3 text-left transition ${meshProfile === profile ? "border-cyan-300 bg-cyan-400/15" : "border-white/15 bg-black/10"}`}
                   >
                     <span className="font-medium">{profile === "hd" ? "HD" : "SmartMesh"}</span>
                     <span className="mt-1 block text-xs opacity-65">
@@ -359,40 +397,85 @@ export default function PetModelStudio() {
             </fieldset>
 
             <fieldset className="space-y-3">
-              <legend className="text-sm font-semibold">Character profile</legend>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button type="button" onClick={() => setSubjectProfile("pet")}
-                  className={`rounded-2xl border p-4 text-left ${subjectProfile === "pet" ? "border-cyan-300 bg-cyan-400/15" : "border-white/15"}`}>
-                  <span className="font-medium">Pet / animal</span>
-                  <span className="mt-1 block text-xs opacity-65">Quadruped rig profile when rigging is selected.</span>
-                </button>
-                <button type="button" onClick={() => setSubjectProfile("humanoid")}
-                  className={`rounded-2xl border p-4 text-left ${subjectProfile === "humanoid" ? "border-cyan-300 bg-cyan-400/15" : "border-white/15"}`}>
-                  <span className="font-medium">Humanoid character</span>
-                  <span className="mt-1 block text-xs opacity-65">Biped, intelligence-runtime-ready rig profile. AI behavior is not embedded in the GLB.</span>
-                </button>
+              <legend className="text-sm font-semibold">2. Start from</legend>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ["image", "Image upload"],
+                  ["multi", "Multi-image"],
+                  ["generate", "Image + generate"],
+                  ["text", "Text to model"],
+                ] as const).map(([mode, label]) => (
+                  <button key={mode} type="button" onClick={() => setInputMode(mode)}
+                    className={`rounded-xl border px-2 py-2 text-xs ${inputMode === mode ? "border-cyan-300 bg-cyan-400/15" : "border-white/10"}`}>
+                    {label}
+                  </button>
+                ))}
               </div>
+              <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-cyan-300/35 bg-cyan-300/5 px-3 py-5 text-center text-xs">
+                <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={loadReferenceFiles} />
+                <span>
+                  <strong className="block text-sm">Choose pet photos</strong>
+                  {inputMode === "multi" ? "Select front, left, back, right, and ¾ views" : "Add a clear photo to begin"}
+                </span>
+              </label>
+              <div className="grid grid-cols-5 gap-1.5">
+                {REFERENCE_FIELDS.map(([key, label]) => (
+                  <div key={key} className={`aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
+                    {references[key]
+                      ? <img src={references[key]} alt={`${label} upload`} className="h-full w-full object-cover" />
+                      : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-45">{label}</span>}
+                  </div>
+                ))}
+              </div>
+              {(inputMode === "generate" || inputMode === "text") && (
+                <textarea value={styleDirection} onChange={(event) => setStyleDirection(event.target.value.slice(0, 400))}
+                  className="min-h-20 w-full rounded-xl border border-white/15 bg-black/20 p-3 text-xs"
+                  placeholder={inputMode === "text" ? "Describe the pet, pose, markings, and base…" : "Describe the extra views you want generated…"} />
+              )}
             </fieldset>
 
             <fieldset className="space-y-3">
-              <legend className="text-sm font-semibold">Add-on stages</legend>
-              <label className="flex items-start gap-3 rounded-2xl border border-white/15 p-4">
+              <legend className="text-sm font-semibold">3. General settings</legend>
+              <label className="block text-xs">
+                <span className="mb-1 block opacity-70">Subject</span>
+                <select value={subjectProfile} onChange={(event) => setSubjectProfile(event.target.value as SubjectProfile)}
+                  className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2">
+                  <option value="pet">Pet / animal</option>
+                  <option value="humanoid">Humanoid character</option>
+                </select>
+                {subjectProfile === "humanoid" && (
+                  <span className="mt-1 block opacity-55">AI behavior is not embedded in the GLB.</span>
+                )}
+              </label>
+              <label className="block text-xs">
+                <span className="mb-1 flex justify-between opacity-70"><span>Finished print height</span><strong>{printHeight} mm</strong></span>
+                <input type="range" min="50" max="200" step="10" value={printHeight} onChange={(event) => setPrintHeight(Number(event.target.value))} className="w-full" />
+              </label>
+              <div className="rounded-xl border border-amber-200/15 bg-amber-200/5 p-3 text-xs opacity-75">
+                For reliable printing, use clear full-body views with visible paws, tail, and floor contact. Fine fur becomes sculpted surface detail.
+              </div>
+              <label className="flex items-start gap-3 rounded-2xl border border-white/15 p-3">
                 <input type="checkbox" checked={includeTexture} onChange={(event) => setIncludeTexture(event.target.checked)} className="mt-1" />
                 <span>
-                  <span className="font-medium">Texture · {product.prices.texture} PupCoins</span>
-                  <span className="block text-xs opacity-65">Charged only after you approve the blank base mesh.</span>
+                  <span className="text-sm font-medium">Texture after base</span>
+                  <span className="block text-xs opacity-65">The Texture tool unlocks when the untextured mesh finishes.</span>
                 </span>
               </label>
-              <label className={`flex items-start gap-3 rounded-2xl border p-4 ${includeTexture ? "border-white/15" : "border-white/5 opacity-45"}`}>
+              <label className={`flex items-start gap-3 rounded-2xl border p-3 ${includeTexture ? "border-white/15" : "border-white/5 opacity-45"}`}>
                 <input type="checkbox" checked={includeRig} disabled={!includeTexture} onChange={(event) => setIncludeRig(event.target.checked)} className="mt-1" />
                 <span>
-                  <span className="font-medium">Rig · {product.prices.rig} PupCoins</span>
-                  <span className="block text-xs opacity-65">A real pre-rig check runs first. Rigging is charged only after compatibility is confirmed and you approve it.</span>
+                  <span className="text-sm font-medium">Animate after texture</span>
+                  <span className="block text-xs opacity-65">The Animate tool unlocks only after rig compatibility passes.</span>
                 </span>
               </label>
+              <label className="flex items-start gap-3 text-xs">
+                <input type="checkbox" checked={autoContinue} onChange={(event) => setAutoContinue(event.target.checked)} className="mt-0.5" />
+                <span>Auto-continue after my required 360° approval. Later paid stages still ask before charging.</span>
+              </label>
+              <p className="text-xs opacity-60">When complete, your private model appears in the Fur Bin.</p>
             </fieldset>
 
-            {includeTexture && (
+            {includeTexture && inputMode !== "generate" && inputMode !== "text" && (
               <fieldset className="space-y-3">
                 <legend className="text-sm font-semibold">Texture direction</legend>
                 <div className="flex flex-wrap gap-2">
@@ -422,10 +505,35 @@ export default function PetModelStudio() {
                 </div>
               </fieldset>
             )}
+            <button onClick={start} disabled={busy || (inputMode !== "text" && !allReferencesReady)}
+              className="group relative w-full overflow-hidden rounded-2xl bg-cyan-400 px-4 py-3.5 font-bold text-slate-950 disabled:opacity-40">
+              <span className="relative z-10">{busy ? "Gathering reference sand…" : "Generate base model"}</span>
+              {busy && <span className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_80%,#f5d08a_0_2px,transparent_3px)] bg-[length:18px_18px]" />}
+            </button>
+          </section>
+
+          <section className="relative min-h-[720px] overflow-hidden rounded-3xl border border-white/15 bg-[radial-gradient(circle_at_50%_35%,rgba(34,211,238,0.13),transparent_38%),linear-gradient(145deg,rgba(15,23,42,0.95),rgba(3,7,18,0.98))]">
+            <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between border-b border-white/10 bg-black/20 px-5 py-3 text-xs backdrop-blur">
+              <span className="font-semibold">Live model viewer</span>
+              <span className="rounded-full border border-white/10 px-3 py-1 opacity-65">Drag to rotate · scroll to zoom</span>
+            </div>
+            <div className="flex min-h-[480px] items-center justify-center px-8 pb-8 pt-20 text-center">
+              <div className="max-w-md">
+                <div className="mx-auto mb-5 flex h-48 w-48 items-end justify-center rounded-full bg-[radial-gradient(ellipse_at_bottom,#d6a75f_0_2%,#8b633d_15%,transparent_62%)] opacity-90">
+                  <span className="mb-8 text-6xl drop-shadow-2xl">🐾</span>
+                </div>
+                <h2 className="text-2xl font-semibold">Your pet takes shape here</h2>
+                <p className="mt-2 text-sm opacity-60">Reference sand gathers into an untextured base mesh. Texture and Animate unlock only after the mesh is complete.</p>
+              </div>
+            </div>
+            <PrintGallery />
           </section>
 
           <aside className="h-fit space-y-4 rounded-3xl border border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
-            <h2 className="font-semibold">Price by approval</h2>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">Build summary</p>
+              <h2 className="mt-1 text-xl font-semibold">Ready for your shelf</h2>
+            </div>
             <PriceRow label="Blank base mesh" value={product.prices.base} />
             <PriceRow label="Texture" value={includeTexture ? product.prices.texture : 0} muted={!includeTexture} />
             <PriceRow label="Rig" value={includeRig ? product.prices.rig : 0} muted={!includeRig} />
@@ -433,9 +541,10 @@ export default function PetModelStudio() {
               <PriceRow label="Maximum total" value={total} strong />
             </div>
             <p className="text-xs opacity-60">Creating the order is free. The base charge happens only when you approve your reference set.</p>
-            <button onClick={start} disabled={busy} className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50">
-              {busy ? "Creating…" : "Start gated build"}
-            </button>
+            <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs">
+              <strong className="block text-sm">Simple print checkout</strong>
+              Approve model → choose {printHeight} mm size → enter shipping → secure card checkout → Slant 3D prints and ships.
+            </div>
             <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs">
               Facial blendshape rigging is not for sale. It returns only after at least {Math.round(product.facialRig.minimumSuccessRate * 100)}% measured reliability.
             </div>
@@ -717,6 +826,36 @@ function PriceRow({ label, value, muted, strong }: { label: string; value: numbe
     <div className={`flex items-center justify-between text-sm ${muted ? "opacity-40" : ""} ${strong ? "font-semibold" : ""}`}>
       <span>{label}</span>
       <span>{value} PupCoins</span>
+    </div>
+  );
+}
+
+const PRINT_EXAMPLES = [
+  { src: "/model-lab/3dashephardmod.png", alt: "Australian Shepherd collectible on an engraved base" },
+  { src: "/model-lab/3dbetsy.png", alt: "Dalmatian puppy print on a Betsy name base" },
+  { src: "/model-lab/3dbodhi.png", alt: "Small fluffy dog print on an engraved base" },
+  { src: "/model-lab/3dgermanshepmod.png", alt: "German Shepherd figurine on a Fido name base" },
+  { src: "/model-lab/3dgoldenmod.png", alt: "Golden doodle figurine on a Reggie name base" },
+] as const;
+
+function PrintGallery() {
+  return (
+    <div className="border-t border-white/10 bg-black/25 p-4">
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-amber-200">Made physical</p>
+          <h3 className="text-lg font-semibold">Personalized 3D printed keepsakes</h3>
+        </div>
+        <span className="text-xs opacity-55">Printed examples</span>
+      </div>
+      <div className="grid grid-cols-5 gap-2">
+        {PRINT_EXAMPLES.map((example) => (
+          <figure key={example.src} className="group aspect-square overflow-hidden rounded-xl border border-white/10 bg-white/5">
+            <img src={example.src} alt={example.alt} loading="lazy"
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+          </figure>
+        ))}
+      </div>
     </div>
   );
 }
