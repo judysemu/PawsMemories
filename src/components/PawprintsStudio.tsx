@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ChevronLeft, Download, ImagePlus, LayoutGrid, Loader2, Printer, Sparkles, Type, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronLeft, Download, ImagePlus, LayoutGrid, Loader2, PawPrint, Printer, Sparkles, Type, X } from "lucide-react";
 import type { Creation, PublicUser, UserProfile } from "../types";
 import { authedFetch } from "../api";
 import { CREDIT_PRICES } from "../pricing";
@@ -70,6 +70,28 @@ interface ShippingForm {
 
 const PRINT_WIDTH = 2400;
 const PRINT_HEIGHT = 3000;
+const CANVAS_ASPECT = PRINT_WIDTH / PRINT_HEIGHT;
+
+// "Small box" (title) and "large box" (message) character limits for the
+// digital template text feature — keeps copy from overflowing the fitted
+// text block at small render scales.
+const TITLE_MAX_LENGTH = 60;
+const MESSAGE_MAX_LENGTH = 220;
+
+/**
+ * Every Pawprint template renders onto the same fixed 4:5 canvas
+ * (PRINT_WIDTH x PRINT_HEIGHT). A Printful product only reproduces that
+ * design correctly if its own print-file aspect ratio is close to 4:5 —
+ * a mismatched size crops or letterboxes the art. This is the "digital
+ * template matches the product variant" check for the Digital + Printed
+ * flow: only orderable products within tolerance of the canvas aspect are
+ * offered, instead of every configured Printful variant regardless of fit.
+ */
+function matchesCanvasAspect(product: PawprintPrintProduct): boolean {
+  if (!product.widthIn || !product.heightIn) return false;
+  const productAspect = product.widthIn / product.heightIn;
+  return Math.abs(productAspect - CANVAS_ASPECT) < 0.03;
+}
 
 const VARIATIONS: Array<{ id: Variation; label: string }> = [
   { id: "classic", label: "Classic" },
@@ -397,6 +419,8 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   const [category, setCategory] = useState("");
   const [template, setTemplate] = useState<PawprintTemplate | null>(null);
   const [photos, setPhotos] = useState<StudioPhoto[]>([]);
+  const [photosConfirmed, setPhotosConfirmed] = useState(false);
+  const [intent, setIntent] = useState<"" | "digital" | "digital-printed">("");
   const [title, setTitle] = useState("A little love, saved forever");
   const [message, setMessage] = useState("Every day is better with paws beside us.");
   const [variation, setVariation] = useState<Variation>("classic");
@@ -434,13 +458,23 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     fetch("/api/pawprints/print-products").then((response) => response.json()).then((data) => {
       const products = Array.isArray(data.products) ? data.products : [];
       setPrintProducts(products);
-      setPrintProductCode((current) => current || products[0]?.code || "");
+      const firstPrintable = products.find((item: PawprintPrintProduct) => item.orderable === true && matchesCanvasAspect(item));
+      setPrintProductCode((current) => current || firstPrintable?.code || products[0]?.code || "");
       setPrintOrderMode(data.orderMode === "payment" ? "payment" : "draft");
       setPrintAvailable(data.available === true);
     }).catch(() => { setPrintProducts([]); setPrintAvailable(false); });
   }, []);
 
   const categoryTemplates = useMemo(() => templates.filter((item) => item.category === category), [templates, category]);
+
+  // Products actually usable for the Digital + Printed flow: server-owned
+  // (orderable) AND close enough in aspect to the fixed Pawprint canvas that
+  // the printed copy matches the digital design instead of cropping it.
+  const printableProducts = useMemo(
+    () => printProducts.filter((item) => item.orderable === true && matchesCanvasAspect(item)),
+    [printProducts],
+  );
+  const digitalPrintedAvailable = printAvailable && printableProducts.length > 0;
 
   const chooseTemplate = (item: PawprintTemplate) => {
     setTemplate(item);
@@ -533,17 +567,70 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     }
   };
 
-  const selectedPrintProduct = printProducts.find((item) => item.code === printProductCode);
+  const selectedPrintProduct = printableProducts.find((item) => item.code === printProductCode);
 
-  if (!category) return (
-    <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8">
+  // Step 1: photo first. Everything downstream (occasion, layout, print
+  // format) is chosen around the photo, not the other way around.
+  if (!photosConfirmed) return (
+    <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
       {!userProfile.email && (
         <section className="mb-12 overflow-hidden rounded-3xl bg-primary/5 p-8 text-center sm:p-16">
           <h1 className="text-4xl font-black text-on-surface">Personalized Pawprints Pet Art</h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-on-surface-variant">Create digital and printable pet keepsakes with your photos, message, and chosen occasion. Sign in to save and print your designs.</p>
         </section>
       )}
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">What are you creating?</h1><p className="mt-2 text-on-surface-variant">Choose an occasion, then add your own photo and exact words.</p></div>
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">Add your photo</h1><p className="mt-2 text-on-surface-variant">Upload or choose the photo you want to feature. You can add a few more once you're in the editor.</p></div>
+      <button type="button" onClick={() => photoInput.current?.click()} className="min-h-64 w-full overflow-hidden rounded-3xl border-2 border-dashed border-outline-variant bg-surface-container-low transition hover:border-primary">
+        <span className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
+          <ImagePlus size={40} className="text-primary" />
+          <strong className="text-lg">Upload or choose a photo</strong>
+          <small className="text-on-surface-variant">PNG, JPEG, or WebP · up to 20 MB each · minimum 600 × 600</small>
+        </span>
+      </button>
+      <input ref={photoInput} type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void choosePhotos(files); event.target.value = ""; }} />
+      {photos.length > 0 && (
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {photos.map((photo) => (
+            <div key={photo.id} className="group relative aspect-square overflow-hidden rounded-xl border border-outline-variant">
+              <img src={photo.dataUrl} alt={photo.name} className="h-full w-full object-cover" />
+              <button type="button" onClick={() => setPhotos((current) => current.filter((item) => item.id !== photo.id))} aria-label={`Remove ${photo.name}`} className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <p className="mt-4 rounded-xl bg-error/10 p-3 text-sm font-bold text-error">{error}</p>}
+      <button type="button" onClick={() => setPhotosConfirmed(true)} disabled={photos.length === 0} className="mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-6 font-black text-on-primary disabled:opacity-40 sm:w-auto">
+        Continue <ArrowRight size={18} />
+      </button>
+    </main>
+  );
+
+  // Step 2: two stylized paw buttons — digital-only, or digital + printed.
+  // The printed option is only offered when a real, orderable Printful
+  // product exists that matches the Pawprint's fixed canvas aspect ratio.
+  if (!intent) return (
+    <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
+      <button onClick={() => setPhotosConfirmed(false)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Photo</button>
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">How do you want your Pawprint?</h1><p className="mt-2 text-on-surface-variant">Choose a digital-only keepsake, or add a physical print shipped to your door.</p></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <button type="button" onClick={() => setIntent("digital")} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition hover:-translate-y-1 hover:border-primary/60">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><PawPrint size={30} /></span>
+          <strong className="mt-4 block text-xl font-black">Digital Only</strong>
+          <span className="mt-1 block text-sm text-on-surface-variant">Save, download, and email a finished Pawprint. No shipping.</span>
+        </button>
+        <button type="button" onClick={() => { if (digitalPrintedAvailable) setIntent("digital-printed"); }} disabled={!digitalPrintedAvailable} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition enabled:hover:-translate-y-1 enabled:hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><PawPrint size={30} /></span>
+          <strong className="mt-4 block text-xl font-black">Digital + Printed</strong>
+          <span className="mt-1 block text-sm text-on-surface-variant">{digitalPrintedAvailable ? "Get the digital file plus a physical print shipped to your door." : "Physical printing isn't set up for this design's size yet — digital only for now."}</span>
+        </button>
+      </div>
+    </main>
+  );
+
+  if (!category) return (
+    <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8">
+      <button onClick={() => setIntent("")} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Digital or Printed</button>
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">What are you creating?</h1><p className="mt-2 text-on-surface-variant">Choose an occasion, then add your exact words.</p></div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {categories.map((item) => { const meta = CATEGORY_META[item]; return <button key={item} onClick={() => setCategory(item)} className="relative aspect-[4/5] overflow-hidden rounded-3xl border border-outline-variant/40 p-4 text-left transition hover:-translate-y-1 hover:border-primary/50" style={{ background: meta?.colors[0] }}><span className="text-6xl opacity-70">{meta?.symbol || "🐾"}</span><span className="absolute inset-x-4 bottom-4 text-base font-black" style={{ color: meta?.colors[2] }}>{meta?.label || item}</span></button>; })}
       </div>
@@ -568,7 +655,7 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
         <section className="rounded-3xl bg-surface-container-low p-3 sm:p-6"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-black">Choose a variation</h2><p className="text-xs text-on-surface-variant">Your photos and words stay the same.</p></div><span className="rounded-full bg-surface px-3 py-1 text-xs font-black">{VARIATIONS.length} options</span></div><div className="grid grid-cols-2 gap-2 sm:gap-4">{VARIATIONS.map((item) => <VariationPreview key={item.id} variation={item.id} selected={variation === item.id} photos={photos} title={title || "Your title"} message={message || "Your message"} category={category} onSelect={() => setVariation(item.id)} />)}</div></section>
         <aside className="space-y-4">
           <section className="rounded-3xl border border-outline-variant/30 bg-surface p-5"><div className="mb-3 flex items-center gap-2"><ImagePlus size={18} className="text-primary" /><h2 className="font-black">Photos</h2><span className="ml-auto text-xs font-black text-primary">{photos.length}/{MAX_PAWPRINT_PHOTOS}</span></div><button type="button" onClick={() => photoInput.current?.click()} className="min-h-40 w-full overflow-hidden rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-low transition hover:border-primary"><span className="flex min-h-40 flex-col items-center justify-center gap-2 p-6 text-center"><ImagePlus size={30} className="text-primary" /><strong>Add photos</strong><small className="text-on-surface-variant">Multiple PNG, JPEG, or WebP files · up to 20 MB each<br />Minimum 600 × 600 · large images optimize automatically</small></span></button><input ref={photoInput} type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void choosePhotos(files); event.target.value = ""; }} />{photos.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">{photos.map((photo, index) => <div key={photo.id} className="group relative aspect-square overflow-hidden rounded-xl border border-outline-variant"><img src={photo.dataUrl} alt={photo.name} className="h-full w-full object-cover" /><button type="button" onClick={() => setPhotos((current) => current.filter((item) => item.id !== photo.id))} aria-label={`Remove ${photo.name}`} className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X size={14} /></button><div className="absolute inset-x-1 bottom-1 flex justify-between"><button type="button" disabled={index === 0} onClick={() => movePhoto(index, -1)} aria-label={`Move ${photo.name} earlier`} className="grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white disabled:opacity-30"><ArrowLeft size={13} /></button><button type="button" disabled={index === photos.length - 1} onClick={() => movePhoto(index, 1)} aria-label={`Move ${photo.name} later`} className="grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white disabled:opacity-30"><ArrowRight size={13} /></button></div></div>)}</div>}</section>
-          <section className="rounded-3xl border border-outline-variant/30 bg-surface p-5"><div className="mb-3 flex items-center gap-2"><Type size={18} className="text-primary" /><h2 className="font-black">Your words</h2></div><label className="text-xs font-bold text-on-surface-variant">Title</label><input id="pawprint-text" value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} className="mt-1 min-h-12 w-full rounded-xl border border-outline-variant bg-surface-container px-3" /><label className="mt-4 block text-xs font-bold text-on-surface-variant">Message</label><textarea value={message} maxLength={300} rows={4} onChange={(event) => setMessage(event.target.value)} className="mt-1 w-full resize-none rounded-xl border border-outline-variant bg-surface-container p-3" /><p className="mt-1 text-right text-[10px] text-on-surface-variant">{message.length}/300</p></section>
+          <section className="rounded-3xl border border-outline-variant/30 bg-surface p-5"><div className="mb-3 flex items-center gap-2"><Type size={18} className="text-primary" /><h2 className="font-black">Your words</h2></div><label className="text-xs font-bold text-on-surface-variant">Title</label><input id="pawprint-text" value={title} maxLength={TITLE_MAX_LENGTH} onChange={(event) => setTitle(event.target.value)} className="mt-1 min-h-12 w-full rounded-xl border border-outline-variant bg-surface-container px-3" /><p className="mt-1 text-right text-[10px] text-on-surface-variant">{title.length}/{TITLE_MAX_LENGTH}</p><label className="mt-2 block text-xs font-bold text-on-surface-variant">Message</label><textarea value={message} maxLength={MESSAGE_MAX_LENGTH} rows={4} onChange={(event) => setMessage(event.target.value)} className="mt-1 w-full resize-none rounded-xl border border-outline-variant bg-surface-container p-3" /><p className="mt-1 text-right text-[10px] text-on-surface-variant">{message.length}/{MESSAGE_MAX_LENGTH}</p></section>
           {error && <p className="rounded-xl bg-error/10 p-3 text-sm font-bold text-error">{error}</p>}
           {resultUrl && <>
             <a href={resultUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-primary font-black text-primary"><Download size={17} /> Open finished Pawprint</a>
@@ -577,32 +664,32 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
               <div className="mt-2 flex gap-2"><input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} placeholder="friend@example.com" className="min-h-11 min-w-0 flex-1 rounded-xl border border-outline-variant bg-surface px-3 text-sm" /><button type="button" disabled={sending || !savedCreationId || !recipientEmail.trim()} onClick={async () => { setSending(true); setError(""); try { const response = await authedFetch("/api/pawprints/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creationId: savedCreationId, email: recipientEmail }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send the Pawprint."); setRecipientEmail(""); } catch (caught: any) { setError(caught.message || "Could not send the Pawprint."); } finally { setSending(false); } }} className="min-h-11 rounded-xl bg-primary px-4 text-xs font-black text-on-primary disabled:opacity-40">{sending ? "Sending…" : "Send"}</button></div>
               <p className="mt-2 text-[10px] text-on-surface-variant">The email includes the ${CREDIT_PRICES.PAWPRINT} PupCoins creation price.</p>
             </div>
-            {/* Rendered unconditionally. This block used to be hidden whenever
-                the product list was empty, so a deployment that had a valid
-                Printful key but no variant IDs configured showed the customer
-                no physical-print option at all — indistinguishable from the
-                feature not existing. The disabled state below is the correct
-                signal instead. */}
-            {<div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
+            {/* Only shown when the shopper chose "Digital + Printed" up front.
+                Print format options are pre-filtered to printableProducts —
+                orderable Printful variants whose aspect matches this Pawprint's
+                fixed canvas — so every option here is a digital template that
+                genuinely matches its printed product. */}
+            {intent === "digital-printed" && <div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
               <div className="flex items-center gap-2"><Printer size={17} className="text-primary" /><h2 className="text-sm font-black">Order a physical Pawprint</h2></div>
-              <label className="mt-3 block text-xs font-bold text-on-surface-variant">Print format</label>
-              <select value={printProductCode} onChange={(event) => setPrintProductCode(event.target.value)} disabled={!printAvailable} className="mt-1 min-h-11 w-full rounded-xl border border-outline-variant bg-surface px-3 text-sm disabled:opacity-50">
-                {printProducts.map((product) => <option key={product.code} value={product.code}>{product.label}{product.priceCents ? ` · $${(product.priceCents / 100).toFixed(2)}` : ""}</option>)}
-              </select>
-              {selectedPrintProduct && <p className="mt-1 text-[10px] text-on-surface-variant">{selectedPrintProduct.description} · {selectedPrintProduct.widthIn} × {selectedPrintProduct.heightIn} in · a separate 300-DPI print file will be prepared.</p>}
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <input aria-label="Shipping name" placeholder="Full name" value={shipping.name} onChange={(event) => setShipping((current) => ({ ...current, name: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping email" type="email" placeholder="Email" value={shipping.email} onChange={(event) => setShipping((current) => ({ ...current, email: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping address" placeholder="Street address" value={shipping.address1} onChange={(event) => setShipping((current) => ({ ...current, address1: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping city" placeholder="City" value={shipping.city} onChange={(event) => setShipping((current) => ({ ...current, city: event.target.value }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping state" placeholder="State" value={shipping.state_code} onChange={(event) => setShipping((current) => ({ ...current, state_code: event.target.value.toUpperCase() }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping postal code" placeholder="Postal code" value={shipping.zip} onChange={(event) => setShipping((current) => ({ ...current, zip: event.target.value }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                <input aria-label="Shipping country" placeholder="Country" maxLength={2} value={shipping.country_code} onChange={(event) => setShipping((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-              </div>
-              {!printAvailable && <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-bold text-amber-700">These are the formats we print. Physical Pawprint ordering is being switched on shortly — your finished digital Pawprint is ready to download and email right now.</p>}
-              <button type="button" onClick={() => void submitPrintOrder()} disabled={printBusy || !savedCreationId || !printAvailable} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-black text-on-primary disabled:cursor-not-allowed disabled:opacity-40">{printBusy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}{printBusy ? "Preparing print…" : !printAvailable ? "Printing unavailable" : printOrderMode === "payment" ? "Price & secure checkout" : "Create print order"}</button>
-              {printOrder && <p className="mt-2 rounded-xl bg-primary/10 p-3 text-xs font-bold text-primary">Printful order {printOrder.id || "created"} · {printOrder.status}. You can return to this order from your FurBin.</p>}
-              <p className="mt-2 text-[10px] text-on-surface-variant">The print file is prepared at 300 DPI. Printful receives a draft first; it enters production only after Stripe confirms your payment.</p>
+              {digitalPrintedAvailable ? <>
+                <label className="mt-3 block text-xs font-bold text-on-surface-variant">Print format</label>
+                <select value={printProductCode} onChange={(event) => setPrintProductCode(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-outline-variant bg-surface px-3 text-sm">
+                  {printableProducts.map((product) => <option key={product.code} value={product.code}>{product.label}{product.priceCents ? ` · $${(product.priceCents / 100).toFixed(2)}` : ""}</option>)}
+                </select>
+                {selectedPrintProduct && <p className="mt-1 text-[10px] text-on-surface-variant">{selectedPrintProduct.description} · {selectedPrintProduct.widthIn} × {selectedPrintProduct.heightIn} in · a separate 300-DPI print file will be prepared.</p>}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <input aria-label="Shipping name" placeholder="Full name" value={shipping.name} onChange={(event) => setShipping((current) => ({ ...current, name: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping email" type="email" placeholder="Email" value={shipping.email} onChange={(event) => setShipping((current) => ({ ...current, email: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping address" placeholder="Street address" value={shipping.address1} onChange={(event) => setShipping((current) => ({ ...current, address1: event.target.value }))} className="col-span-2 min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping city" placeholder="City" value={shipping.city} onChange={(event) => setShipping((current) => ({ ...current, city: event.target.value }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping state" placeholder="State" value={shipping.state_code} onChange={(event) => setShipping((current) => ({ ...current, state_code: event.target.value.toUpperCase() }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping postal code" placeholder="Postal code" value={shipping.zip} onChange={(event) => setShipping((current) => ({ ...current, zip: event.target.value }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                  <input aria-label="Shipping country" placeholder="Country" maxLength={2} value={shipping.country_code} onChange={(event) => setShipping((current) => ({ ...current, country_code: event.target.value.toUpperCase() }))} className="min-h-11 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
+                </div>
+                <button type="button" onClick={() => void submitPrintOrder()} disabled={printBusy || !savedCreationId} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-black text-on-primary disabled:cursor-not-allowed disabled:opacity-40">{printBusy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}{printBusy ? "Preparing print…" : printOrderMode === "payment" ? "Price & secure checkout" : "Create print order"}</button>
+                {printOrder && <p className="mt-2 rounded-xl bg-primary/10 p-3 text-xs font-bold text-primary">Printful order {printOrder.id || "created"} · {printOrder.status}. You can return to this order from your FurBin.</p>}
+                <p className="mt-2 text-[10px] text-on-surface-variant">The print file is prepared at 300 DPI. Printful receives a draft first; it enters production only after Stripe confirms your payment.</p>
+              </> : <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-bold text-amber-700">Physical Pawprint ordering just became unavailable for this format — your finished digital Pawprint is ready to download and email right now.</p>}
             </div>}
           </>}
           {!userProfile.email ? (

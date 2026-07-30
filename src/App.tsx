@@ -585,10 +585,7 @@ export default function App() {
             className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             aria-label="Pawsome3D home"
           >
-            <img src="/brand/pawsome-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
-            <span className="hidden text-base font-black tracking-tight text-on-surface sm:block">
-              Pawsome<span className="text-primary">3D</span>
-            </span>
+            <img src="/brand/pawsome-logo.png" alt="Pawsome3D" className="h-9 w-9 shrink-0 rounded-lg object-contain" />
           </button>
 
           {isAuthed && (

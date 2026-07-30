@@ -88,6 +88,36 @@ different variant from a 12×16 matte poster.
 > The variant IDs above are placeholders. **Look yours up** — an incorrect
 > variant ID produces a real order for the wrong product at your expense.
 
+### "Store not found or not accessible by this user!"
+
+This is a `PRINTFUL_STORE_ID` mismatch, not a missing-header problem — do **not**
+just delete the variable to make the error go away.
+
+Printful tokens come in two shapes:
+
+- **Store-scoped token** (created against one specific store): `PRINTFUL_STORE_ID`
+  can be omitted entirely — the token already implies its store.
+- **Account-level / "All-Stores" token** (what you get from the All Stores API):
+  Printful's own docs are explicit that this token type *still* requires the
+  `X-PF-Store-Id` header on store-scoped endpoints like `/orders`. Removing
+  `PRINTFUL_STORE_ID` with this token type does not fix the error — it just
+  trades "store not found" for a different failure once an endpoint needs a
+  store context.
+
+So the fix is to find the *correct* ID, not remove it:
+
+```bash
+curl -H "Authorization: Bearer $PRINTFUL_API_KEY" https://api.printful.com/stores
+```
+
+This lists every store your token can see, each with its numeric `id`. Set
+`PRINTFUL_STORE_ID` to the `id` of the store you actually sell Pawprints
+through. A wrong/stale ID (leftover from a different account, a typo, or a
+store that was deleted/renamed) is the almost-always cause of this exact
+message — `server/printful.ts` and `server/printfulCatalog.ts` already send
+the header correctly whenever the variable is set, so this is a configuration
+fix on Hostinger, not a code change.
+
 Set it as a single-line environment variable in Hostinger (mind the quoting —
 the value contains double quotes, so wrap it in single quotes).
 
