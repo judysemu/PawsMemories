@@ -177,6 +177,18 @@ test("humanoid selection maps to a biped rig type without claiming embedded AI",
   assert.doesNotMatch(studio, /facialRig:\s*true/);
 });
 
+test("model studio accepts one source image and generates the approval views", () => {
+  const studio = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
+  const routes = fs.readFileSync("server/pet-generation/routes.ts", "utf8");
+  assert.match(studio, /createReferenceSession/);
+  assert.match(studio, /startReferenceAttempt/);
+  assert.match(studio, /One photo is enough; extra angles are optional/);
+  assert.match(studio, /Auto-approve the generated 360° views/);
+  assert.doesNotMatch(studio, /REFERENCE_FIELDS\.every/);
+  assert.match(routes, /requiredSourceUploads:\s*1/);
+  assert.match(routes, /generatedForApproval:\s*\["front", "left", "right", "rear", "three_quarter"\]/);
+});
+
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);

@@ -1,5 +1,10 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { authedFetch } from "../api";
+import {
+  approveReferenceManifest,
+  authedFetch,
+  createReferenceSession,
+  startReferenceAttempt,
+} from "../api";
 import PetModelViewer from "./PetModelViewer";
 
 type MeshProfile = "hd" | "smart_mesh";
@@ -21,7 +26,12 @@ interface Product {
     minimumSuccessRate: number;
     reason: string;
   };
-  referenceRequirements: { required: string[]; guidance: string[] };
+  referenceRequirements: {
+    requiredSourceUploads: number;
+    optionalSourceAngles: string[];
+    generatedForApproval: string[];
+    guidance: string[];
+  };
 }
 
 interface ValidationReport {
@@ -75,6 +85,11 @@ interface OrderView {
   facialRig: Product["facialRig"];
 }
 
+interface GeneratedReferenceView {
+  viewKind: "front" | "left" | "right" | "rear" | "front_three_quarter";
+  signedUrl: string;
+}
+
 const REFERENCE_FIELDS = [
   ["frontUrl", "Front"],
   ["leftUrl", "Left side"],
@@ -120,6 +135,7 @@ export default function PetModelStudio() {
   const [autoContinue, setAutoContinue] = useState(false);
   const [printHeight, setPrintHeight] = useState(100);
   const [references, setReferences] = useState<Record<string, string>>({});
+  const [referenceSession, setReferenceSession] = useState<{ sessionUuid: string; manifestHash: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -194,6 +210,33 @@ export default function PetModelStudio() {
 
   const start = async () => {
     try {
+      const sourceImage = references.frontUrl;
+      if (inputMode !== "text" && !sourceImage) {
+        throw new Error("Add one clear pet photo to generate the 360° views.");
+      }
+      const session = await createReferenceSession(
+        inputMode === "text" ? "text" : "photo",
+        inputMode === "text" ? selectedStyle : undefined,
+        subjectProfile,
+        sourceImage,
+      );
+      const generated = await startReferenceAttempt(session.sessionUuid, `views_${crypto.randomUUID()}`);
+      const generatedViews = (generated.session.views || []) as GeneratedReferenceView[];
+      const manifestHash = String(generated.session.manifestHash || "");
+      if (generatedViews.length !== 5 || !manifestHash) {
+        throw new Error("The image generator did not return a complete 360° view set.");
+      }
+      const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
+      const generatedManifest = {
+        frontUrl: byKind.get("front"),
+        leftUrl: byKind.get("left"),
+        rightUrl: byKind.get("right"),
+        rearUrl: byKind.get("rear"),
+        threeQuarterUrl: byKind.get("front_three_quarter"),
+      };
+      if (Object.values(generatedManifest).some((value) => !value)) {
+        throw new Error("The generated 360° view set is missing a required angle.");
+      }
       const created = await call("/api/pet-glb/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,16 +251,20 @@ export default function PetModelStudio() {
         }),
       }) as OrderView;
       applyView(created);
-      if (allReferencesReady) {
-        const withReferences = await call(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ references }),
-        }) as OrderView;
-        applyView(withReferences);
+      const withReferences = await call(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ references: generatedManifest }),
+      }) as OrderView;
+      setReferences(generatedManifest as Record<string, string>);
+      setReferenceSession({ sessionUuid: session.sessionUuid, manifestHash });
+      applyView(withReferences);
+      if (autoContinue) {
+        await approveReferenceManifest(session.sessionUuid, manifestHash);
+        await approveStage(withReferences);
       }
-    } catch {
-      // call() owns the customer-safe error.
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
     }
   };
 
@@ -226,7 +273,7 @@ export default function PetModelStudio() {
     files.forEach((file, index) => {
       const reader = new FileReader();
       reader.onload = () => {
-        const key = REFERENCE_FIELDS[index][0];
+        const key = index === 0 ? "frontUrl" : REFERENCE_FIELDS[index][0];
         setReferences((current) => ({ ...current, [key]: String(reader.result || "") }));
       };
       reader.readAsDataURL(file);
@@ -243,10 +290,10 @@ export default function PetModelStudio() {
     }).then(applyView).catch(() => {});
   };
 
-  const approve = () => {
-    const stage = view?.currentStage;
-    if (!view || !stage?.artifactSha256) return;
-    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/approve`, {
+  const approveStage = async (targetView: OrderView) => {
+    const stage = targetView.currentStage;
+    if (!stage?.artifactSha256) return;
+    const approved = await call(`/api/pet-glb/orders/${targetView.order.orderUuid}/stages/${stage.stage}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -256,7 +303,21 @@ export default function PetModelStudio() {
         assetVersionId: stage.assetVersionId,
         reportSha256: stage.validationReportSha256,
       }),
-    }).then(applyView).catch(() => {});
+    }) as OrderView;
+    applyView(approved);
+  };
+
+  const approve = async () => {
+    const stage = view?.currentStage;
+    if (!view || !stage?.artifactSha256) return;
+    try {
+      if (stage.stage === "reference" && referenceSession) {
+        await approveReferenceManifest(referenceSession.sessionUuid, referenceSession.manifestHash);
+      }
+      await approveStage(view);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not approve the generated views.");
+    }
   };
 
   const poll = () => {
@@ -342,7 +403,7 @@ export default function PetModelStudio() {
   if (!product) return <div className="p-6 text-sm text-red-500">{error}</div>;
 
   const stage = view?.currentStage;
-  const allReferencesReady = REFERENCE_FIELDS.every(([key]) => references[key]?.trim());
+  const primaryReferenceReady = Boolean(references.frontUrl?.trim());
   const validationPasses = stage?.validationReport?.operatorReady !== false;
   const canApprove = stage?.state === "awaiting_customer_approval"
     && Boolean(stage.artifactSha256)
@@ -414,8 +475,8 @@ export default function PetModelStudio() {
               <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-cyan-300/35 bg-cyan-300/5 px-3 py-5 text-center text-xs">
                 <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={loadReferenceFiles} />
                 <span>
-                  <strong className="block text-sm">Choose pet photos</strong>
-                  {inputMode === "multi" ? "Select front, left, back, right, and ¾ views" : "Add a clear photo to begin"}
+                  <strong className="block text-sm">Choose at least one pet photo</strong>
+                  {inputMode === "multi" ? "One photo is enough; extra angles are optional" : "One clear photo generates the complete view set"}
                 </span>
               </label>
               <div className="grid grid-cols-5 gap-1.5">
@@ -423,7 +484,7 @@ export default function PetModelStudio() {
                   <div key={key} className={`aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
                     {references[key]
                       ? <img src={references[key]} alt={`${label} upload`} className="h-full w-full object-cover" />
-                      : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-45">{label}</span>}
+                      : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-45">{key === "frontUrl" ? "Required" : `${label} optional`}</span>}
                   </div>
                 ))}
               </div>
@@ -470,7 +531,7 @@ export default function PetModelStudio() {
               </label>
               <label className="flex items-start gap-3 text-xs">
                 <input type="checkbox" checked={autoContinue} onChange={(event) => setAutoContinue(event.target.checked)} className="mt-0.5" />
-                <span>Auto-continue after my required 360° approval. Later paid stages still ask before charging.</span>
+                <span>Auto-approve the generated 360° views and begin the base mesh. Later paid stages still ask before charging.</span>
               </label>
               <p className="text-xs opacity-60">When complete, your private model appears in the Fur Bin.</p>
             </fieldset>
@@ -505,7 +566,7 @@ export default function PetModelStudio() {
                 </div>
               </fieldset>
             )}
-            <button onClick={start} disabled={busy || (inputMode !== "text" && !allReferencesReady)}
+            <button onClick={start} disabled={busy || (inputMode !== "text" ? !primaryReferenceReady : !selectedStyle.trim())}
               className="group relative w-full overflow-hidden rounded-2xl bg-cyan-400 px-4 py-3.5 font-bold text-slate-950 disabled:opacity-40">
               <span className="relative z-10">{busy ? "Gathering reference sand…" : "Generate base model"}</span>
               {busy && <span className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_80%,#f5d08a_0_2px,transparent_3px)] bg-[length:18px_18px]" />}
@@ -691,18 +752,18 @@ export default function PetModelStudio() {
 
             {view.order.state === "awaiting_references" && (
               <div className="space-y-3 rounded-3xl border border-white/15 bg-white/[0.07] p-4">
-                <h2 className="font-semibold">Add five reference images</h2>
-                <p className="text-xs opacity-60">Use secure HTTPS image links. You will see and approve every image before the base charge.</p>
+                <h2 className="font-semibold">Add one source image</h2>
+                <p className="text-xs opacity-60">One clear image is enough. Pawsome3D generates the complete multi-angle set for your approval.</p>
                 {REFERENCE_FIELDS.map(([key, label]) => (
                   <label key={key} className="block text-xs">
-                    <span className="mb-1 block opacity-75">{label}</span>
+                    <span className="mb-1 block opacity-75">{label}{key === "frontUrl" ? "" : " · optional"}</span>
                     <input type="url" value={references[key] || ""} onChange={(event) => setReferences((current) => ({ ...current, [key]: event.target.value }))}
                       className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2" placeholder="https://…" />
                   </label>
                 ))}
-                <button onClick={saveReferences} disabled={busy || !allReferencesReady}
+                <button onClick={saveReferences} disabled={busy || !primaryReferenceReady}
                   className="w-full rounded-2xl bg-cyan-500 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-40">
-                  Review these images
+                  Generate 360° views
                 </button>
               </div>
             )}
@@ -751,7 +812,7 @@ export default function PetModelStudio() {
                 {canApprove && (
                   <button onClick={approve} disabled={busy} className="w-full rounded-2xl bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-50">
                     {stage.stage === "reference"
-                      ? `Approve images & build base · ${view.quote.base} PupCoins`
+                      ? `Approve generated 360° views & build base · ${view.quote.base} PupCoins`
                       : stage.stage === "base" && view.order.includeTexture
                         ? `Approve base & add texture · ${view.quote.texture} PupCoins`
                         : stage.stage === "rig_check"
