@@ -57,6 +57,10 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "api.tripo3d.ai",
   "tripo-data.cdn.bcebos.com",
   "cdn.tripo3d.ai",
+  // Tripo's regional signed-download host observed in production output.
+  // Keep this exact: allowing the parent tripo3d.com domain would broaden the
+  // SSRF boundary to unrelated provider-controlled subdomains.
+  "tripo-data.rg1.data.tripo3d.com",
 ]);
 
 function isAllowedUrl(rawUrl: string): boolean {

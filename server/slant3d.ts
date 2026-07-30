@@ -62,9 +62,40 @@ async function request(path: string, init: RequestInit = {}): Promise<any> {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.success === false) {
-    throw new Error(payload?.message || payload?.error || `Slant 3D returned HTTP ${response.status}.`);
+    throw new Error(slantErrorMessage(payload, response.status));
   }
   return payload;
+}
+
+/**
+ * Slant sometimes returns structured error objects instead of strings. Reduce
+ * them to a useful, bounded message without logging the full provider payload.
+ */
+export function slantErrorMessage(payload: unknown, status: number): string {
+  const record = payload && typeof payload === "object"
+    ? payload as Record<string, unknown>
+    : {};
+  const candidates = [record.message, record.error, record.detail];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim().slice(0, 300);
+    }
+    if (candidate && typeof candidate === "object") {
+      const nested = candidate as Record<string, unknown>;
+      for (const value of [nested.message, nested.error, nested.detail]) {
+        if (typeof value === "string" && value.trim()) {
+          return value.trim().slice(0, 300);
+        }
+      }
+      const code = nested.code ?? nested.type;
+      if (typeof code === "string" || typeof code === "number") {
+        return `Slant 3D error ${String(code).slice(0, 80)} (HTTP ${status}).`;
+      }
+    }
+  }
+
+  return `Slant 3D returned HTTP ${status}.`;
 }
 
 export function slant3dConfigured(): boolean {

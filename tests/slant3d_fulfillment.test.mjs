@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { draftSlantOrder, submitSlantOrderIfDraft, uploadSlantFileFromUrl, verifySlant3dConfiguration } from "../server/slant3d.ts";
+import { draftSlantOrder, slantErrorMessage, submitSlantOrderIfDraft, uploadSlantFileFromUrl, verifySlant3dConfiguration } from "../server/slant3d.ts";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
@@ -103,4 +103,16 @@ test("Slant deployment verification is read-only and validates platform and fila
     filamentName: "PLA Matte Black",
   });
   assert.deepEqual(calls.map((call) => call.method), ["GET", "GET"]);
+});
+
+test("Slant structured provider errors become useful bounded messages", () => {
+  assert.equal(
+    slantErrorMessage({ message: { message: "Filament is unavailable" } }, 422),
+    "Filament is unavailable",
+  );
+  assert.equal(
+    slantErrorMessage({ error: { code: "INVALID_PLATFORM" } }, 400),
+    "Slant 3D error INVALID_PLATFORM (HTTP 400).",
+  );
+  assert.equal(slantErrorMessage({}, 503), "Slant 3D returned HTTP 503.");
 });

@@ -45,16 +45,32 @@ function normalizeProduct(value: unknown): PawprintPrintProduct | null {
 export function getPawprintPrintProducts(): PawprintPrintProduct[] {
   const configured = String(process.env.PAWPRINT_PRINT_PRODUCTS_JSON || "").trim();
   if (configured) {
-    try {
-      const parsed = JSON.parse(configured);
-      if (Array.isArray(parsed)) {
-        const products = parsed.map(normalizeProduct).filter((item): item is PawprintPrintProduct => Boolean(item));
-        const unique = new Map(products.map((item) => [item.code, item]));
-        if (unique.size) return [...unique.values()];
+    const candidates = [configured];
+    // hPanel can preserve shell-style escaping literally, producing
+    // [\{\"code\":...}] at runtime. Retry only this narrow brace/quote
+    // normalization after strict JSON parsing fails.
+    const hpanelNormalized = configured.replace(/\\([{}"])/g, "$1");
+    if (hpanelNormalized !== configured) candidates.push(hpanelNormalized);
+
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) {
+          const products = parsed.map(normalizeProduct).filter((item): item is PawprintPrintProduct => Boolean(item));
+          const unique = new Map(products.map((item) => [item.code, item]));
+          if (unique.size) {
+            if (candidate !== configured) {
+              console.warn("Normalized Hostinger escaping in PAWPRINT_PRINT_PRODUCTS_JSON.");
+            }
+            return [...unique.values()];
+          }
+        }
+      } catch (error) {
+        lastError = error;
       }
-    } catch (error) {
-      console.error("Invalid PAWPRINT_PRINT_PRODUCTS_JSON:", error);
     }
+    console.error("Invalid PAWPRINT_PRINT_PRODUCTS_JSON:", lastError || "No valid product rows.");
   }
 
   const legacy = normalizeProduct({
