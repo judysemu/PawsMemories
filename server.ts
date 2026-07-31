@@ -31,6 +31,7 @@ import { semanticScan as runSemanticScan } from "./server/semanticScan";
 import { animatorRouter } from "./server/animator/routes.ts";
 import { assetsRouter } from "./server/assets/routes";
 import { referenceSessionsRouter } from "./server/reference-sessions/routes";
+import { generateSignedUrlForVersion } from "./server/assets/access";
 import { modelBuildsRouter, modelBuildService } from "./server/model-builds/routes";
 import { spatialGeneratorRouter } from "./server/spatial-generator/routes";
 import { createPetGenerationRouter, createPetGlbWebhookHandler } from "./server/pet-generation/routes";
@@ -6010,8 +6011,43 @@ async function startServer() {
          WHERE a.user_phone = ? AND (a.model_url IS NOT NULL OR a.rigged_model_url IS NOT NULL)`,
         [phone]
       ) as any;
+      const [petGlbRows] = await getPool().query(
+        `SELECT p.id, 'pet_glb_order' AS source_type,
+                CONCAT('Custom ', COALESCE(p.subject_profile, 'pet'), ' model') AS name,
+                NULL AS breed, NULL AS image_url, NULL AS rigged_model_url,
+                NULL AS model_url, p.created_at, p.state AS status,
+                a.asset_uuid AS canonical_asset_uuid,
+                a.id AS asset_id, av.id AS version_id, a.owner_id, a.asset_type, a.visibility, a.status AS asset_status,
+                av.version_number, av.sha256, av.mime_type, av.size_bytes, av.bucket, av.object_key,
+                av.metadata, av.source_provider, av.license, av.commercial_use_eligible
+         FROM pet_glb_orders p
+         INNER JOIN assets a ON a.id = p.asset_id
+         INNER JOIN asset_versions av ON av.id = p.approved_version_id
+         WHERE p.owner_phone = ? AND p.approved_version_id IS NOT NULL
+           AND p.state IN ('approved', 'delivered')`,
+        [phone],
+      ) as any;
+      const petModels = await Promise.all((petGlbRows || []).map(async (row: any) => {
+        try {
+          return {
+            ...row,
+            model_url: await generateSignedUrlForVersion({
+              id: Number(row.asset_id), asset_uuid: row.canonical_asset_uuid, owner_id: row.owner_id,
+              asset_type: row.asset_type, visibility: row.visibility, status: row.asset_status,
+              current_version_id: Number(row.version_id), created_at: new Date(), updated_at: new Date(),
+            }, {
+              id: Number(row.version_id), asset_id: Number(row.asset_id), version_number: Number(row.version_number),
+              sha256: row.sha256, mime_type: row.mime_type, size_bytes: Number(row.size_bytes), bucket: row.bucket,
+              object_key: row.object_key, metadata: row.metadata, source_provider: row.source_provider,
+              license: row.license, commercial_use_eligible: Boolean(row.commercial_use_eligible), created_at: new Date(),
+            }, phone),
+          };
+        } catch {
+          return null;
+        }
+      }));
       const seen = new Set<string>();
-      const models = [...creationRows, ...avatarRows]
+      const models = [...creationRows, ...avatarRows, ...petModels.filter(Boolean)]
         .filter((item: any) => {
           const url = item.rigged_model_url || item.model_url;
           if (!url || seen.has(url)) return false;
@@ -6027,7 +6063,7 @@ async function startServer() {
   });
 
   const PrintPrepareSchema = z.object({
-    sourceType: z.enum(["creation", "avatar"]),
+    sourceType: z.enum(["creation", "avatar", "pet_glb_order"]),
     sourceId: z.number().int().positive(),
     targetHeightMm: z.number().min(25).max(300),
     recipient: z.object({
@@ -6074,14 +6110,42 @@ async function startServer() {
         await getPool().query(`UPDATE print_orders SET checkout_url = ?, stripe_session_id = ?, status = 'awaiting_payment' WHERE id = ?`, [resumed.url, resumed.id, existing.id]);
         return res.json({ success: true, idempotent: true, order: existing, checkoutUrl: resumed.url });
       }
-      const table = input.sourceType === "creation" ? "creations" : "avatars";
-      const [rows] = await getPool().query(
-        `SELECT id, model_url${input.sourceType === "avatar" ? ", rigged_model_url" : ""}
-         FROM ${table} WHERE id = ? AND user_phone = ? LIMIT 1`,
-        [input.sourceId, phone]
-      ) as any;
-      const source = rows?.[0];
-      const modelUrl = source?.rigged_model_url || source?.model_url;
+      let modelUrl: string | null = null;
+      if (input.sourceType === "pet_glb_order") {
+        const [rows] = await getPool().query(
+          `SELECT p.id, p.approved_version_id, a.id AS asset_id, a.asset_uuid, a.owner_id,
+                  a.asset_type, a.visibility, a.status AS asset_status, av.version_number,
+                  av.sha256, av.mime_type, av.size_bytes, av.bucket, av.object_key, av.metadata,
+                  av.source_provider, av.license, av.commercial_use_eligible
+           FROM pet_glb_orders p
+           INNER JOIN assets a ON a.id = p.asset_id
+           INNER JOIN asset_versions av ON av.id = p.approved_version_id
+           WHERE p.id = ? AND p.owner_phone = ? AND p.state IN ('approved', 'delivered') LIMIT 1`,
+          [input.sourceId, phone],
+        ) as any;
+        const source = rows?.[0];
+        if (source) {
+          modelUrl = await generateSignedUrlForVersion({
+            id: Number(source.asset_id), asset_uuid: source.asset_uuid, owner_id: source.owner_id,
+            asset_type: source.asset_type, visibility: source.visibility, status: source.asset_status,
+            current_version_id: Number(source.approved_version_id), created_at: new Date(), updated_at: new Date(),
+          }, {
+            id: Number(source.approved_version_id), asset_id: Number(source.asset_id), version_number: Number(source.version_number),
+            sha256: source.sha256, mime_type: source.mime_type, size_bytes: Number(source.size_bytes), bucket: source.bucket,
+            object_key: source.object_key, metadata: source.metadata, source_provider: source.source_provider,
+            license: source.license, commercial_use_eligible: Boolean(source.commercial_use_eligible), created_at: new Date(),
+          }, phone);
+        }
+      } else {
+        const table = input.sourceType === "creation" ? "creations" : "avatars";
+        const [rows] = await getPool().query(
+          `SELECT id, model_url${input.sourceType === "avatar" ? ", rigged_model_url" : ""}
+           FROM ${table} WHERE id = ? AND user_phone = ? LIMIT 1`,
+          [input.sourceId, phone]
+        ) as any;
+        const source = rows?.[0];
+        modelUrl = source?.rigged_model_url || source?.model_url || null;
+      }
       if (!modelUrl) return res.status(404).json({ success: false, error: "That model is not ready or does not belong to you." });
 
       const workerUrl = String(process.env.BLENDER_WORKER_URL || "").replace(/\/render$/, "").replace(/\/$/, "");

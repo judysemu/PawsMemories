@@ -385,7 +385,7 @@ export async function fetchCreations(): Promise<Creation[]> {
 
 export interface ModelLibraryItem {
   id: number;
-  source_type: "creation" | "avatar" | "marketplace_listing";
+  source_type: "creation" | "avatar" | "pet_glb_order" | "marketplace_listing";
   listing_uuid?: string;
   name: string | null;
   breed: string | null;
@@ -422,7 +422,7 @@ export async function fetchFulfillmentReadiness(): Promise<FulfillmentReadiness>
 }
 
 export async function createSlant3dCheckout(input: {
-  sourceType: "creation" | "avatar";
+  sourceType: "creation" | "avatar" | "pet_glb_order";
   sourceId: number;
   targetHeightMm: number;
   recipient: {

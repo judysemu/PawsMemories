@@ -191,7 +191,7 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
     setError("");
     try {
       const result = await createSlant3dCheckout({
-        sourceType: selectedModel.source_type as "creation" | "avatar",
+        sourceType: selectedModel.source_type as "creation" | "avatar" | "pet_glb_order",
         sourceId: selectedModel.id,
         targetHeightMm,
         recipient: {
