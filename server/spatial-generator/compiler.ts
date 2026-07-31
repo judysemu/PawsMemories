@@ -50,6 +50,9 @@ export function compileBlenderProgram(
 
   // Build primitives from math output (authoritative)
   const primitives = buildPrimitives(plan, math);
+  if (!primitives.some((primitive) => primitive.role === "additive")) {
+    throw new Error("Spatial plan must contain at least one additive primitive");
+  }
 
   // Generate deterministic program
   const program = generateBlenderPython(primitives, plan, targetUse);
@@ -176,7 +179,7 @@ function generateBlenderPython(
   lines.push("# PawsMemories Spatial Generator — Deterministic Blender Build");
   lines.push(`# Plan: ${plan.planHash}`);
   lines.push(`# Target: ${targetUse}`);
-  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push("# Compiler: pawsome-spatial-v1");
   lines.push("# ============================================================");
   lines.push("");
   lines.push("import bpy");
@@ -230,9 +233,13 @@ function generateBlenderPython(
     lines.push(`bpy.ops.mesh.primitive_${primitiveToBlenderOp(prim.type)}(${primitiveArgs(prim)})`);
     lines.push(`obj = bpy.context.active_object`);
     lines.push(`obj.name = "${objName}"`);
+    lines.push(`obj.dimensions = (${formatVec3Mm(prim.dimensions)})`);
+    lines.push(`bpy.context.view_layer.objects.active = obj`);
+    lines.push(`obj.select_set(True)`);
+    lines.push(`bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)`);
+    lines.push(`obj.select_set(False)`);
     lines.push(`obj.location = (${formatVec3Mm(prim.position)})`);
     lines.push(`obj.rotation_euler = (${formatVec3Deg(prim.rotation)})`);
-    lines.push(`obj.scale = (1.0, 1.0, 1.0)`);
 
     // Apply symmetry
     if (prim.symmetryAxis) {
@@ -277,38 +284,30 @@ function generateBlenderPython(
   const additive = primitives.filter(p => p.role === "additive");
   const subtractive = primitives.filter(p => p.role === "subtractive");
 
-  if (subtractive.length > 0) {
-    lines.push("# Start with first additive primitive as base");
-    if (additive.length > 0) {
-      const base = additive[0];
-      lines.push(`base = bpy.data.objects["Spatial_${base.id}"]`);
-      for (let i = 1; i < additive.length; i++) {
-        const add = additive[i];
-        lines.push(`add = bpy.data.objects["Spatial_${add.id}"]`);
-        lines.push(`mod = base.modifiers.new(name="Bool_Union_${add.id}", type='BOOLEAN')`);
-        lines.push(`mod.operation = 'UNION'`);
-        lines.push(`mod.object = add`);
-      }
-      for (const sub of subtractive) {
-        lines.push(`sub = bpy.data.objects["Spatial_${sub.id}"]`);
-        lines.push(`mod = base.modifiers.new(name="Bool_Diff_${sub.id}", type='BOOLEAN')`);
-        lines.push(`mod.operation = 'DIFFERENCE'`);
-        lines.push(`mod.object = sub`);
-      }
-      lines.push(`bpy.context.view_layer.objects.active = base`);
-      for (let i = 0; i < additive.length + subtractive.length; i++) {
-        lines.push(`bpy.ops.object.modifier_apply(modifier=base.modifiers[0].name)`);
-      }
-      lines.push(`result = base`);
-      lines.push(`result.name = "Spatial_Result"`);
-    }
-  } else {
-    // No boolean operations, just use the first (or only) additive
-    if (additive.length === 1) {
-      lines.push(`result = bpy.data.objects["Spatial_${additive[0].id}"]`);
-      lines.push(`result.name = "Spatial_Result"`);
-    }
+  lines.push("# Start with first additive primitive as base");
+  const base = additive[0];
+  lines.push(`base = bpy.data.objects["Spatial_${base.id}"]`);
+  for (let i = 1; i < additive.length; i++) {
+    const add = additive[i];
+    lines.push(`add = bpy.data.objects["Spatial_${add.id}"]`);
+    lines.push(`mod = base.modifiers.new(name="Bool_Union_${add.id}", type='BOOLEAN')`);
+    lines.push(`mod.operation = 'UNION'`);
+    lines.push(`mod.solver = 'EXACT'`);
+    lines.push(`mod.object = add`);
+    lines.push(`bpy.context.view_layer.objects.active = base`);
+    lines.push(`bpy.ops.object.modifier_apply(modifier=mod.name)`);
   }
+  for (const sub of subtractive) {
+    lines.push(`sub = bpy.data.objects["Spatial_${sub.id}"]`);
+    lines.push(`mod = base.modifiers.new(name="Bool_Diff_${sub.id}", type='BOOLEAN')`);
+    lines.push(`mod.operation = 'DIFFERENCE'`);
+    lines.push(`mod.solver = 'EXACT'`);
+    lines.push(`mod.object = sub`);
+    lines.push(`bpy.context.view_layer.objects.active = base`);
+    lines.push(`bpy.ops.object.modifier_apply(modifier=mod.name)`);
+  }
+  lines.push(`result = base`);
+  lines.push(`result.name = "Spatial_Result"`);
 
   // Clean up helper objects
   lines.push("");
@@ -324,8 +323,11 @@ function generateBlenderPython(
   lines.push(`result.select_set(True)`);
   lines.push(`bpy.context.view_layer.objects.active = result`);
   lines.push(`bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)`);
-  lines.push(`print("SPATIAL_BOUNDS_MIN:", [round(v*1000, 3) for v in result.bound_box[0]])`);
-  lines.push(`print("SPATIAL_BOUNDS_MAX:", [round(v*1000, 3) for v in result.bound_box[6]])`);
+  lines.push(`world_corners = [result.matrix_world @ mathutils.Vector(corner) for corner in result.bound_box]`);
+  lines.push(`bounds_min = [min(corner[i] for corner in world_corners) for i in range(3)]`);
+  lines.push(`bounds_max = [max(corner[i] for corner in world_corners) for i in range(3)]`);
+  lines.push(`print("SPATIAL_BOUNDS_MIN:", [round(v*1000, 3) for v in bounds_min])`);
+  lines.push(`print("SPATIAL_BOUNDS_MAX:", [round(v*1000, 3) for v in bounds_max])`);
   lines.push(`print("SPATIAL_VERTEX_COUNT:", len(result.data.vertices))`);
   lines.push(`print("SPATIAL_FACE_COUNT:", len(result.data.polygons))`);
 

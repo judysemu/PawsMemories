@@ -438,7 +438,12 @@ export class PetGlbService {
           error instanceof PetGenerationError ? error.code : "PROVIDER_START_FAILED",
         );
       }
-      throw error;
+      throw error instanceof PetGenerationError
+        ? error
+        : new PetGenerationError(
+            "PROVIDER_START_FAILED",
+            "The model provider rejected the approved references. The base-stage PupCoins were refunded.",
+          );
     }
   }
 

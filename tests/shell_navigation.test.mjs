@@ -13,12 +13,12 @@ test("top panel exposes Create, Voice Test, Pawprints, and the staged 3D Model s
 });
 
 test("desktop sidebar keeps creation studios out of the global shell", () => {
-  // WAGS_INBOX is a content destination (like Fur Bin), not a creation studio —
-  // it belongs in the shell. Studios (MODELS/PAWLISHER) stay excluded below.
+  // Pawprints is intentionally available here as the requested left-panel tab.
+  // WAGS_INBOX is a content destination (like Fur Bin), not a creation studio.
   assert.deepEqual(SIDEBAR_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.FURBIN,
-    Screen.BIM,
+    Screen.PAWPRINTS,
     Screen.WAGS_INBOX,
   ]);
   // MOBILE_NAV is NOT "sidebar + Profile". Profile and Voice Test both have a
@@ -28,21 +28,20 @@ test("desktop sidebar keeps creation studios out of the global shell", () => {
   assert.deepEqual(MOBILE_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.FURBIN,
-    Screen.BIM,
+    Screen.PAWPRINTS,
     Screen.WAGS_INBOX,
   ]);
   assert.ok(!SIDEBAR_NAV.some(({ screen }) => screen === Screen.MODELS || screen === Screen.PAWLISHER));
 });
 
-test("mobile bottom bar does not duplicate header destinations", () => {
-  // The rule, rather than the specific list: anything already reachable from
-  // the header icons must not also occupy a bottom-bar slot.
+test("mobile bottom bar only duplicates the requested Pawprints destination", () => {
+  // Pawprints is deliberately present in both the top and left/mobile panels.
   const headerScreens = new Set(SHELL_ICON_NAV.map(({ screen }) => screen));
   const duplicated = MOBILE_NAV.filter(({ screen }) => headerScreens.has(screen));
   assert.deepEqual(
     duplicated.map(({ id }) => id),
-    [],
-    "bottom bar must not repeat a destination the header already offers"
+    ["pawprints"],
+    "only the requested Pawprints tab may repeat a header destination"
   );
 });
 

@@ -35,8 +35,8 @@ test("authenticated voice tester uses the real production endpoint with honest s
   assert.doesNotMatch(voice, /speechSynthesis|webkitSpeech|new AudioContext/);
 });
 
-test("BIM is discoverable but remains a non-operational preview", () => {
-  assert.match(shell, /label: "Scaled BIM", screen: Screen\.BIM/);
+test("BIM preview is preserved but removed from the Pawsome3D navigation", () => {
+  assert.doesNotMatch(shell, /label: "Scaled BIM", screen: Screen\.BIM/);
   assert.match(app, /Screen\.BIM[\s\S]{0,250}BimPreviewScreen/);
   assert.match(bimPreview, /Preview only - unavailable/);
   assert.match(bimPreview, /No image or IFC uploads, credit charges, proposals, or model builds start from this page/);

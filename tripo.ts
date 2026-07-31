@@ -1,5 +1,9 @@
+import sharp from "sharp";
+
 const TRIPO_BASE = "https://api.tripo3d.ai/v2/openapi";
 export const TRIPO_PREFIX = "tripo:";
+const MAX_TRIPO_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
+const TRIPO_IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
 
 export class TripoError extends Error {
   constructor(
@@ -78,29 +82,52 @@ interface UploadedImage {
   token: string;
 }
 
+/**
+ * Decode the real bytes and produce the one upload format this bridge supports.
+ * Signed object URLs may return application/octet-stream and Gemini may return
+ * WebP; neither is forwarded to Tripo. Re-encoding also prevents a claimed MIME
+ * type or pooled Buffer backing store from changing the uploaded file bytes.
+ */
+export async function normalizeTripoUploadImage(bytes: Buffer): Promise<Buffer> {
+  if (bytes.length === 0 || bytes.length > MAX_TRIPO_SOURCE_IMAGE_BYTES) {
+    throw new Error(`Tripo source image must be between 1 byte and ${MAX_TRIPO_SOURCE_IMAGE_BYTES} bytes.`);
+  }
+  const image = sharp(bytes, { failOn: "error", limitInputPixels: 40_000_000 });
+  const metadata = await image.metadata();
+  if (!new Set(["jpeg", "png", "webp"]).has(String(metadata.format))) {
+    throw new Error("Tripo source image must decode as JPEG, PNG, or WebP.");
+  }
+  return image.rotate().png({ compressionLevel: 9 }).toBuffer();
+}
+
 /** Download an image (URL or data URL) and upload its bytes to Tripo → image_token. */
 async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
-  let arrayBuffer: ArrayBuffer;
-  let mimeType = "image/jpeg";
+  let sourceBytes: Buffer;
 
   const dataMatch = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (dataMatch) {
-    mimeType = dataMatch[1] || "image/jpeg";
-    arrayBuffer = Buffer.from(dataMatch[2], "base64").buffer;
+    sourceBytes = Buffer.from(dataMatch[2], "base64");
   } else {
-    const imgRes = await fetch(imageUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TRIPO_IMAGE_DOWNLOAD_TIMEOUT_MS);
+    let imgRes: Response;
+    try {
+      imgRes = await fetch(imageUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!imgRes.ok) throw new Error(`Failed to download image for Tripo: ${imgRes.statusText}`);
-    arrayBuffer = await imgRes.arrayBuffer();
-    mimeType = imgRes.headers.get("content-type") || "image/jpeg";
+    const declaredLength = Number(imgRes.headers.get("content-length") || 0);
+    if (declaredLength > MAX_TRIPO_SOURCE_IMAGE_BYTES) {
+      throw new Error(`Tripo source image exceeds ${MAX_TRIPO_SOURCE_IMAGE_BYTES} bytes.`);
+    }
+    sourceBytes = Buffer.from(await imgRes.arrayBuffer());
   }
 
-  let ext = "jpg";
-  if (mimeType.includes("png")) ext = "png";
-  if (mimeType.includes("webp")) ext = "webp";
-
-  const blob = new Blob([arrayBuffer], { type: mimeType });
+  const normalized = await normalizeTripoUploadImage(sourceBytes);
+  const blob = new Blob([Uint8Array.from(normalized)], { type: "image/png" });
   const formData = new FormData();
-  formData.append("file", blob, `upload.${ext}`);
+  formData.append("file", blob, "upload.png");
 
   const uploadRes = await fetch(`${TRIPO_BASE}/upload`, {
     method: "POST",
@@ -123,7 +150,7 @@ async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
   if (!token) {
     throw new Error(`Tripo upload returned no image_token: ${JSON.stringify(uploadJson)}`);
   }
-  return { ext, token };
+  return { ext: "png", token };
 }
 
 async function submitTask(body: Record<string, unknown>): Promise<string> {
@@ -205,12 +232,12 @@ export async function startImageTo3D(input: TripoJobInput): Promise<string> {
 
   // Multiview: upload each present view; keep Tripo's fixed slot order.
   // Empty slots must be sent as {} so the array stays [front, left, back, right].
-  const [frontU, leftU, backU, rightU] = await Promise.all([
-    uploadToTripo(input.imageUrl),
-    left ? uploadToTripo(left) : Promise.resolve(null),
-    back ? uploadToTripo(back) : Promise.resolve(null),
-    right ? uploadToTripo(right) : Promise.resolve(null),
-  ]);
+  // Upload sequentially. If one view is invalid, stop immediately instead of
+  // creating several successful orphan uploads that can never form a task.
+  const frontU = await uploadToTripo(input.imageUrl);
+  const leftU = left ? await uploadToTripo(left) : null;
+  const backU = back ? await uploadToTripo(back) : null;
+  const rightU = right ? await uploadToTripo(right) : null;
 
   const slot = (u: UploadedImage | null) =>
     u ? { type: u.ext, file_token: u.token } : {};

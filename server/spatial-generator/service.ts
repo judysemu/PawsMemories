@@ -370,7 +370,7 @@ export class SpatialGeneratorService {
             { name: "three_quarter", azimuth: 45, elevation: 30 },
           ] as const;
           
-          const renderAssetVersionIds: number[] = [];
+          const renderUploads: Awaited<ReturnType<typeof spatialStorage.uploadArtifact>>[] = [];
           
           for (const view of renderViews) {
             // Set camera angle
@@ -391,7 +391,7 @@ export class SpatialGeneratorService {
               attemptNumber: attempt.attempt_number,
               ownerPhone: job.owner_phone,
             });
-            renderAssetVersionIds.push(uploadResult.assetVersionId);
+            renderUploads.push(uploadResult);
           }
           
           // Upload the draft GLB
@@ -421,21 +421,16 @@ export class SpatialGeneratorService {
             // Render artifacts
             for (let i = 0; i < renderViews.length; i++) {
               const view = renderViews[i];
-              const assetVersionId = renderAssetVersionIds[i];
-              // Get the asset info from storage
-              const artifact = await this.repo.getArtifactByRole(conn, attemptId, `draft_render_${view.name}` as SpatialArtifactRole);
-              if (!artifact) {
-                // Need to get asset info from the upload result
-                await this.repo.createArtifact(conn, {
-                  attemptId,
-                  assetId: glbUpload.assetId, // This is wrong - need actual assetId
-                  assetVersionId: assetVersionId,
-                  role: `draft_render_${view.name}` as SpatialArtifactRole,
-                  computedHash: "", // Need actual hash
-                  sizeBytes: 0,
-                  mimeType: "image/png",
-                });
-              }
+              const upload = renderUploads[i];
+              await this.repo.createArtifact(conn, {
+                attemptId,
+                assetId: upload.assetId,
+                assetVersionId: upload.assetVersionId,
+                role: `draft_render_${view.name}` as SpatialArtifactRole,
+                computedHash: upload.sha256,
+                sizeBytes: upload.sizeBytes,
+                mimeType: upload.mimeType,
+              });
             }
             
             await conn.commit();
@@ -446,7 +441,7 @@ export class SpatialGeneratorService {
           
           return {
             draftGlbAssetVersionId: glbUpload.assetVersionId,
-            renderAssetVersionIds,
+            renderAssetVersionIds: renderUploads.map((upload) => upload.assetVersionId),
             boundsMm: {
               min: validation.metrics.boundingBox?.min || [0, 0, 0],
               max: validation.metrics.boundingBox?.max || [0, 0, 0],
