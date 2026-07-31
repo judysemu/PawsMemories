@@ -32,6 +32,8 @@ type SpatialHealthSnapshot = {
   ready?: unknown;
   featureEnabled?: unknown;
   layer8Configured?: unknown;
+  directMathWorkerOnline?: unknown;
+  /** @deprecated compatibility with older health clients. */
   pixelWorkerOnline?: unknown;
   blenderWorkerHealthy?: unknown;
   orchestratorReady?: unknown;
@@ -42,7 +44,10 @@ function sanitizedPipelineBlockers(health: SpatialHealthSnapshot): string[] {
   const blockers: string[] = [];
   if (health.featureEnabled !== true) blockers.push("feature_flag");
   if (health.layer8Configured !== true) blockers.push("layer8");
-  if (health.pixelWorkerOnline !== true) blockers.push("pixel_worker");
+  const directMathReady = health.directMathWorkerOnline === true || health.pixelWorkerOnline === true;
+  // Keep the public blocker label stable for existing operators; the health
+  // field above is now directMathWorkerOnline and has no Pixel/Gemma dependency.
+  if (!directMathReady) blockers.push("pixel_worker");
   if (health.blenderWorkerHealthy !== true) blockers.push("blender_worker");
   if (health.orchestratorReady !== true) blockers.push("orchestrator");
   return blockers.length > 0 ? blockers : ["readiness_unconfirmed"];
@@ -70,7 +75,7 @@ export function createSpatialGeneratorRouter(
       const ready = health.ready === true
         && health.featureEnabled === true
         && health.layer8Configured === true
-        && health.pixelWorkerOnline === true
+        && (health.directMathWorkerOnline === true || health.pixelWorkerOnline === true)
         && health.blenderWorkerHealthy === true
         && health.orchestratorReady === true
         && Array.isArray(health.blockers)
