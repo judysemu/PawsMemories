@@ -1,10 +1,10 @@
 # Pawsome3D next recommended fixes after the live production sweep
 
-Date: 2026-07-31 (America/Denver)  
-Production domain: `https://pawsome3d.com`  
-Deployed commit: `2d15391b982f8d070511e420f1f92c63fc90bd04`  
-Branch: `codex/pawsome3d-production-hardening`  
-Draft PR: `#20`  
+Date: 2026-07-31 (America/Denver)
+Production domain: `https://pawsome3d.com`
+Deployed commit: `2d15391b982f8d070511e420f1f92c63fc90bd04`
+Branch: `codex/pawsome3d-production-hardening`
+Draft PR: `#20`
 Deployment archive SHA-256: `05eb14844339357ba0ed9108c175f6b9fba8bcef26090a07a059c835a398a335`
 
 ## Executive verdict
