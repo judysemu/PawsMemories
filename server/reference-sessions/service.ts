@@ -66,19 +66,15 @@ function boundedReferenceCap(name: string, productionFallback: number, maximum: 
 
 async function assertReferenceProviderBudget(
   connection: mysql.PoolConnection,
-  ownerId: string,
 ): Promise<void> {
   // The product allowance is enforced per reference session (initial render +
   // up to two free retries), not across unrelated pets created the same day.
-  // Keep the user-wide guard opt-in for operators who need a temporary brake.
-  const perUserDailyCap = boundedReferenceCap("REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP", 50, 50);
   const globalDailyCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 20, 200);
   const globalMinuteCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20);
   const globalConcurrentCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5);
   const [rows]: any = await connection.query(
     `SELECT
        COUNT(*) AS global_day_count,
-       SUM(CASE WHEN s.owner_id = ? THEN 1 ELSE 0 END) AS owner_day_count,
        SUM(CASE WHEN a.started_at >= NOW() - INTERVAL 1 MINUTE THEN 1 ELSE 0 END) AS global_minute_count,
        (
          SELECT COUNT(*)
@@ -91,7 +87,7 @@ async function assertReferenceProviderBudget(
      FROM reference_attempts a
      INNER JOIN reference_sessions s ON s.id = a.session_id
      WHERE a.started_at >= NOW() - INTERVAL 24 HOUR`,
-    [ownerId],
+    [],
   );
   const counts = rows?.[0] || {};
   if (Number(counts.global_active_count || 0) >= globalConcurrentCap) {
@@ -104,12 +100,6 @@ async function assertReferenceProviderBudget(
     throw new ReferenceSessionError(
       "Reference generation is at its global minute safety limit. Try again shortly.",
       "MINUTE_ATTEMPT_CAP",
-    );
-  }
-  if (Number(counts.owner_day_count || 0) >= perUserDailyCap) {
-    throw new ReferenceSessionError(
-      `You have reached today's ${perUserDailyCap}-attempt reference-generation safety limit.`,
-      "DAILY_ATTEMPT_CAP",
     );
   }
   if (Number(counts.global_day_count || 0) >= globalDailyCap) {
@@ -349,7 +339,7 @@ export class ReferenceSessionService {
         );
       }
 
-      await assertReferenceProviderBudget(connection, ownerId);
+      await assertReferenceProviderBudget(connection);
 
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto

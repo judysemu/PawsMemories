@@ -199,11 +199,10 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     assert.equal(provider.calls, 1);
   });
 
-  await t.test("3c. Durable daily cap stops new sessions before another provider call", async () => {
+  await t.test("3c. New sessions are not blocked by another pet's attempt history", async () => {
     const ownerId = "+15551115555";
     const provider = new FakeReferenceImageProvider();
     const cappedService = new ReferenceSessionService(provider, () => pool);
-    process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "1";
     try {
       const first = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A terrier" });
       await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
@@ -221,13 +220,10 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
       assert.equal(Number(ownerAttemptRows[0].count), 1);
 
       const second = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A spaniel" });
-      await assert.rejects(
-        cappedService.startOrRetryAttempt(ownerId, second.session_uuid, "daily-cap-second"),
-        (err) => err instanceof ReferenceSessionError && err.code === "DAILY_ATTEMPT_CAP",
-      );
-      assert.equal(provider.calls, 1);
+      await cappedService.startOrRetryAttempt(ownerId, second.session_uuid, "daily-cap-second");
+      assert.equal(provider.calls, 2);
     } finally {
-      process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "100";
+      delete process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP;
     }
   });
 
