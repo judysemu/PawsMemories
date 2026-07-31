@@ -357,9 +357,11 @@ export class PetGlbService {
     if (!current || current.attemptUuid !== input.attemptUuid) {
       throw new PetGenerationError("STALE_STAGE", "Retry does not match the current stage");
     }
-    const retryPrice = current.attemptNumber === 1
+    // Each customer-gated stage gets two free correction attempts. A third
+    // attempt is an explicit full-price regeneration of that same stage.
+    const retryPrice = current.attemptNumber <= 2
       ? CREDIT_PRICES.FIRST_REGENERATION
-      : CREDIT_PRICES.ADDITIONAL_REGENERATION;
+      : stagePrice(current.stage);
     const retry = await this.stages.queueRetry({
       orderId: order.id,
       ownerPhone,

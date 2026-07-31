@@ -1061,7 +1061,9 @@ export default function PetModelStudio() {
                 {stage.state === "rejected" && stage.stage !== "reference" && (
                   <button onClick={retry} disabled={busy} className="w-full rounded-2xl bg-cyan-500 px-4 py-2.5 font-semibold text-slate-950">
                     Retry {STAGE_LABELS[stage.stage]}
-                    {stage.attemptNumber > 1 ? " · 5 PupCoins" : " · first retry free"}
+                    {stage.attemptNumber < 3
+                      ? ` · ${stage.attemptNumber === 1 ? "first" : "second"} retry free`
+                      : ` · ${stage.stage === "base" ? view.quote.base : stage.stage === "texture" ? view.quote.texture : view.quote.rig} PupCoins`}
                   </button>
                 )}
               </div>

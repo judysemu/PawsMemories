@@ -88,14 +88,13 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
         presets: ["reference-faithful", "soft-stylized", "toy-collectible", "studio-realistic"],
       },
       referenceRequirements: {
-        requiredSourceUploads: 1,
-        optionalSourceAngles: ["left", "right", "rear", "three_quarter"],
+        requiredSourceUploads: 4,
+        optionalSourceAngles: [],
         generatedForApproval: ["front", "left", "right", "rear", "three_quarter"],
         guidance: [
-          "One clear, full-body photo is enough to start.",
-          "Additional source angles are optional.",
+          "Four clear, full-body photos are required: front, left, rear, and right angles.",
           "Pawsome3D generates the complete multi-angle set before model building.",
-          "Approve the generated views or choose auto-approval.",
+          "Approve the generated views or request an immediate remake.",
           "Avoid filters and motion blur.",
           "Include clear views of distinctive markings.",
           "Measurements improve scale confidence.",
