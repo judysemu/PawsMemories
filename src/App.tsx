@@ -1078,11 +1078,17 @@ export default function App() {
 
 
             {currentScreen === Screen.ANIMATOR && (
-              <UnderConstructionLock
-                featureName="Animation Studio"
-                featureDescription="Bring your 3D pet model to life with motion, video, and cinematic scenes — coming soon."
-                onGoToCreate={() => setCurrentScreen(Screen.CREATE)}
-              />
+              userProfile.isAdmin ? (
+                <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
+                  <AnimatorScreen initialAssetId={null} onClose={() => setCurrentScreen(Screen.CREATE)} />
+                </Suspense>
+              ) : (
+                <UnderConstructionLock
+                  featureName="Animation Studio"
+                  featureDescription="Bring your 3D pet model to life with motion, video, and cinematic scenes — coming soon."
+                  onGoToCreate={() => setCurrentScreen(Screen.CREATE)}
+                />
+              )
             )}
 
 

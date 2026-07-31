@@ -34,13 +34,15 @@ test("Animator and Video Creator source code is preserved (not deleted)", () => 
   assert.match(videoCreator, /Open 3D Animation Builder/);
 });
 
-test("Animator screen is gated with UnderConstructionLock in App.tsx", () => {
+test("Animator is customer-gated while administrators can exercise the release candidate", () => {
   const app = fs.readFileSync("src/App.tsx", "utf8");
   // Animator mode state and openAnimationStudio helper are retained
   assert.match(app, /useState<"simple" \| "pro">\("simple"\)/);
   assert.match(app, /const openAnimationStudio = \(\) => \{[\s\S]*setAnimatorMode\("simple"\)/);
-  // The ANIMATOR screen still renders UnderConstructionLock
-  assert.match(app, /currentScreen === Screen\.ANIMATOR[\s\S]*UnderConstructionLock/);
+  const animatorBlock = app.match(/currentScreen === Screen\.ANIMATOR[\s\S]*?Safety net/)?.[0] || "";
+  assert.match(animatorBlock, /userProfile\.isAdmin/);
+  assert.match(animatorBlock, /<AnimatorScreen[\s\S]*?\/>/);
+  assert.match(animatorBlock, /<UnderConstructionLock/);
   assert.match(app, /featureName="Animation Studio"/);
   // Phase 6: Fido's Styles is UNLOCKED — PAWLISHER renders the real workspace.
   assert.match(app, /currentScreen === Screen\.PAWLISHER[\s\S]{0,400}FidosStylesScreen/);

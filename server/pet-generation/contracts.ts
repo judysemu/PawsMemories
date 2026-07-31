@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { z } from "zod";
 import { PET_GLB_STAGE_PRICES, petGlbTotalCost } from "../../src/pricing";
+import { globalDailyCapFor, globalDailyCostMicroUsdFor, isEndpointEnabled } from "../paidApiGuards";
 import type {
   MeshProfile,
   PetGlbOrderConfiguration,
@@ -134,3 +135,18 @@ export const FACIAL_RIG_POLICY = Object.freeze({
   minimumFixtureCount: 20,
   reason: "No validated production cohort meets the facial blendshape release threshold.",
 });
+
+export function rigGenerationAvailability(env: Record<string, string | undefined> = process.env) {
+  const enabled = isEndpointEnabled("rig", env);
+  const requestCap = globalDailyCapFor("rig", env);
+  const costCapMicroUsd = globalDailyCostMicroUsdFor("rig", env);
+  const available = enabled && requestCap > 0 && costCapMicroUsd > 0;
+  return {
+    available,
+    requestCap,
+    costCapMicroUsd,
+    reason: available
+      ? null
+      : "Animation-ready rigging is temporarily closed while its funded production path is verified.",
+  } as const;
+}

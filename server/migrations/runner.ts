@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 44;
+export const CURRENT_SCHEMA_VERSION = 45;
 
 export interface Migration {
   version: number;
@@ -2228,6 +2228,43 @@ export const MIGRATIONS: Migration[] = [
       `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND INDEX_NAME='uniq_stationery_payment_consumption'`,
       `SET @stmt=IF(@idx_exists=0,'ALTER TABLE stationery_payment_evidence ADD UNIQUE KEY uniq_stationery_payment_consumption (consumed_local_order_uuid)','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 45,
+    name: "pet_glb_recovery_evidence",
+    skipWhenTableMissing: "pet_glb_stage_attempts",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_stage_attempts' AND COLUMN_NAME='recovery_lease_owner'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_stage_attempts ADD COLUMN recovery_lease_owner CHAR(36) NULL AFTER failure_code','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_stage_attempts' AND COLUMN_NAME='recovery_lease_expires_at'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_stage_attempts ADD COLUMN recovery_lease_expires_at DATETIME(3) NULL AFTER recovery_lease_owner','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_stage_attempts' AND COLUMN_NAME='recovery_attempts'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_stage_attempts ADD COLUMN recovery_attempts INT NOT NULL DEFAULT 0 AFTER recovery_lease_expires_at','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_stage_attempts' AND COLUMN_NAME='last_recovery_at'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_stage_attempts ADD COLUMN last_recovery_at DATETIME(3) NULL AFTER recovery_attempts','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_stage_attempts' AND INDEX_NAME='idx_pet_glb_stage_recovery_lease'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE pet_glb_stage_attempts ADD KEY idx_pet_glb_stage_recovery_lease (state, recovery_lease_expires_at, updated_at)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `CREATE TABLE IF NOT EXISTS pet_glb_recovery_evidence (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        stage_attempt_id BIGINT NOT NULL,
+        order_id BIGINT NOT NULL,
+        decision VARCHAR(48) NOT NULL,
+        reason_code VARCHAR(96) NOT NULL,
+        provider_handle_present BOOLEAN NOT NULL DEFAULT FALSE,
+        refund_correlation_id VARCHAR(190) NULL,
+        redacted_evidence_json JSON NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_pet_glb_recovery_decision (stage_attempt_id, decision, reason_code),
+        KEY idx_pet_glb_recovery_order (order_id, created_at),
+        CONSTRAINT fk_pet_glb_recovery_stage FOREIGN KEY (stage_attempt_id) REFERENCES pet_glb_stage_attempts(id) ON DELETE RESTRICT,
+        CONSTRAINT fk_pet_glb_recovery_order FOREIGN KEY (order_id) REFERENCES pet_glb_orders(id) ON DELETE RESTRICT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },
 ];

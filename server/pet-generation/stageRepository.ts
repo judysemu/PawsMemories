@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
+import { refundWalletDebitInTransaction } from "../wallet";
 import { PetGenerationError } from "./provider";
 import type { PetGlbModelStageKind, PetGlbStageKind, RigCapability } from "./types";
 import type { ValidationReport } from "./validation";
@@ -35,6 +36,10 @@ export interface PetGlbStageAttempt {
   approvedAt: Date | null;
   rejectionReason: string | null;
   failureCode: string | null;
+  recoveryLeaseOwner: string | null;
+  recoveryLeaseExpiresAt: Date | null;
+  recoveryAttempts: number;
+  lastRecoveryAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +81,10 @@ function mapAttempt(row: any): PetGlbStageAttempt {
     approvedAt: row.approved_at ? new Date(row.approved_at) : null,
     rejectionReason: row.rejection_reason ?? null,
     failureCode: row.failure_code ?? null,
+    recoveryLeaseOwner: row.recovery_lease_owner ?? null,
+    recoveryLeaseExpiresAt: row.recovery_lease_expires_at ? new Date(row.recovery_lease_expires_at) : null,
+    recoveryAttempts: Number(row.recovery_attempts || 0),
+    lastRecoveryAt: row.last_recovery_at ? new Date(row.last_recovery_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -133,6 +142,128 @@ export class PetGlbStageRepository {
       [orderId],
     );
     return (rows as any[]).map(mapAttempt);
+  }
+
+  async listStaleCurrentAttempts(leaseMinutes = 10, limit = 25): Promise<PetGlbStageAttempt[]> {
+    const minutes = Math.max(1, Math.floor(leaseMinutes));
+    const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const [rows] = await this.getPool().query(
+      `SELECT s.* FROM pet_glb_stage_attempts s JOIN pet_glb_orders o ON o.current_stage_attempt_id = s.id
+       WHERE s.state IN ('queued','processing','persisting','recovery_required')
+         AND s.updated_at < DATE_SUB(NOW(3), INTERVAL ${minutes} MINUTE)
+         AND (s.recovery_lease_expires_at IS NULL OR s.recovery_lease_expires_at <= NOW(3))
+       ORDER BY s.updated_at ASC LIMIT ${boundedLimit}`,
+    );
+    return (rows as any[]).map(mapAttempt);
+  }
+
+  async claimRecoveryLease(input: {
+    orderId: number;
+    attemptId: number;
+    leaseOwner: string;
+    staleMinutes?: number;
+    leaseSeconds?: number;
+  }): Promise<PetGlbStageAttempt | null> {
+    const staleMinutes = Math.max(1, Math.min(24 * 60, Math.floor(input.staleMinutes ?? 10)));
+    const leaseSeconds = Math.max(15, Math.min(5 * 60, Math.floor(input.leaseSeconds ?? 90)));
+    const [result] = await this.getPool().query(
+      `UPDATE pet_glb_stage_attempts s
+         JOIN pet_glb_orders o ON o.id = s.order_id AND o.current_stage_attempt_id = s.id
+          SET s.recovery_lease_owner = ?,
+              s.recovery_lease_expires_at = DATE_ADD(NOW(3), INTERVAL ${leaseSeconds} SECOND),
+              s.recovery_attempts = s.recovery_attempts + 1,
+              s.last_recovery_at = NOW(3)
+        WHERE s.id = ? AND s.order_id = ?
+          AND s.state IN ('queued','processing','persisting','recovery_required')
+          AND s.updated_at < DATE_SUB(NOW(3), INTERVAL ${staleMinutes} MINUTE)
+          AND (s.recovery_lease_expires_at IS NULL OR s.recovery_lease_expires_at <= NOW(3))`,
+      [input.leaseOwner, input.attemptId, input.orderId],
+    );
+    if ((result as any).affectedRows !== 1) return null;
+    return this.findById(input.attemptId);
+  }
+
+  async resumeClaimedProviderRecovery(
+    orderId: number,
+    attemptId: number,
+    leaseOwner: string,
+  ): Promise<PetGlbStageAttempt> {
+    const conn = await this.getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(
+        "SELECT * FROM pet_glb_stage_attempts WHERE id = ? AND order_id = ? FOR UPDATE",
+        [attemptId, orderId],
+      );
+      const attempt = (rows as any[])[0] ? mapAttempt((rows as any[])[0]) : null;
+      if (!attempt || !attempt.providerJobId) {
+        throw new PetGenerationError("RECOVERY_NOT_RESUMABLE", "Recovery has no durable provider job");
+      }
+      if (attempt.recoveryLeaseOwner !== leaseOwner || !attempt.recoveryLeaseExpiresAt || attempt.recoveryLeaseExpiresAt.getTime() <= Date.now()) {
+        throw new PetGenerationError("RECOVERY_LEASE_LOST", "Recovery lease is no longer current");
+      }
+      if (attempt.stage === "reference") {
+        throw new PetGenerationError("RECOVERY_NOT_RESUMABLE", "Reference approval has no provider job");
+      }
+      const [result] = await conn.query(
+        `UPDATE pet_glb_stage_attempts
+            SET state = 'processing', failure_code = NULL, updated_at = NOW(3),
+                recovery_lease_owner = NULL, recovery_lease_expires_at = NULL
+          WHERE id = ? AND order_id = ? AND recovery_lease_owner = ?
+            AND recovery_lease_expires_at > NOW(3)`,
+        [attemptId, orderId, leaseOwner],
+      );
+      if ((result as any).affectedRows !== 1) {
+        throw new PetGenerationError("RECOVERY_LEASE_LOST", "Recovery resume lost its lease");
+      }
+      await conn.query(
+        "UPDATE pet_glb_orders SET state = ?, updated_at = NOW(3) WHERE id = ? AND current_stage_attempt_id = ?",
+        [ORDER_STATE_FOR_PROCESSING[attempt.stage], orderId, attemptId],
+      );
+      await conn.commit();
+      return {
+        ...attempt,
+        state: "processing",
+        failureCode: null,
+        recoveryLeaseOwner: null,
+        recoveryLeaseExpiresAt: null,
+        updatedAt: new Date(),
+      };
+    } catch (error) {
+      await conn.rollback().catch(() => {});
+      throw error;
+    } finally {
+      conn.release();
+    }
+  }
+
+  async releaseRecoveryLease(
+    orderId: number,
+    attemptId: number,
+    leaseOwner: string,
+    touch = false,
+  ): Promise<boolean> {
+    const [result] = await this.getPool().query(
+      `UPDATE pet_glb_stage_attempts
+          SET recovery_lease_owner = NULL, recovery_lease_expires_at = NULL,
+              updated_at = IF(?, NOW(3), updated_at)
+        WHERE id = ? AND order_id = ? AND recovery_lease_owner = ?`,
+      [touch ? 1 : 0, attemptId, orderId, leaseOwner],
+    );
+    return (result as any).affectedRows === 1;
+  }
+
+  async recordRecoveryEvidence(input: { orderId: number; attemptId: number; decision: string; reasonCode: string; providerHandlePresent: boolean; refundCorrelationId?: string | null; evidence: Record<string, unknown> }): Promise<void> {
+    await this.getPool().query(
+      `INSERT INTO pet_glb_recovery_evidence (stage_attempt_id, order_id, decision, reason_code, provider_handle_present, refund_correlation_id, redacted_evidence_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE redacted_evidence_json = VALUES(redacted_evidence_json)`,
+      [input.attemptId, input.orderId, input.decision, input.reasonCode, input.providerHandlePresent ? 1 : 0, input.refundCorrelationId || null, JSON.stringify(input.evidence)],
+    );
+  }
+
+  async listRecoveryEvidence(orderId: number): Promise<Array<Record<string, unknown>>> {
+    const [rows] = await this.getPool().query("SELECT * FROM pet_glb_recovery_evidence WHERE order_id = ? ORDER BY id ASC", [orderId]);
+    return (rows as any[]).map((row) => ({ id: Number(row.id), stageAttemptId: Number(row.stage_attempt_id), orderId: Number(row.order_id), decision: row.decision, reasonCode: row.reason_code, providerHandlePresent: Boolean(row.provider_handle_present), refundCorrelationId: row.refund_correlation_id || null, evidence: parseJson(row.redacted_evidence_json) || {}, createdAt: new Date(row.created_at) }));
   }
 
   async saveReferenceManifest(
@@ -553,6 +684,7 @@ export class PetGlbStageRepository {
   async recoverPersistedModelStage(
     orderId: number,
     attemptId: number,
+    expectedLeaseOwner?: string,
   ): Promise<PetGlbStageAttempt> {
     const attempt = await this.findById(attemptId);
     if (
@@ -574,9 +706,11 @@ export class PetGlbStageRepository {
       await conn.beginTransaction();
       const [result] = await conn.query(
         `UPDATE pet_glb_stage_attempts
-            SET state = 'awaiting_customer_approval', failure_code = NULL, updated_at = NOW()
-          WHERE id = ? AND order_id = ? AND state = 'recovery_required'`,
-        [attemptId, orderId],
+            SET state = 'awaiting_customer_approval', failure_code = NULL, updated_at = NOW(3),
+                recovery_lease_owner = NULL, recovery_lease_expires_at = NULL
+          WHERE id = ? AND order_id = ? AND state = 'recovery_required'
+            AND (? IS NULL OR (recovery_lease_owner = ? AND recovery_lease_expires_at > NOW(3)))`,
+        [attemptId, orderId, expectedLeaseOwner ?? null, expectedLeaseOwner ?? null],
       );
       if ((result as any).affectedRows !== 1) {
         throw new PetGenerationError("CONCURRENT_TRANSITION", "Persisted recovery lost a race");
@@ -764,7 +898,12 @@ export class PetGlbStageRepository {
     attemptId: number,
     ownerPhone: string,
     failureCode: string,
-  ): Promise<void> {
+    options: {
+      expectedLeaseOwner?: string;
+      recoveryReasonCode?: string;
+      recoveryEvidence?: Record<string, unknown>;
+    } = {},
+  ): Promise<{ refundApplied: boolean; refundCorrelationId: string | null }> {
     const conn = await this.getPool().getConnection();
     try {
       await conn.beginTransaction();
@@ -775,44 +914,84 @@ export class PetGlbStageRepository {
       const row = (rows as any[])[0];
       if (!row) throw new PetGenerationError("STAGE_NOT_FOUND", "Stage attempt not found");
       const attempt = mapAttempt(row);
+      const [orderRows] = await conn.query(
+        "SELECT owner_phone, current_stage_attempt_id FROM pet_glb_orders WHERE id = ? LIMIT 1 FOR UPDATE",
+        [orderId],
+      );
+      const order = (orderRows as any[])[0];
+      if (!order || String(order.owner_phone) !== ownerPhone) {
+        throw new PetGenerationError("FORBIDDEN", "Refund owner does not match the order");
+      }
+      if (Number(order.current_stage_attempt_id) !== attemptId) {
+        throw new PetGenerationError(
+          "CONCURRENT_TRANSITION",
+          "Stage is no longer the order's current attempt",
+        );
+      }
+      // A repeated terminal call is an idempotent no-op. Check this before the
+      // recovery lease because the first successful terminal transition clears
+      // that lease atomically with the refund.
       if (attempt.state === "failed") {
         await conn.commit();
-        return;
+        return { refundApplied: false, refundCorrelationId: null };
       }
+      if (
+        options.expectedLeaseOwner
+        && (
+          attempt.recoveryLeaseOwner !== options.expectedLeaseOwner
+          || !attempt.recoveryLeaseExpiresAt
+          || attempt.recoveryLeaseExpiresAt.getTime() <= Date.now()
+        )
+      ) {
+        throw new PetGenerationError("RECOVERY_LEASE_LOST", "Recovery refund lost its lease");
+      }
+      let refundApplied = false;
+      let refundCorrelationId: string | null = null;
       if (attempt.creditsDisposition === "charged" && attempt.priceCredits > 0) {
-        const refundKey = `pet_glb:refund:${attempt.attemptUuid}`;
-        const [existing] = await conn.query(
-          "SELECT id FROM credit_transactions WHERE idempotency_key = ? LIMIT 1 FOR UPDATE",
-          [refundKey],
-        );
-        if (!(existing as any[]).length) {
-          await conn.query("UPDATE users SET credits = credits + ? WHERE phone = ?", [
-            attempt.priceCredits,
-            ownerPhone,
-          ]);
-          const [balanceRows] = await conn.query("SELECT credits FROM users WHERE phone = ? LIMIT 1", [ownerPhone]);
-          const balance = Number((balanceRows as any[])[0]?.credits || 0);
-          await conn.query(
-            `INSERT INTO credit_transactions
-               (user_phone, delta, reason, balance_after, idempotency_key)
-             VALUES (?, ?, ?, ?, ?)`,
-            [ownerPhone, attempt.priceCredits, `pet_glb_${attempt.stage}_refund`, balance, refundKey],
-          );
+        const chargeCorrelation = row.charge_idempotency_key ? String(row.charge_idempotency_key) : "";
+        if (!chargeCorrelation) {
+          throw new PetGenerationError("REFUND_EVIDENCE_MISSING", "Charged stage has no immutable debit correlation");
         }
+        const refund = await refundWalletDebitInTransaction(conn, chargeCorrelation, {
+          ownerId: ownerPhone,
+          amount: attempt.priceCredits,
+        });
+        refundApplied = refund.applied;
+        refundCorrelationId = `wallet-debit-refund:${crypto.createHash("sha256").update(chargeCorrelation).digest("hex")}`;
         await conn.query(
           "UPDATE pet_glb_stage_attempts SET credits_disposition = 'refunded' WHERE id = ?",
           [attempt.id],
         );
       }
       await conn.query(
-        "UPDATE pet_glb_stage_attempts SET state = 'failed', failure_code = ?, updated_at = NOW() WHERE id = ?",
+        `UPDATE pet_glb_stage_attempts
+            SET state = 'failed', failure_code = ?, updated_at = NOW(3),
+                recovery_lease_owner = NULL, recovery_lease_expires_at = NULL
+          WHERE id = ?`,
         [failureCode, attempt.id],
       );
       await conn.query(
-        "UPDATE pet_glb_orders SET state = 'stage_failed', updated_at = NOW() WHERE id = ?",
-        [orderId],
+        "UPDATE pet_glb_orders SET state = 'stage_failed', updated_at = NOW(3) WHERE id = ? AND current_stage_attempt_id = ?",
+        [orderId, attemptId],
       );
+      if (options.recoveryReasonCode) {
+        await conn.query(
+          `INSERT INTO pet_glb_recovery_evidence
+             (stage_attempt_id, order_id, decision, reason_code, provider_handle_present, refund_correlation_id, redacted_evidence_json)
+           VALUES (?, ?, 'terminal_refund', ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE refund_correlation_id = VALUES(refund_correlation_id), redacted_evidence_json = VALUES(redacted_evidence_json)`,
+          [
+            attemptId,
+            orderId,
+            options.recoveryReasonCode,
+            attempt.providerJobId ? 1 : 0,
+            refundCorrelationId,
+            JSON.stringify(options.recoveryEvidence || { stage: attempt.stage, priorState: attempt.state }),
+          ],
+        );
+      }
       await conn.commit();
+      return { refundApplied, refundCorrelationId };
     } catch (error) {
       await conn.rollback().catch(() => {});
       throw error;
@@ -937,6 +1116,10 @@ export class PetGlbStageRepository {
       approvedAt: null,
       rejectionReason: null,
       failureCode: null,
+      recoveryLeaseOwner: null,
+      recoveryLeaseExpiresAt: null,
+      recoveryAttempts: 0,
+      lastRecoveryAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

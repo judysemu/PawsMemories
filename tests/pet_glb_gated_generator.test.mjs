@@ -8,6 +8,7 @@ const {
   CreatePetGlbOrderSchema,
   FACIAL_RIG_POLICY,
   meshProfilePolicy,
+  rigGenerationAvailability,
   rigTypeForSubject,
   stagePrice,
 } = await import("../server/pet-generation/contracts.ts");
@@ -217,7 +218,7 @@ test("model studio requires four source photos and generates approval views", ()
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  assert.equal(CURRENT_SCHEMA_VERSION, 44);
+  assert.equal(CURRENT_SCHEMA_VERSION, 45);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);
@@ -227,6 +228,23 @@ test("migration 39 persists immutable customer stage attempts", () => {
   assert.match(sql, /fk_pet_glb_stage_asset_version/);
   assert.match(sql, /fk_pet_glb_order_current_stage/);
   assert.match(sql, /fk_pet_glb_order_final_customer_version/);
+});
+
+test("migration 45 adds redacted, idempotent recovery evidence", () => {
+  const migration = MIGRATIONS.find((entry) => entry.version === 45);
+  assert.ok(migration);
+  assert.equal(migration.name, "pet_glb_recovery_evidence");
+  const sql = migration.statements.join("\n");
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_recovery_evidence/);
+  assert.match(sql, /uniq_pet_glb_recovery_decision/);
+  assert.match(fs.readFileSync("server/pet-generation/routes.ts", "utf8"), /recovery-evidence/);
+});
+
+test("stale recovery repository exposes bounded evidence and stale-current queries", () => {
+  const source = fs.readFileSync("server/pet-generation/stageRepository.ts", "utf8");
+  assert.match(source, /listStaleCurrentAttempts/);
+  assert.match(source, /listRecoveryEvidence/);
+  assert.match(source, /ON DUPLICATE KEY UPDATE/);
 });
 
 test("completed-stage persistence has a single durable poll winner", async () => {
@@ -278,4 +296,12 @@ test("the primary signed-in Create route opens the gated studio and retires wiza
     source,
     /currentScreen === Screen\.CREATE[\s\S]*?isAuthed[\s\S]*?<PetModelStudio \/>[\s\S]*?: <CreateScreen/,
   );
+});
+
+test("PETSIM_RIG_GLOBAL_DAILY_CAP=0 makes rig generation unavailable before charge and provider dispatch", () => {
+  const envWithCap0 = { ...process.env, PETSIM_RIG_GLOBAL_DAILY_CAP: "0" };
+  const availability = rigGenerationAvailability(envWithCap0);
+  assert.equal(availability.available, false);
+  assert.equal(availability.requestCap, 0);
+  assert.match(availability.reason, /temporarily closed/);
 });

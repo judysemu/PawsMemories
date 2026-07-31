@@ -5,7 +5,7 @@ import { MySqlProviderJobStore } from "./jobStore";
 import { PetGlbOrderRepository, type PetGlbOrder } from "./orderRepository";
 import { validatePetGlb, validatePetGlbStage, type ValidationReport } from "./validation";
 import { CUSTOM_RIGGED_PET_GLB_V1 } from "./skuRegistry";
-import { PetGenerationError } from "./provider";
+import { PetGenerationError, type PetModelGenerationProvider } from "./provider";
 import type {
   PetGlbModelStageKind,
   PetGlbOrderConfiguration,
@@ -17,6 +17,7 @@ import {
   FACIAL_RIG_POLICY,
   meshProfilePolicy,
   productQuote,
+  rigGenerationAvailability,
   rigTypeForSubject,
   stagePrice,
 } from "./contracts";
@@ -44,6 +45,8 @@ export interface PetGlbServiceDeps {
   /** Issues a short-lived authenticated download URL for an approved version. */
   signDownload: (versionId: number, ownerPhone: string, ttlSeconds: number) => Promise<string>;
   rigProfileJoints?: string[];
+  /** Deterministic recovery seam; production uses the configured provider factory. */
+  providerFactory?: () => PetModelGenerationProvider;
 }
 
 export const DOWNLOAD_TTL_SECONDS = 900;
@@ -94,6 +97,142 @@ export class PetGlbService {
     return Promise.all(orders.map((order) => this.buildView(order)));
   }
 
+  async sweepStaleStages(options: {
+    staleMinutes?: number;
+    limit?: number;
+  } = {}): Promise<{
+    inspected: number;
+    claimed: number;
+    resumed: number;
+    refunded: number;
+    active: number;
+    retryableErrors: number;
+  }> {
+    const staleMinutes = Math.max(1, Math.min(24 * 60, Math.floor(options.staleMinutes ?? 10)));
+    const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 25)));
+    const candidates = await this.stages.listStaleCurrentAttempts(staleMinutes, limit);
+    const result = { inspected: candidates.length, claimed: 0, resumed: 0, refunded: 0, active: 0, retryableErrors: 0 };
+
+    for (const candidate of candidates) {
+      const leaseOwner = crypto.randomUUID();
+      const claimed = await this.stages.claimRecoveryLease({
+        orderId: candidate.orderId,
+        attemptId: candidate.id,
+        leaseOwner,
+        staleMinutes,
+      });
+      if (!claimed) continue;
+      result.claimed += 1;
+      const order = await this.orders.findById(claimed.orderId);
+      if (!order) {
+        await this.stages.releaseRecoveryLease(claimed.orderId, claimed.id, leaseOwner, true);
+        result.retryableErrors += 1;
+        continue;
+      }
+
+      try {
+        if (
+          claimed.state === "recovery_required"
+          && claimed.stage !== "reference"
+          && claimed.stage !== "rig_check"
+          && claimed.assetId
+          && claimed.assetVersionId
+          && claimed.artifactSha256
+          && claimed.validationReport
+          && claimed.validationReportSha256
+        ) {
+          await this.stages.recoverPersistedModelStage(claimed.orderId, claimed.id, leaseOwner);
+          await this.stages.recordRecoveryEvidence({
+            orderId: claimed.orderId,
+            attemptId: claimed.id,
+            decision: "resumable",
+            reasonCode: "PERSISTED_ARTIFACT_RECOVERED",
+            providerHandlePresent: Boolean(claimed.providerJobId),
+            evidence: { stage: claimed.stage, priorState: claimed.state, artifactPresent: true },
+          });
+          result.resumed += 1;
+          continue;
+        }
+
+        if (!claimed.providerJobId) {
+          const refund = await this.stages.failAndRefund(
+            claimed.orderId,
+            claimed.id,
+            order.ownerPhone,
+            "STALE_STAGE_WITHOUT_PROVIDER_HANDLE",
+            {
+              expectedLeaseOwner: leaseOwner,
+              recoveryReasonCode: "NO_DURABLE_PROVIDER_HANDLE",
+              recoveryEvidence: {
+                stage: claimed.stage,
+                priorState: claimed.state,
+                providerHandlePresent: false,
+                recoveryAttempts: claimed.recoveryAttempts,
+              },
+            },
+          );
+          if (refund.refundApplied || claimed.creditsDisposition !== "charged") result.refunded += 1;
+          continue;
+        }
+
+        const providerJob = await this.provider().getJob(claimed.providerJobId);
+        if (providerJob.status === "failed" || providerJob.status === "cancelled") {
+          const refund = await this.stages.failAndRefund(
+            claimed.orderId,
+            claimed.id,
+            order.ownerPhone,
+            providerJob.reason || `PROVIDER_${providerJob.status.toUpperCase()}`,
+            {
+              expectedLeaseOwner: leaseOwner,
+              recoveryReasonCode: `DURABLE_PROVIDER_${providerJob.status.toUpperCase()}`,
+              recoveryEvidence: {
+                stage: claimed.stage,
+                priorState: claimed.state,
+                providerStatus: providerJob.status,
+                providerHandlePresent: true,
+              },
+            },
+          );
+          if (refund.refundApplied || claimed.creditsDisposition !== "charged") result.refunded += 1;
+          continue;
+        }
+
+        await this.stages.recordRecoveryEvidence({
+          orderId: claimed.orderId,
+          attemptId: claimed.id,
+          decision: providerJob.status === "completed" ? "resumable" : "provider_active",
+          reasonCode: providerJob.status === "completed" ? "DURABLE_PROVIDER_COMPLETED" : "DURABLE_PROVIDER_ACTIVE",
+          providerHandlePresent: true,
+          evidence: { stage: claimed.stage, priorState: claimed.state, providerStatus: providerJob.status },
+        });
+        await this.stages.resumeClaimedProviderRecovery(claimed.orderId, claimed.id, leaseOwner);
+        if (providerJob.status === "completed") {
+          await this.pollCustomerStage(order.orderUuid, order.ownerPhone, claimed.stage);
+          result.resumed += 1;
+        } else {
+          result.active += 1;
+        }
+      } catch (error) {
+        await this.stages.recordRecoveryEvidence({
+          orderId: claimed.orderId,
+          attemptId: claimed.id,
+          decision: "retryable_error",
+          reasonCode: "RECOVERY_POLL_ERROR",
+          providerHandlePresent: Boolean(claimed.providerJobId),
+          evidence: {
+            stage: claimed.stage,
+            priorState: claimed.state,
+            errorCode: error instanceof PetGenerationError ? error.code : "PROVIDER_UNAVAILABLE",
+          },
+        }).catch(() => {});
+        await this.stages.releaseRecoveryLease(claimed.orderId, claimed.id, leaseOwner, true).catch(() => false);
+        result.retryableErrors += 1;
+      }
+    }
+
+    return result;
+  }
+
   async submitReferenceManifest(
     orderUuid: string,
     ownerPhone: string,
@@ -128,6 +267,12 @@ export class PetGlbService {
     if (!current) throw new PetGenerationError("STAGE_NOT_FOUND", "Order has no current stage");
 
     const nextStage = this.nextStage(order, current.stage);
+    if ((nextStage === "rig_check" || nextStage === "rig") && !rigGenerationAvailability().available) {
+      throw new PetGenerationError(
+        "RIG_GENERATION_DISABLED",
+        rigGenerationAvailability().reason || "Rig generation is unavailable",
+      );
+    }
     const nextInputHash = nextStage
       ? canonicalHash({
           orderUuid,
@@ -176,9 +321,19 @@ export class PetGlbService {
         && attempt.validationReportSha256
       ) {
         await this.stages.recoverPersistedModelStage(order.id, attempt.id);
+        await this.stages.recordRecoveryEvidence({
+          orderId: order.id, attemptId: attempt.id, decision: "resumable",
+          reasonCode: "PERSISTED_ARTIFACT_RECOVERED", providerHandlePresent: Boolean(attempt.providerJobId),
+          evidence: { stage: attempt.stage, state: attempt.state, artifactPresent: true },
+        });
         return this.buildView((await this.orders.findByUuid(orderUuid))!);
       }
       attempt = await this.stages.resumeProviderRecovery(order.id, attempt.id);
+      await this.stages.recordRecoveryEvidence({
+        orderId: order.id, attemptId: attempt.id, decision: "resumable",
+        reasonCode: "DURABLE_PROVIDER_HANDLE", providerHandlePresent: true,
+        evidence: { stage: attempt.stage, state: "recovery_required", resumedState: attempt.state },
+      });
     }
     let completionClaimed = false;
     if (attempt.state === "persisting") {
@@ -380,6 +535,7 @@ export class PetGlbService {
   }
 
   private provider() {
+    if (this.deps.providerFactory) return this.deps.providerFactory();
     return createProviderForSku(CUSTOM_RIGGED_PET_GLB_V1, {
       store: new MySqlProviderJobStore(this.deps.getPool),
     });

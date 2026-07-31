@@ -107,11 +107,60 @@ jobs:
           test -d dist && echo "dist/ directory exists" || exit 1
           test -f dist/index.html && echo "dist/index.html exists" || exit 1
           test -f dist/server.cjs && echo "dist/server.cjs exists" || exit 1
+      - name: Package exact deployment archive
+        run: bash scripts/build-deploy-zip.sh --output=pawsome3d-deploy.zip
       - uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: dist/
+          path: pawsome3d-deploy.zip
           retention-days: 7
+
+  # ===========================================================================
+  # JOB 3b: Exact production archive boot (gating)
+  # Builds a clean archive, installs only its production dependencies, and
+  # boots it against the isolated MySQL service with deterministic non-secret
+  # environment values.
+  # ===========================================================================
+  archive-smoke:
+    name: Exact Archive Boot Smoke
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: paws_archive_smoke
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: .
+      - name: Run exact extracted-archive boot smoke
+        run: npm run test:archive
+        env:
+          ARCHIVE_PATH: pawsome3d-deploy.zip
+          ARCHIVE_EXPECTED_COMMIT: ${{ github.sha }}
+          REQUIRE_CLEAN: "true"
+          DB_HOST: 127.0.0.1
+          DB_PORT: "3306"
+          DB_NAME: paws_archive_smoke
+          DB_USER: root
+          DB_PASSWORD: ""
 
   # ===========================================================================
   # JOB 4: IFC Tests (Python) — single source of truth for IFC discovery.

@@ -27,6 +27,12 @@ interface Product {
     minimumSuccessRate: number;
     reason: string;
   };
+  rigGeneration: {
+    available: boolean;
+    requestCap: number;
+    costCapMicroUsd: number;
+    reason: string | null;
+  };
   referenceRequirements: {
     requiredSourceUploads: number;
     optionalSourceAngles: string[];
@@ -752,12 +758,20 @@ export default function PetModelStudio() {
                   <span className="block text-xs opacity-65">The Texture tool unlocks when the untextured mesh finishes.</span>
                 </span>
               </label>
-              <label className="flex items-start gap-3 rounded-2xl border border-white/15 p-3">
-                <input type="checkbox" checked={includeRig} onChange={(event) => setIncludeRig(event.target.checked)} className="mt-1" />
+              <label className={`flex items-start gap-3 rounded-2xl border p-3 ${product.rigGeneration.available ? "border-white/15" : "border-amber-300/25 bg-amber-300/10"}`}>
+                <input
+                  type="checkbox"
+                  checked={includeRig}
+                  disabled={!product.rigGeneration.available}
+                  onChange={(event) => setIncludeRig(event.target.checked)}
+                  className="mt-1 disabled:cursor-not-allowed"
+                />
                 <span>
                   <span className="text-sm font-medium">Animation-ready body rig · {product.prices.rig} PupCoins</span>
                   <span className="block text-xs opacity-65">
-                    Adds a skeleton and skin weights after the base mesh, or after Texture when selected. Animation tools unlock only after compatibility passes.
+                    {product.rigGeneration.available
+                      ? "Adds a skeleton and skin weights after the base mesh, or after Texture when selected. Animation tools unlock only after compatibility passes."
+                      : product.rigGeneration.reason}
                   </span>
                 </span>
               </label>

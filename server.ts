@@ -37,6 +37,7 @@ import { spatialGeneratorRouter, startSpatialGeneratorScheduler } from "./server
 import { createPetGenerationRouter, createPetGlbWebhookHandler } from "./server/pet-generation/routes";
 import { buildPetGlbDeps } from "./server/pet-generation/wiring";
 import { isPetGlbEnabled } from "./server/pet-generation/featureFlag";
+import { PetGlbService } from "./server/pet-generation/service";
 import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
@@ -1057,6 +1058,24 @@ async function startServer() {
       express.raw({ type: "application/json" }),
       createPetGlbWebhookHandler(petGlbDeps),
     );
+    const petGlbRecovery = new PetGlbService(petGlbDeps);
+    let petGlbRecoveryActive = false;
+    const sweepPetGlbRecovery = async () => {
+      if (petGlbRecoveryActive) return;
+      petGlbRecoveryActive = true;
+      try {
+        const result = await petGlbRecovery.sweepStaleStages();
+        if (result.claimed > 0) {
+          console.log(`[pet-glb recovery] inspected=${result.inspected} claimed=${result.claimed} resumed=${result.resumed} active=${result.active} refunded=${result.refunded} retryable=${result.retryableErrors}`);
+        }
+      } catch (error: any) {
+        console.error("[pet-glb recovery] sweep failed:", error?.message || error);
+      } finally {
+        petGlbRecoveryActive = false;
+      }
+    };
+    void sweepPetGlbRecovery();
+    setInterval(() => void sweepPetGlbRecovery(), 60 * 1000).unref();
     console.log("[pet-glb] mounted at /api/pet-glb");
   }
   if (isModelBuildV3Enabled()) {

@@ -3,8 +3,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ALLOW_DIRTY=false
+OUTPUT_ZIP=""
 for arg in "$@"; do
   if [ "$arg" = "--allow-dirty" ]; then ALLOW_DIRTY=true; fi
+  case "$arg" in
+    --output=*) OUTPUT_ZIP="${arg#--output=}" ;;
+  esac
 done
 
 if [ "$ALLOW_DIRTY" = false ] && [ -n "$(git status --porcelain)" ]; then
@@ -27,6 +31,7 @@ if [ "$ALLOW_DIRTY" = true ]; then
 else
   ZIP_NAME="pawsome3d-deploy.zip"
 fi
+if [ -n "$OUTPUT_ZIP" ]; then ZIP_NAME="$OUTPUT_ZIP"; fi
 
 STAGING_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t paws_stage)
 EXTRACT_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t paws_extract)
@@ -34,7 +39,7 @@ cleanup() { rm -rf "$STAGING_DIR" "$EXTRACT_DIR"; }
 trap cleanup EXIT
 
 echo "Running fail-closed production build..."
-npm run build
+RELEASE_DIRTY="${RELEASE_DIRTY:-$([ "$ALLOW_DIRTY" = true ] && echo true || echo false)}" npm run build
 
 echo "Packaging the locally verified Hostinger build for commit $COMMIT_SHA..."
 mkdir -p "$STAGING_DIR/dist"

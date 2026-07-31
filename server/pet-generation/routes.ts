@@ -11,6 +11,7 @@ import {
   FACIAL_RIG_POLICY,
   meshProfilePolicy,
   ReferenceManifestSchema,
+  rigGenerationAvailability,
   StageApprovalSchema,
   StageKindSchema,
   StageRejectionSchema,
@@ -62,6 +63,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
 
   // ── Product / quote ───────────────────────────────────────────────────────
   router.get("/product", (_req, res) => {
+    const rigGeneration = rigGenerationAvailability();
     res.json({
       sku: "CUSTOM_RIGGED_PET_GLB_V1",
       name: "Custom 3D Model",
@@ -82,6 +84,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
         { id: "humanoid", label: "Humanoid character", rigType: "biped" },
       ],
       facialRig: FACIAL_RIG_POLICY,
+      rigGeneration,
       styleDirection: {
         stage: "texture",
         maxCharacters: 400,
@@ -117,6 +120,12 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
       });
     }
     try {
+      if (parsed.data.includeRig && !rigGenerationAvailability().available) {
+        return res.status(503).json({
+          error: "RIG_GENERATION_DISABLED",
+          message: rigGenerationAvailability().reason,
+        });
+      }
       res.json(await service.createConfiguredOrder(phone, {
         meshProfile: parsed.data.meshProfile,
         subjectProfile: parsed.data.subjectProfile,
@@ -287,6 +296,17 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
       res.json(await service.operatorQueue(phone));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.get("/operator/orders/:orderUuid/recovery-evidence", pollLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      if (!deps.isOperator || !(await deps.isOperator(phone))) return res.status(403).json({ error: "NOT_OPERATOR" });
+      const order = await service.repository.findByUuid(req.params.orderUuid);
+      if (!order) return res.status(404).json({ error: "ORDER_NOT_FOUND" });
+      res.json(await service.stageRepository.listRecoveryEvidence(order.id));
     } catch (err) { fail(res, err); }
   });
 

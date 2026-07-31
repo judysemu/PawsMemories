@@ -213,6 +213,15 @@ export class PetGlbOrderRepository {
     return arr.length ? mapRow(arr[0]) : undefined;
   }
 
+  async findById(orderId: number): Promise<PetGlbOrder | undefined> {
+    const [rows] = await this.getPool().query(
+      "SELECT * FROM pet_glb_orders WHERE id = ? LIMIT 1",
+      [orderId],
+    );
+    const arr = rows as any[];
+    return arr.length ? mapRow(arr[0]) : undefined;
+  }
+
   async listByOwner(ownerPhone: string, limit = 20): Promise<PetGlbOrder[]> {
     const bounded = Math.max(1, Math.min(50, Math.trunc(limit)));
     const [rows] = await this.getPool().query(
