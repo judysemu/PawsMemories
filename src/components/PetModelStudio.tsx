@@ -237,7 +237,6 @@ export default function PetModelStudio() {
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
   const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("multi");
-  const [autoContinue, setAutoContinue] = useState(false);
   const [printHeight, setPrintHeight] = useState(100);
   const [collarSizeClass, setCollarSizeClass] = useState<CollarSizeClass>("medium_dog");
   const [neckCircumferenceMm, setNeckCircumferenceMm] = useState(400);
@@ -340,15 +339,20 @@ export default function PetModelStudio() {
     setError(null);
     setGenerationMessage("Preparing your reference session…");
     try {
-      const sourceImage = references.frontUrl;
+      const sourceImages = UPLOAD_FIELDS.map(([key]) => references[key]).filter((value): value is string => Boolean(value?.trim()));
+      const sourceImage = sourceImages[0];
       if (inputMode !== "text" && !sourceImage) {
         throw new Error("Add one clear pet photo to generate the 360° views.");
+      }
+      if (inputMode === "multi" && sourceImages.length < UPLOAD_FIELDS.length) {
+        throw new Error("Add four photos from different angles before generating the reference set.");
       }
       const session = await createReferenceSession(
         inputMode === "text" ? "text" : "photo",
         inputMode === "text" ? selectedStyle : undefined,
         subjectProfile,
         sourceImage,
+        inputMode === "multi" ? sourceImages : undefined,
       );
       setGenerationMessage("Generating the complete 360° view set…");
       const generated = await startReferenceAttempt(session.sessionUuid, `views_${crypto.randomUUID()}`);
@@ -392,12 +396,7 @@ export default function PetModelStudio() {
       setReferences(generatedManifest as Record<string, string>);
       setReferenceSession({ sessionUuid: session.sessionUuid, manifestHash });
       applyView(withReferences);
-      if (autoContinue) {
-        setGenerationMessage("Approving the views and starting the base mesh…");
-        await approveReferenceManifest(session.sessionUuid, manifestHash);
-        await approveStage(withReferences);
-      }
-      setGenerationMessage(autoContinue ? "Base mesh started." : "360° views are ready for your approval.");
+      setGenerationMessage("360° views are ready for your approval.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
       setGenerationMessage(null);
@@ -406,16 +405,33 @@ export default function PetModelStudio() {
     }
   };
 
+  const optimizeReferenceFile = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the reference photo."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("The reference photo could not be decoded."));
+      image.onload = () => {
+        const scale = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      image.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+
   const loadReferenceFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     const emptyKeys = UPLOAD_FIELDS.map(([key]) => key).filter((key) => !references[key]);
     files.slice(0, emptyKeys.length).forEach((file, index) => {
-      const reader = new FileReader();
-      reader.onload = () => {
+      void optimizeReferenceFile(file).then((dataUrl) => {
         const key = emptyKeys[index];
-        setReferences((current) => ({ ...current, [key]: String(reader.result || "") }));
-      };
-      reader.readAsDataURL(file);
+        setReferences((current) => ({ ...current, [key]: dataUrl }));
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not read the reference photo."));
     });
     event.target.value = "";
   };
@@ -648,17 +664,17 @@ export default function PetModelStudio() {
               <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-cyan-300/35 bg-cyan-300/5 px-3 py-5 text-center text-xs">
                 <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={loadReferenceFiles} />
                 <span>
-                  <strong className="block text-sm">Choose at least one pet photo</strong>
-                  {inputMode === "multi" ? "One photo is enough; extra angles are optional" : "One clear photo generates the complete view set"}
+                  <strong className="block text-sm">Choose your pet photos</strong>
+                  {inputMode === "multi" ? "Four angles required · front, left, rear, and right" : "One clear photo generates the complete view set"}
                 </span>
               </label>
               <div className="grid grid-cols-4 gap-1.5">
                 {UPLOAD_FIELDS.map(([key, label]) => (
-                  <label key={key} className={`relative aspect-square cursor-pointer overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
+                  <div key={key} className={`relative aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
                     {references[key]
                       ? <img src={references[key]} alt={`${label} upload`} className="h-full w-full object-cover" />
                       : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-55">{key === "frontUrl" ? "Required\nphoto" : "Add photo"}</span>}
-                    <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={loadReferenceFiles} />
+                    <label className="absolute inset-0 cursor-pointer" aria-label={`Add ${label}`}><input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={loadReferenceFiles} /></label>
                     {references[key] && (
                       <button
                         type="button"
@@ -669,7 +685,7 @@ export default function PetModelStudio() {
                         ×
                       </button>
                     )}
-                  </label>
+                  </div>
                 ))}
               </div>
               {(inputMode === "generate" || inputMode === "text") && (
@@ -715,10 +731,7 @@ export default function PetModelStudio() {
                   </span>
                 </span>
               </label>
-              <label className="flex items-start gap-3 text-xs">
-                <input type="checkbox" checked={autoContinue} onChange={(event) => setAutoContinue(event.target.checked)} className="mt-0.5" />
-                <span>Auto-approve the generated 360° views and begin the base mesh. Later paid stages still ask before charging.</span>
-              </label>
+              <p className="text-xs opacity-60">Every generated reference set pauses for your approval before the base mesh begins.</p>
               <p className="text-xs opacity-60">When complete, your private model appears in the Fur Bin.</p>
             </fieldset>
 
@@ -752,7 +765,7 @@ export default function PetModelStudio() {
                 </div>
               </fieldset>
             )}
-            <button onClick={start} disabled={busy || (inputMode !== "text" ? !primaryReferenceReady : !selectedStyle.trim())}
+            <button onClick={start} disabled={busy || (inputMode === "multi" ? UPLOAD_FIELDS.some(([key]) => !references[key]) : inputMode !== "text" ? !primaryReferenceReady : !selectedStyle.trim())}
               className="group relative w-full overflow-hidden rounded-2xl bg-cyan-400 px-4 py-3.5 font-bold text-slate-950 disabled:opacity-40">
               <span className="relative z-10">{busy ? "Generating 360° views…" : "Generate base model"}</span>
               {busy && <span className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_80%,#f5d08a_0_2px,transparent_3px)] bg-[length:18px_18px]" />}

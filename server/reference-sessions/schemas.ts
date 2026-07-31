@@ -19,14 +19,24 @@ export const CreateSessionSchema = z
     prompt: z.string().max(2000).optional().nullable(),
     sourceImageBase64: z.string().max(28_000_000).optional(),
     sourceMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
+    sourceImagesBase64: z.array(z.string().max(28_000_000)).max(4).optional(),
+    sourceMimeTypes: z.array(z.enum(["image/png", "image/jpeg", "image/webp"])).max(4).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
     if (value.inputMode === "text" && !value.prompt?.trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["prompt"], message: "A prompt is required for text input." });
     }
-    if (value.inputMode === "photo" && (!value.sourceImageBase64 || !value.sourceMimeType)) {
+    const imageCount = value.sourceImagesBase64?.length || (value.sourceImageBase64 ? 1 : 0);
+    const mimeCount = value.sourceMimeTypes?.length || (value.sourceMimeType ? 1 : 0);
+    if (value.inputMode === "photo" && (imageCount < 1 || mimeCount < 1)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceImageBase64"], message: "A source image is required for photo input." });
+    }
+    if (value.sourceImagesBase64 && value.sourceMimeTypes && value.sourceImagesBase64.length !== value.sourceMimeTypes.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceMimeTypes"], message: "Each source image must declare its MIME type." });
+    }
+    if ((value.sourceImagesBase64 || []).reduce((total, image) => total + image.length, 0) > 45_000_000) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceImagesBase64"], message: "Reference photos are too large combined. Choose smaller images." });
     }
   });
 

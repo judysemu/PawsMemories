@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import type mysql from "mysql2/promise";
+import sharp from "sharp";
 import { getPool } from "../../db";
 import { getPrivateObjectBuffer } from "../../storage.private";
 import { addLineage, registerAsset } from "../assets/service";
@@ -168,10 +169,30 @@ export class ReferenceSessionService {
     let sourceAsset: { id: number; versionId: number } | null = null;
     let sourceObjectKey: string | null = null;
     if (validated.inputMode === "photo") {
-      const imageBuffer = decodeBase64Image(validated.sourceImageBase64!);
+      const encodedImages = validated.sourceImagesBase64?.length
+        ? validated.sourceImagesBase64
+        : [validated.sourceImageBase64!];
+      const mimeTypes = validated.sourceMimeTypes?.length
+        ? validated.sourceMimeTypes
+        : [validated.sourceMimeType!];
+      const inspectedInputs = await Promise.all(encodedImages.map(async (encoded, index) => {
+        const imageBuffer = decodeBase64Image(encoded);
+        const inspected = await inspectReferenceImage(imageBuffer, mimeTypes[index] || mimeTypes[0], 1);
+        return { imageBuffer, ...inspected };
+      }));
+      const imageBuffer = inspectedInputs.length === 1
+        ? inspectedInputs[0].imageBuffer
+        : await sharp({
+          create: { width: 2048, height: 2048, channels: 3, background: "#f5f5f5" },
+        }).composite(await Promise.all(inspectedInputs.slice(0, 4).map(async ({ imageBuffer }, index) => ({
+          input: await sharp(imageBuffer).resize(1024, 1024, { fit: "contain", background: "#ffffff" }).png().toBuffer(),
+          left: (index % 2) * 1024,
+          top: Math.floor(index / 2) * 1024,
+        })))).png().toBuffer();
+      const imageMimeType = inspectedInputs.length === 1 ? inspectedInputs[0].mimeType : "image/png";
       // User uploads only need to decode safely. Gemini generates the canonical
       // high-resolution approval views, which retain the stricter 1024px gate.
-      const inspected = await inspectReferenceImage(imageBuffer, validated.sourceMimeType!, 1);
+      const inspected = await inspectReferenceImage(imageBuffer, imageMimeType, 1);
       const stored = await storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
       sourceObjectKey = stored.objectKey;
       try {

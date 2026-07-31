@@ -1151,9 +1151,12 @@ export async function createReferenceSession(
   prompt?: string,
   subjectClass: string = "pet",
   sourceImageDataUrl?: string,
+  sourceImageDataUrls?: string[],
 ): Promise<{ success: boolean; sessionUuid: string; state: string }> {
-  const sourceMatch = sourceImageDataUrl?.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i);
-  if (inputMode === "photo" && !sourceMatch) {
+  const candidates = (sourceImageDataUrls?.length ? sourceImageDataUrls : sourceImageDataUrl ? [sourceImageDataUrl] : [])
+    .map((value) => value.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i))
+    .filter((match): match is RegExpMatchArray => Boolean(match));
+  if (inputMode === "photo" && candidates.length === 0) {
     throw new Error("The source photo must be an embedded PNG, JPEG, or WebP image.");
   }
   const res = await authedFetch("/api/reference-sessions/create", {
@@ -1163,8 +1166,10 @@ export async function createReferenceSession(
       inputMode,
       prompt,
       subjectClass,
-      sourceImageBase64: sourceMatch?.[2],
-      sourceMimeType: sourceMatch?.[1]?.toLowerCase(),
+      sourceImageBase64: candidates[0]?.[2],
+      sourceMimeType: candidates[0]?.[1]?.toLowerCase(),
+      sourceImagesBase64: candidates.map((match) => match[2]),
+      sourceMimeTypes: candidates.map((match) => match[1].toLowerCase()),
     }),
   });
   if (!res.ok) {
@@ -1582,4 +1587,3 @@ export async function fetchCustomizeOrders(): Promise<CustomizeOrder[]> {
   const data = await res.json();
   return data.orders || [];
 }
-
