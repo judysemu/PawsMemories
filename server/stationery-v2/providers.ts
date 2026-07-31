@@ -53,10 +53,19 @@ async function jsonRequest(baseUrl: string, token: string, path: string, init: R
   return body?.result || body?.data || body;
 }
 
+function parsePrintfulVariantMap(rawMap: string): Record<string, unknown> {
+  const candidates = [rawMap];
+  const hpanelNormalized = rawMap.replace(/\\([{}"])/g, "$1");
+  if (hpanelNormalized !== rawMap) candidates.push(hpanelNormalized);
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate) as Record<string, unknown>; } catch { /* try the narrow Hostinger fallback */ }
+  }
+  throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must be valid JSON.");
+}
+
 function printfulVariantId(env: NodeJS.ProcessEnv, sku: string): number {
   const rawMap = String(env.PRINTFUL_STATIONERY_VARIANT_MAP || "{}");
-  let map: Record<string, unknown>;
-  try { map = JSON.parse(rawMap) as Record<string, unknown>; } catch { throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must be valid JSON."); }
+  const map = parsePrintfulVariantMap(rawMap);
   const value = map[sku] ?? sku;
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw new Error("No valid Printful variant is configured for this stationery SKU.");
@@ -66,8 +75,7 @@ function printfulVariantId(env: NodeJS.ProcessEnv, sku: string): number {
 function validatePrintfulVariantMap(env: NodeJS.ProcessEnv): void {
   const rawMap = String(env.PRINTFUL_STATIONERY_VARIANT_MAP || "");
   if (!rawMap.trim()) throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP is required.");
-  let map: Record<string, unknown>;
-  try { map = JSON.parse(rawMap) as Record<string, unknown>; } catch { throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must be valid JSON."); }
+  const map = parsePrintfulVariantMap(rawMap);
   if (!map || typeof map !== "object" || Object.keys(map).length === 0) throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must contain at least one SKU.");
   for (const [sku, value] of Object.entries(map)) {
     const id = Number(value);

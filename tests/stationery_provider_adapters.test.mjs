@@ -42,6 +42,23 @@ test("Printful Stationery adapter creates and confirms an idempotent order", asy
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("Printful Stationery adapter accepts Hostinger-literal brace and quote escaping", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify({ result: { id: 42 } }), { status: 200 });
+  };
+  try {
+    const provider = new PrintfulStationeryProvider({
+      PRINTFUL_API_KEY: "pf-secret",
+      PRINTFUL_STATIONERY_VARIANT_MAP: '\\{\\"CARD-5X7\\":123\\}',
+    });
+    await provider.submitFrozenManifest(input);
+    assert.equal(JSON.parse(calls[0].init.body).items[0].variant_id, 123);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("Slant3D Stationery adapter uploads the frozen file and creates an order", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
