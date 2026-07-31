@@ -167,7 +167,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
           </h1>
           <p className="text-xs font-medium text-on-surface-variant opacity-80">
             {step === "login" && "Log in with your email and password."}
-            {step === "signup" && "Create your account and claim one free avatar."}
+            {step === "signup" && "Create your account to get started."}
             {step === "profile" && "Just a couple details and you're in."}
             {step === "pets" && "Tell us about your furry friends!"}
           </p>
