@@ -304,7 +304,7 @@ it after direct race/state probes exposed two additional failures:
 | TypeScript | **PASS** | `npm run lint` under Node 24.18.0 |
 | Production build | **PASS** | Vite, 2.1 MB server bundle, and 79-file release manifest completed under Node 24.18.0 |
 | Python/IFC/worker suites | **PASS** | IFC worker 6/6 under Python 3.11 with pinned `ifcopenshell==0.8.5`; contracts 40/40 and security 8/8 |
-| Security/dependency scan | **PASS for source tree** | npm audit 0 vulnerabilities; redacted source secret scan found no embedded credential after manual review of ten heuristic alerts; committed archive will be scanned separately |
+| Security/dependency scan | **PASS for source tree** | Root and Blender-worker npm audits report 0 vulnerabilities; redacted source secret scan found no embedded credential after manual review of ten heuristic alerts; committed archive will be scanned separately |
 | Live exact commit | Pending after fixes | `/version` |
 | Live readiness | Pending after fixes | `/readyz` |
 | Real model workflow | **NOT YET RUN** | Must complete reference generation, model build, persistence, and Fur Bin verification |

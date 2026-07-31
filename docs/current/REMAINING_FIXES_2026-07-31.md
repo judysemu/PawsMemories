@@ -25,7 +25,7 @@ reviewing the resulting runtime/browser evidence.
 - Contract/security suites: **48/48 PASS**.
 - IFC worker: **6/6 PASS** under Python 3.11 with pinned
   `ifcopenshell==0.8.5`.
-- Dependency audit: **0 vulnerabilities**.
+- Root and Blender-worker dependency audits: **0 vulnerabilities**.
 - Redacted source secret scan: **PASS**; ten heuristic alerts were reviewed as
   environment reads, request fields, configured client fields, or database
   columns, with no embedded credential. The committed-archive scan remains

@@ -7,7 +7,7 @@ import net from "net";
 import { execSync, exec, spawn } from "child_process";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
-import Jimp from "jimp";
+import { Jimp } from "jimp";
 import * as templates from "./animation-templates.js";
 import { buildSkeletalClipScript, SKELETAL_CLIP_MANIFEST } from "./skeletal-clips.js";
 import { buildSkeletalClipScript as buildSkeletalClipScriptHuman, SKELETAL_CLIP_MANIFEST as SKELETAL_CLIP_MANIFEST_HUMAN } from "./skeletal-clips-human.js";
@@ -1381,7 +1381,11 @@ app.post("/bake-sprites", async (req, res) => {
         const sheetHeight = actions.length * frameSize;
 
         // Initialize empty sprite sheet canvas
-        const spriteSheet = new Jimp(sheetWidth, sheetHeight, 0x00000000);
+        const spriteSheet = new Jimp({
+          width: sheetWidth,
+          height: sheetHeight,
+          color: 0x00000000,
+        });
 
         for (let i = 0; i < actions.length; i++) {
           const action = actions[i];
@@ -1416,7 +1420,7 @@ app.post("/bake-sprites", async (req, res) => {
         }
 
         console.log(`[Sprites ${jobId}] Writing final sprite sheet...`);
-        await spriteSheet.writeAsync(outputPngPath);
+        await spriteSheet.write(outputPngPath);
         fs.writeFileSync(outputJsonPath, JSON.stringify(animationMetadata));
 
         const spritePng = fs.readFileSync(outputPngPath);

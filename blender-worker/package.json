@@ -9,8 +9,7 @@
     "start:mac": "PATH=\"/Applications/Blender.app/Contents/MacOS:$PATH\" node server.js"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "jimp": "^0.22.12",
-    "uuid": "^10.0.0"
+    "express": "4.22.2",
+    "jimp": "1.6.1"
   }
 }

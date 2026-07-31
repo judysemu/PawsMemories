@@ -34,10 +34,10 @@ jobs:
 
   # ===========================================================================
   # JOB 2: Unit Tests + AR Tests (gating)
-  # Unit + AR tests are DB-agnostic (initDb skips when DB vars are absent) and
-  # contract tests drive an in-process Express app with no real providers. The
-  # full-server auth smoke test binds a free local port and tears down its whole
-  # process group. A 15-minute job timeout is a hard backstop against the
+  # Unit + AR tests include transaction/concurrency coverage against an isolated
+  # MySQL service; contract tests drive an in-process Express app with no real
+  # providers. The full-server auth smoke test binds a free local port and tears
+  # down its whole process group. A 15-minute job timeout is a hard backstop against the
   # historical "unit tests hung in CI" failure (open child-handle / interval).
   # The AR suite is covered by the single `npm test` step below (tests/*.test.mjs
   # already includes tests/ar_*, tests/brain_*, tests/pets_*, and
@@ -49,6 +49,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,12 +68,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
       - run: npm ci
-      # Unit tests (all tests/*.test.mjs) — explicitly DB-disabled so any
-      # spawned server child cannot attempt a MySQL connection.
+      - name: Install Blender worker dependencies
+        run: npm ci --prefix blender-worker
+      # Unit tests (all tests/*.test.mjs), including the fail-closed Blender
+      # worker boundary and real-MySQL transaction/concurrency regressions.
       - name: Run unit tests
         run: npm test
         env:
           NODE_ENV: test
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PORT: "3306"
+          MYSQL_TEST_USER: root
+          MYSQL_TEST_PASSWORD: ""
       - name: Run hostile-input security tests
         run: npm run test:security
         env:
