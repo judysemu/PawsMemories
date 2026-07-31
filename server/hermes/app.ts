@@ -63,9 +63,9 @@ export async function createProductionHermesApp(): Promise<Express> {
 
   // Gemini adapter — active whenever the Hermes bridge is disabled (the default).
   // Uses the same GEMINI_API_KEY as the rest of the app so no new credentials
-  // are needed. GEMINI_HERMES_MODEL defaults to "gemini-2.5-flash".
+  // are needed. GEMINI_HERMES_MODEL defaults to "gemini-3.1-flash-lite".
   const geminiApiKey = process.env.GEMINI_API_KEY;
-  const geminiHermesModel = process.env.GEMINI_HERMES_MODEL || "gemini-2.5-flash";
+  const geminiHermesModel = process.env.GEMINI_HERMES_MODEL || "gemini-3.1-flash-lite";
   const geminiAdapter = geminiApiKey
     ? new GeminiHermesAdapter(geminiApiKey, geminiHermesModel)
     : undefined;

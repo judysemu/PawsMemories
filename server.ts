@@ -3957,15 +3957,15 @@ async function startServer() {
 
   /**
    * Best-first TEXT model chain, used by extractPalette. Previously hardcoded as
-   * ["gemini-2.5-flash", "gemini-2.0-flash-exp"] while GEMINI_TEXT_FALLBACK_MODEL
+   * ["gemini-3.1-flash-lite"] while GEMINI_TEXT_FALLBACK_MODEL
    * was declared in .env.example but read nowhere (GEMINI_CALL_AUDIT.md §4.1).
    * Defaults preserve the exact previous behaviour; the env var now works.
    */
   // Only include the fallback when explicitly set — no default so the chain
-  // stays single-model (gemini-2.5-flash) and gemini-2.0-flash-exp never
+  // stays single-model (gemini-3.1-flash-lite) unless an operator opts in.
   // appears unless the operator deliberately opts in.
   const TEXT_MODELS: string[] = [
-    (process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash").trim(),
+    (process.env.GEMINI_TEXT_MODEL || "gemini-3.1-flash-lite").trim(),
     process.env.GEMINI_TEXT_FALLBACK_MODEL?.trim() ?? "",
   ].filter(Boolean);
 
@@ -5072,7 +5072,7 @@ async function startServer() {
       const parts: any[] = request.images.map((image) => ({ inlineData: { data: image.data, mimeType: image.mimeType } }));
       parts.push({ text: buildBimProposalPrompt(request) });
       const response = await ai.models.generateContent({
-        model: (process.env.BIM_PROPOSAL_MODEL || "gemini-2.5-flash").trim(),
+        model: (process.env.BIM_PROPOSAL_MODEL || "gemini-3.1-flash-lite").trim(),
         contents: { parts },
         config: { temperature: 0.1, responseMimeType: "application/json", systemInstruction: BIM_PROPOSAL_SYSTEM_INSTRUCTION },
       });
@@ -5094,7 +5094,7 @@ async function startServer() {
   const classifyGenerate: GenerateFn = async ({ prompt, imageBase64, mimeType, temperature }) => {
     const part = { inlineData: { data: imageBase64, mimeType } };
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: process.env.GEMINI_TEXT_MODEL || "gemini-3.1-flash-lite",
       contents: { parts: [part, { text: prompt }] },
       config: { temperature, responseMimeType: "application/json" },
     });
@@ -7816,7 +7816,7 @@ async function startServer() {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_TEXT_MODEL || "gemini-3.1-flash-lite",
         contents: contentParts,
         config: {
           systemInstruction: buildRandySystemInstruction(liveContext),

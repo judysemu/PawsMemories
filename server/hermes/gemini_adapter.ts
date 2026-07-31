@@ -11,7 +11,7 @@
  *
  * Control env vars:
  *   GEMINI_API_KEY       — required (already set for image generation)
- *   GEMINI_HERMES_MODEL  — optional override, defaults to "gemini-2.5-flash"
+ *   GEMINI_HERMES_MODEL  — optional override, defaults to "gemini-3.1-flash-lite"
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -154,16 +154,16 @@ markings, human anatomy, low-quality artefacts.`;
 // Model to use for the planning pass, keyed by quality tier.
 // The planning pass is text-only; image rendering is handled separately.
 const HERMES_PLAN_MODEL_BY_TIER: Record<string, string> = {
-  draft:    "gemini-2.5-flash",
-  standard: "gemini-2.5-flash",
-  studio:   "gemini-2.5-pro",
+  draft:    "gemini-3.1-flash-lite",
+  standard: "gemini-3.1-flash-lite",
+  studio:   "gemini-3.1-flash-lite",
 };
 
 export class GeminiHermesAdapter implements GeminiAdapter {
   private readonly ai: GoogleGenAI;
   private readonly model: string;
 
-  constructor(apiKey: string, model = "gemini-2.5-flash") {
+  constructor(apiKey: string, model = "gemini-3.1-flash-lite") {
     this.ai = new GoogleGenAI({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } },

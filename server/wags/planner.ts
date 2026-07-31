@@ -8,7 +8,7 @@
  *
  * Control env vars:
  *   GEMINI_API_KEY         — required (shared with image generation)
- *   GEMINI_WAGS_MODEL      — optional override (default: gemini-2.5-flash)
+ *   GEMINI_WAGS_MODEL      — optional override (default: gemini-3.1-flash-lite)
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -146,7 +146,7 @@ export async function planWagsBox(input: WagsPlannerInput): Promise<WagsPlan> {
     apiKey,
     httpOptions: { headers: { "User-Agent": "aistudio-build" } },
   });
-  const model = process.env.GEMINI_WAGS_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_WAGS_MODEL || "gemini-3.1-flash-lite";
 
   const monthNum = parseInt(input.box_month.split("-")[1] ?? "1", 10);
   const season = getSeason(monthNum);

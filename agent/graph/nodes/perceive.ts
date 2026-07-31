@@ -77,7 +77,7 @@ export async function perceiveNode(state: BuildState): Promise<Partial<BuildStat
   try {
     const responseText = await generateGeminiText({
       apiKey,
-      model: "gemini-2.5-flash",
+      model: "gemini-3.1-flash-lite",
       input,
       fallbackContents: [{ role: "user", parts: fallbackParts }],
       systemInstruction: PERCEIVE_SYSTEM_PROMPT,

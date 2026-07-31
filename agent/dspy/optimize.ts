@@ -237,7 +237,7 @@ Your task: Analyze viewport screenshots and scene graph data to understand the c
 ${formatFewShotExamples(perceiveExamples)}
 
 Return a JSON object with: objectsPresent, overallQuality, missingElements, suggestedViewportChange, readyForNextStep, notes.`,
-    model: "gemini-2.5-flash",
+    model: "gemini-3.1-flash-lite",
     temperature: 0.1,
   };
 
@@ -257,7 +257,7 @@ ${formatFewShotExamples(codeGenExamples)}
 
 Return ONLY valid Python code. Start with "import bpy".`,
     model: "gpt-4o",
-    fallback_model: "gemini-2.5-flash",
+    fallback_model: "gemini-3.1-flash-lite",
     temperature: 0.1,
   };
 
@@ -274,7 +274,7 @@ Severity guide:
 ${formatFewShotExamples(verifyExamples)}
 
 Return JSON: { success, issuesFound[], driftSeverity, recommendation, details }`,
-    model: "gemini-2.5-flash",
+    model: "gemini-3.1-flash-lite",
     temperature: 0.1,
   };
 

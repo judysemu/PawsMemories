@@ -148,7 +148,7 @@ async function generateCode(
 
   const code = await generateGeminiText({
     apiKey: geminiKey,
-    model: "gemini-2.5-flash",
+    model: "gemini-3.1-flash-lite",
     input: userPrompt,
     fallbackContents: userPrompt,
     systemInstruction: CODE_GEN_SYSTEM_PROMPT,

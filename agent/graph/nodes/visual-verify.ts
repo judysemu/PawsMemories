@@ -133,7 +133,7 @@ export async function visualVerifyNode(state: BuildState): Promise<Partial<Build
   try {
     const responseText = await generateGeminiText({
       apiKey,
-      model: "gemini-2.5-flash",
+      model: "gemini-3.1-flash-lite",
       input,
       fallbackContents: [{ role: "user", parts: fallbackParts }],
       systemInstruction: VISUAL_VERIFY_SYSTEM_PROMPT,

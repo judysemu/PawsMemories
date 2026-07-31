@@ -132,7 +132,7 @@ export async function verifyNode(state: BuildState): Promise<Partial<BuildState>
   try {
     const responseText = await generateGeminiText({
       apiKey,
-      model: "gemini-2.5-flash",
+      model: "gemini-3.1-flash-lite",
       input,
       fallbackContents: [{ role: "user", parts: fallbackParts }],
       systemInstruction: VERIFY_SYSTEM_PROMPT,
