@@ -143,7 +143,7 @@ This section records local code and artifact evidence only. It does not upgrade 
 | P1 item | CODE | LOCAL | ARCHIVE | DEPLOYED | LIVE | END-TO-END | Evidence / remaining gate |
 |---|---|---|---|---|---|---|---|
 | Stale Pet GLB recovery | PASS | PASS | N/A | NOT RUN | NOT RUN | NOT RUN | Additive schema v45, bounded stale-current leases, durable-handle-only resume, redacted operator evidence, and immutable-debit refunds are implemented. Five real-MySQL recovery tests pass, including exclusive leases, exactly-once refunds, no refund after a concurrent stage transition, no blind provider create, and evidence persistence. |
-| Exact deployment archive boot | PASS | PASS | PENDING CLEAN RUN | NOT RUN | NOT RUN | NOT RUN | The smoke test extracts the real ZIP, installs production dependencies, boots the packaged root `server.cjs`, checks five routes and release metadata, and proves missing-secret and missing-sound boot failures. The dedicated database reset is restricted to `paws_archive_smoke*`. |
+| Exact deployment archive boot | PASS | PASS | PASS | NOT RUN | NOT RUN | NOT RUN | The clean `46a1dfa` ZIP was extracted, production dependencies were installed, packaged root `server.cjs` booted, `/healthz`, `/readyz`, `/version`, `/`, and `/create` passed, and missing-secret plus missing-sound boot failures were proven. The dedicated database reset is restricted to `paws_archive_smoke*`. |
 | Pinned model viewer | PASS | PASS | PASS | NOT RUN | NOT RUN | NOT RUN | `@google/model-viewer@4.0.0` and application `three@0.169.0` are lockfile-pinned, the runtime CDN loader is removed, and the production build emits a local model-viewer chunk. Nested development/library Three.js versions remain visible in `npm ls`; no live runtime duplication claim is made. |
 | Rig generation closed | PASS | PASS | N/A | NOT RUN | NOT RUN | NOT RUN | A zero rig request or cost cap reports unavailable in the product contract and rejects rig orders before charge/provider dispatch. Production limits were not raised. |
 | Animator release candidate | PASS | PASS | PASS | NOT RUN | NOT RUN | NOT RUN | Admin can reach the existing release candidate while customers retain the Under Construction gate. Deterministic scene, audio, ffmpeg mux, ownership, and packaged-asset tests pass. A live browser export with audible output remains required before customer release. |
@@ -158,7 +158,9 @@ This section records local code and artifact evidence only. It does not upgrade 
 - Contract suite: 40 passed, 0 failed.
 - Security suite: 8 passed, 0 failed.
 - Production build: PASS; the viewer is bundled locally and no Model Viewer CDN reference is present.
-- Clean archive hash and size are intentionally recorded in a follow-up evidence commit after the committed archive is built and smoke-tested.
+- Clean archive commit: `46a1dfaa4db4fe11f016ed6b303eb20ab9db2929`.
+- Clean archive: 21,047,312 bytes; SHA-256 `24d2d264bade2a39fbce0fe6f6fc0fc4dcbdafe1274026a20671c8eb6dac3b32`.
+- Exact extracted-archive boot smoke: PASS under Node `v24.18.0`.
 
 ## Remaining P0 work
 
