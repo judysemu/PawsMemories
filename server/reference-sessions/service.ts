@@ -67,7 +67,10 @@ async function assertReferenceProviderBudget(
   connection: mysql.PoolConnection,
   ownerId: string,
 ): Promise<void> {
-  const perUserDailyCap = boundedReferenceCap("REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP", 3, 50);
+  // The product allowance is enforced per reference session (initial render +
+  // up to two free retries), not across unrelated pets created the same day.
+  // Keep the user-wide guard opt-in for operators who need a temporary brake.
+  const perUserDailyCap = boundedReferenceCap("REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP", 50, 50);
   const globalDailyCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 20, 200);
   const globalMinuteCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20);
   const globalConcurrentCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5);

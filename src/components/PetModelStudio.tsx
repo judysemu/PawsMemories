@@ -175,6 +175,13 @@ const REFERENCE_FIELDS = [
   ["threeQuarterUrl", "Three-quarter"],
 ] as const;
 
+const UPLOAD_FIELDS = [
+  ["frontUrl", "Front photo"],
+  ["leftUrl", "Left photo"],
+  ["rearUrl", "Rear photo"],
+  ["rightUrl", "Right photo"],
+] as const;
+
 const STYLE_PRESETS = [
   { id: "reference", label: "Reference-faithful", text: "" },
   { id: "soft", label: "Soft stylized", text: "Soft stylized finish while preserving the reference colors and markings." },
@@ -400,11 +407,12 @@ export default function PetModelStudio() {
   };
 
   const loadReferenceFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []).slice(0, REFERENCE_FIELDS.length);
-    files.forEach((file, index) => {
+    const files = Array.from(event.target.files || []);
+    const emptyKeys = UPLOAD_FIELDS.map(([key]) => key).filter((key) => !references[key]);
+    files.slice(0, emptyKeys.length).forEach((file, index) => {
       const reader = new FileReader();
       reader.onload = () => {
-        const key = index === 0 ? "frontUrl" : REFERENCE_FIELDS[index][0];
+        const key = emptyKeys[index];
         setReferences((current) => ({ ...current, [key]: String(reader.result || "") }));
       };
       reader.readAsDataURL(file);
@@ -590,20 +598,12 @@ export default function PetModelStudio() {
   ];
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-5 p-3 sm:p-5">
-      <header className="flex flex-wrap items-end justify-between gap-4 rounded-3xl border border-white/10 bg-black/20 px-5 py-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Pawsome3D model lab</p>
-          <h1 className="mt-1 text-3xl font-semibold">{product.name}</h1>
-        </div>
-        <p className="max-w-xl text-sm opacity-70">
-          Build like a professional 3D studio, with one important pause: you approve the generated 360° views before the base mesh begins.
-        </p>
-      </header>
+    <div className="h-[calc(100vh-4rem)] w-full overflow-hidden">
+      <div className="mx-auto h-full max-w-[1600px] overflow-y-auto space-y-3 p-2 sm:p-3">
 
       {!view ? (
-        <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_320px]">
-          <section className="space-y-5 rounded-3xl border border-white/15 bg-white/[0.07] p-4 backdrop-blur-xl">
+        <div className="grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)_300px]">
+          <section className="space-y-3 rounded-3xl border border-white/15 bg-white/[0.07] p-3 backdrop-blur-xl">
             <nav aria-label="Model tools" className="grid grid-cols-3 gap-2 border-b border-white/10 pb-4">
               <button type="button" className="rounded-xl bg-cyan-400 px-3 py-2 text-xs font-bold text-slate-950">Model</button>
               <button type="button" disabled className="rounded-xl border border-white/10 px-3 py-2 text-xs opacity-35">Texture</button>
@@ -652,12 +652,13 @@ export default function PetModelStudio() {
                   {inputMode === "multi" ? "One photo is enough; extra angles are optional" : "One clear photo generates the complete view set"}
                 </span>
               </label>
-              <div className="grid grid-cols-5 gap-1.5">
-                {REFERENCE_FIELDS.map(([key, label]) => (
-                  <div key={key} className={`relative aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
+              <div className="grid grid-cols-4 gap-1.5">
+                {UPLOAD_FIELDS.map(([key, label]) => (
+                  <label key={key} className={`relative aspect-square cursor-pointer overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
                     {references[key]
                       ? <img src={references[key]} alt={`${label} upload`} className="h-full w-full object-cover" />
-                      : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-45">{key === "frontUrl" ? "Required" : `${label} optional`}</span>}
+                      : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-55">{key === "frontUrl" ? "Required\nphoto" : "Add photo"}</span>}
+                    <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={loadReferenceFiles} />
                     {references[key] && (
                       <button
                         type="button"
@@ -668,7 +669,7 @@ export default function PetModelStudio() {
                         ×
                       </button>
                     )}
-                  </div>
+                  </label>
                 ))}
               </div>
               {(inputMode === "generate" || inputMode === "text") && (
@@ -767,7 +768,7 @@ export default function PetModelStudio() {
             )}
           </section>
 
-          <section className="relative min-h-[720px] overflow-hidden rounded-3xl border border-white/15 bg-[radial-gradient(circle_at_50%_35%,rgba(34,211,238,0.13),transparent_38%),linear-gradient(145deg,rgba(15,23,42,0.95),rgba(3,7,18,0.98))]">
+          <section className="relative min-h-[620px] overflow-hidden rounded-3xl border border-slate-300/30 bg-[radial-gradient(circle_at_50%_35%,rgba(34,211,238,0.18),transparent_38%),linear-gradient(145deg,rgba(226,232,240,0.96),rgba(203,213,225,0.98))] text-slate-800">
             <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between border-b border-white/10 bg-black/20 px-5 py-3 text-xs backdrop-blur">
               <span className="font-semibold">Live model viewer</span>
               <span className="rounded-full border border-white/10 px-3 py-1 opacity-65">Drag to rotate · scroll to zoom</span>
@@ -781,7 +782,7 @@ export default function PetModelStudio() {
                 <p className="mt-2 text-sm opacity-60">Reference sand gathers into an untextured base mesh. Texture and Animate unlock only after the mesh is complete.</p>
               </div>
             </div>
-            <div className="border-t border-white/10 bg-black/25 p-5">
+            <div className="border-t border-slate-400/30 bg-white/35 p-4">
               <div className="flex items-start gap-4">
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-violet-400/15 text-2xl">🦴</span>
                 <div>
@@ -800,10 +801,10 @@ export default function PetModelStudio() {
             </div>
           </section>
 
-          <aside className="h-fit space-y-4 rounded-3xl border border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
+          <aside className="h-fit space-y-3 rounded-3xl border border-white/15 bg-white/[0.08] p-4 backdrop-blur-xl">
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">Build summary</p>
-              <h2 className="mt-1 text-xl font-semibold">Ready for your shelf</h2>
+              <h2 className="mt-1 text-xl font-semibold">Build summary</h2>
             </div>
             <PriceRow label="Blank base mesh" value={product.prices.base} />
             <PriceRow label="Texture" value={includeTexture ? product.prices.texture : 0} muted={!includeTexture} />
@@ -821,17 +822,18 @@ export default function PetModelStudio() {
             </div>
             {recentOrders.length > 0 && (
               <div className="space-y-2 border-t border-white/15 pt-4">
-                <h2 className="text-sm font-semibold">Your model builds</h2>
-                {recentOrders.slice(0, 6).map((item) => (
-                  <button
+                <h2 className="text-sm font-semibold">Recent successful models</h2>
+                {recentOrders.filter((item) => ["approved", "delivered"].includes(item.order.state)).slice(0, 3).map((item) => (
+                  <div
                     key={item.order.orderUuid}
-                    type="button"
-                    onClick={() => setView(item)}
-                    className="flex w-full items-center justify-between rounded-xl border border-white/10 px-3 py-2 text-left text-xs"
+                    className="space-y-2 rounded-xl border border-white/10 p-2 text-xs"
                   >
-                    <span>{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} · {item.order.subjectProfile}</span>
-                    <span className="max-w-28 truncate opacity-60">{item.order.state.replaceAll("_", " ")}</span>
-                  </button>
+                    <button type="button" onClick={() => setView(item)} className="flex w-full items-center gap-2 text-left">
+                      {item.order.referenceManifest?.frontUrl ? <img src={item.order.referenceManifest.frontUrl} alt="Successful model reference" className="h-12 w-12 rounded-lg object-cover" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-cyan-300/15 text-xl">🐾</span>}
+                      <span><strong className="block">{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} model</strong><span className="opacity-60">{item.order.subjectProfile}</span></span>
+                    </button>
+                    <a href="/print-shop" className="block rounded-lg bg-cyan-400 px-2 py-1.5 text-center text-[11px] font-bold text-slate-950">Slant3D 3D-print checkout</a>
+                  </div>
                 ))}
               </div>
             )}
@@ -1164,6 +1166,7 @@ export default function PetModelStudio() {
           Back to model builds
         </button>
       )}
+      </div>
     </div>
   );
 }

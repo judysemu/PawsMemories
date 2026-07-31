@@ -725,15 +725,15 @@ export default function App() {
       <div className="flex-grow flex w-full relative">
         {/* Desktop Sidebar */}
         {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.PET_GLB, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.ADMIN_WAGS, Screen.WAGS_INBOX, Screen.PET_HEALTH].includes(currentScreen) && (
-          <aside className="fixed bottom-0 left-0 top-16 z-40 hidden w-64 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-outline-variant/20 bg-surface/85 py-5 shadow-xl backdrop-blur-xl dark:bg-surface-dim/85 md:flex">
-            <nav className="mt-4 flex-1 space-y-2 px-4">
+          <aside className="fixed bottom-0 left-0 top-16 z-40 hidden w-56 shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-outline-variant/20 bg-surface/85 py-3 shadow-xl backdrop-blur-xl dark:bg-surface-dim/85 md:flex">
+            <nav className="mt-2 flex-1 space-y-1 px-3">
               {SIDEBAR_NAV.map((item) => {
                 const NavIcon = SHELL_NAV_ICONS[item.id] || HelpCircle;
                 return (
                   <button
                     key={item.id}
                     onClick={() => item.screen === Screen.ANIMATOR ? openAnimationStudio() : setCurrentScreen(item.screen)}
-                    className={`flex min-h-12 w-full items-center gap-4 rounded-lg px-4 py-3 text-left transition-all ${currentScreen === item.screen ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:bg-secondary-container/50 dark:hover:bg-surface-variant/30"}`}
+                    className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all ${currentScreen === item.screen ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:bg-secondary-container/50 dark:hover:bg-surface-variant/30"}`}
                   >
                     <NavIcon size={20} strokeWidth={1.9} aria-hidden="true" />
                     <span className="min-w-0 truncate font-medium">{item.label}</span>
@@ -756,7 +756,7 @@ export default function App() {
 
       {/* Main Content Router viewport */}
       <CreateFlowProvider>
-      <main className={`flex min-w-0 flex-grow flex-col items-center justify-center pt-16 pb-24 md:pb-0 ${isAuthed ? 'relative w-full md:ml-64 md:w-[calc(100%-16rem)]' : 'w-full'}`}>
+      <main className={`flex min-w-0 flex-grow flex-col items-center justify-center pt-16 pb-24 md:pb-0 ${isAuthed ? 'relative w-full md:ml-56 md:w-[calc(100%-14rem)]' : 'w-full'}`}>
         {/* Render public screens regardless of auth state */}
         {[Screen.DASHBOARD, Screen.LANDING_MODELS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) && (
           <HomePage
