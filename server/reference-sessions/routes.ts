@@ -31,9 +31,10 @@ export function createReferenceSessionsRouter(
   const checkAdmin = options.isAdmin || isUserAdmin;
   const generationLimiter = rateLimit({
     windowMs: 60_000,
-    max: 5,
+    max: 1,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req) => getRequestUserPhone(req) || "missing-auth",
     message: { success: false, error: "Too many reference generation requests. Try again shortly.", code: "RATE_LIMITED" },
   });
 

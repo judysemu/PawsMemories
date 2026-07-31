@@ -223,6 +223,16 @@ export class ReferenceSessionService {
       if (!["draft", "ready", "failed"].includes(session.state)) {
         throw new ReferenceSessionError(`Session cannot start an attempt while ${session.state}.`, "INVALID_STATE");
       }
+      const configuredMaxAttempts = Number(process.env.REFERENCE_GENERATION_MAX_ATTEMPTS || 2);
+      const maxAttempts = Number.isSafeInteger(configuredMaxAttempts)
+        ? Math.max(1, Math.min(3, configuredMaxAttempts))
+        : 2;
+      if (session.retry_count >= maxAttempts) {
+        throw new ReferenceSessionError(
+          `This reference session has reached its ${maxAttempts}-attempt safety limit. Create a new session to try again.`,
+          "ATTEMPT_LIMIT_REACHED",
+        );
+      }
 
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto

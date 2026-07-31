@@ -5,6 +5,7 @@ import { ORDERED_VIEW_KINDS } from "./types";
 
 export const MIN_REFERENCE_DIMENSION_PX = 1024;
 export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
+export const REFERENCE_PROVIDER_TIMEOUT_MS = 120_000;
 const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export interface ReferenceImageProvider {
@@ -76,39 +77,42 @@ const VIEW_INSTRUCTIONS: Record<ViewKind, string> = {
 export class GeminiReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "gemini";
   readonly model: string;
-  private readonly models: string[];
   private readonly ai: GoogleGenAI | null;
+  private inFlight = false;
 
-  constructor(apiKey = process.env.GEMINI_API_KEY || "", models = process.env.GEMINI_IMAGE_MODELS) {
-    this.models = (models || "gemini-3-pro-image,gemini-3.1-flash-image,gemini-3.1-flash-lite-image,gemini-2.5-flash-image")
-      .split(",").map((value) => value.trim()).filter(Boolean);
-    this.model = this.models[0] || "unconfigured";
-    this.ai = apiKey.trim() ? new GoogleGenAI({ apiKey: apiKey.trim(), httpOptions: { headers: { "User-Agent": "aistudio-build" } } }) : null;
+  constructor(
+    apiKey = process.env.GEMINI_API_KEY || "",
+    model = process.env.GEMINI_REFERENCE_IMAGE_MODEL || "gemini-3.1-flash-image",
+  ) {
+    this.model = model.trim() || "gemini-3.1-flash-image";
+    this.ai = apiKey.trim() ? new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: {
+        headers: { "User-Agent": "pawsome3d-reference-builder" },
+        timeout: REFERENCE_PROVIDER_TIMEOUT_MS,
+        // The SDK otherwise defaults to five attempts. This workflow already
+        // makes five angle calls, so hidden retries can multiply one click into
+        // 25 billable provider requests.
+        retryOptions: { attempts: 1 },
+      },
+    }) : null;
   }
 
   private async generateImage(parts: any[], label: string): Promise<{ imageBuffer: Buffer; mimeType: string; widthPx: number; heightPx: number; model: string }> {
     if (!this.ai) throw new Error("GEMINI_API_KEY is required for multiview reference generation.");
-    const failures: string[] = [];
-    for (const model of this.models) {
-      try {
-        const response = await this.ai.models.generateContent({
-          model,
-          contents: [{ role: "user", parts }],
-          config: { responseModalities: ["IMAGE", "TEXT"], imageConfig: { aspectRatio: "1:1" } },
-        });
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-          if (!part.inlineData?.data) continue;
-          const mimeType = part.inlineData.mimeType || "image/png";
-          const imageBuffer = Buffer.from(part.inlineData.data, "base64");
-          const inspected = await inspectReferenceImage(imageBuffer, mimeType);
-          return { imageBuffer, ...inspected, model };
-        }
-        failures.push(`${model}: no image output`);
-      } catch (error: any) {
-        failures.push(`${model}: ${String(error?.message || error).slice(0, 160)}`);
-      }
+    const response = await this.ai.models.generateContent({
+      model: this.model,
+      contents: [{ role: "user", parts }],
+      config: { responseModalities: ["IMAGE", "TEXT"], imageConfig: { aspectRatio: "1:1" } },
+    });
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (!part.inlineData?.data) continue;
+      const mimeType = part.inlineData.mimeType || "image/png";
+      const imageBuffer = Buffer.from(part.inlineData.data, "base64");
+      const inspected = await inspectReferenceImage(imageBuffer, mimeType);
+      return { imageBuffer, ...inspected, model: this.model };
     }
-    throw new Error(`${label} failed across the configured Gemini image chain: ${failures.join("; ")}`);
+    throw new Error(`${label} returned no image output from the configured reference model.`);
   }
 
   async generateMultiview(
@@ -117,36 +121,40 @@ export class GeminiReferenceImageProvider implements ReferenceImageProvider {
   ): Promise<ProviderGenerationResult> {
     if (inputMode === "text" && !input.prompt?.trim()) throw new Error("A text prompt is required.");
     if (inputMode === "photo" && (!input.photoBuffer || !input.photoMimeType)) throw new Error("A source photo is required.");
+    if (this.inFlight) throw new Error("Reference generation is already running. Please wait for it to finish.");
+    this.inFlight = true;
 
-    const sourceParts: any[] = [];
-    if (input.photoBuffer && input.photoMimeType) {
-      sourceParts.push({ inlineData: { data: input.photoBuffer.toString("base64"), mimeType: input.photoMimeType } });
-    }
-    const baseDescription = input.prompt?.trim() || "Preserve the exact identity, anatomy, markings, colors, proportions, and accessories of the supplied subject.";
-    const retryClause = input.retryNotes?.trim() ? ` Requested correction: ${input.retryNotes.trim()}` : "";
-    const front = await this.generateImage([
-      ...sourceParts,
-      { text: `${baseDescription}${retryClause} Create a clean, full-subject, centered ${VIEW_INSTRUCTIONS.front} on a neutral background for multi-view 3D reconstruction. Preserve identity exactly. No text, collage, props, crop, or perspective distortion.` },
-    ], "front reference view");
+    try {
+      const sourceParts: any[] = [];
+      if (input.photoBuffer && input.photoMimeType) {
+        sourceParts.push({ inlineData: { data: input.photoBuffer.toString("base64"), mimeType: input.photoMimeType } });
+      }
+      const baseDescription = input.prompt?.trim() || "Preserve the exact identity, anatomy, markings, colors, proportions, and accessories of the supplied subject.";
+      const retryClause = input.retryNotes?.trim() ? ` Requested correction: ${input.retryNotes.trim()}` : "";
+      const front = await this.generateImage([
+        ...sourceParts,
+        { text: `${baseDescription}${retryClause} Create a clean, full-subject, centered ${VIEW_INSTRUCTIONS.front} on a neutral background for multi-view 3D reconstruction. Preserve identity exactly. No text, collage, props, crop, or perspective distortion.` },
+      ], "front reference view");
 
-    const views: GeneratedViewPayload[] = [{
-      viewKind: "front",
-      imageBuffer: front.imageBuffer,
-      mimeType: front.mimeType,
-      widthPx: front.widthPx,
-      heightPx: front.heightPx,
-      isSynthesized: true,
-    }];
-    const usedModels = new Set([front.model]);
-    const anchor = { inlineData: { data: front.imageBuffer.toString("base64"), mimeType: front.mimeType } };
-    for (const viewKind of ORDERED_VIEW_KINDS.slice(1)) {
-      const generated = await this.generateImage([
-        anchor,
-        { text: `Using the supplied front image as the immutable identity anchor, generate the same subject in an exact ${VIEW_INSTRUCTIONS[viewKind]}. Preserve anatomy, silhouette, markings, colors, face, accessories, scale, lighting, and neutral background. Full subject visible. No text or collage.` },
-      ], `${viewKind} reference view`);
-      usedModels.add(generated.model);
-      views.push({ viewKind, imageBuffer: generated.imageBuffer, mimeType: generated.mimeType, widthPx: generated.widthPx, heightPx: generated.heightPx, isSynthesized: true });
+      const views: GeneratedViewPayload[] = [{
+        viewKind: "front",
+        imageBuffer: front.imageBuffer,
+        mimeType: front.mimeType,
+        widthPx: front.widthPx,
+        heightPx: front.heightPx,
+        isSynthesized: true,
+      }];
+      const anchor = { inlineData: { data: front.imageBuffer.toString("base64"), mimeType: front.mimeType } };
+      for (const viewKind of ORDERED_VIEW_KINDS.slice(1)) {
+        const generated = await this.generateImage([
+          anchor,
+          { text: `Using the supplied front image as the immutable identity anchor, generate the same subject in an exact ${VIEW_INSTRUCTIONS[viewKind]}. Preserve anatomy, silhouette, markings, colors, face, accessories, scale, lighting, and neutral background. Full subject visible. No text or collage.` },
+        ], `${viewKind} reference view`);
+        views.push({ viewKind, imageBuffer: generated.imageBuffer, mimeType: generated.mimeType, widthPx: generated.widthPx, heightPx: generated.heightPx, isSynthesized: true });
+      }
+      return { provider: this.name, model: this.model, views };
+    } finally {
+      this.inFlight = false;
     }
-    return { provider: this.name, model: [...usedModels].join(","), views };
   }
 }

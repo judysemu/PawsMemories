@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import sharp from "sharp";
 import {
@@ -6,6 +7,10 @@ import {
   GeminiReferenceImageProvider,
   inspectReferenceImage,
 } from "../server/reference-sessions/provider.ts";
+
+const providerSource = await readFile(new URL("../server/reference-sessions/provider.ts", import.meta.url), "utf8");
+const routeSource = await readFile(new URL("../server/reference-sessions/routes.ts", import.meta.url), "utf8");
+const serviceSource = await readFile(new URL("../server/reference-sessions/service.ts", import.meta.url), "utf8");
 
 test("reference image inspection trusts decoded bytes, not claimed dimensions", async () => {
   const onePixel = await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).png().toBuffer();
@@ -30,8 +35,21 @@ test("fake provider emits five genuinely high-resolution decodable images", asyn
 
 test("production provider fails closed without GEMINI_API_KEY", async () => {
   const provider = new GeminiReferenceImageProvider("");
+  assert.equal(provider.model, "gemini-3.1-flash-image");
   await assert.rejects(
     () => provider.generateMultiview({ prompt: "a dog" }, "text"),
     /GEMINI_API_KEY is required/,
   );
+});
+
+test("reference generation cannot multiply calls through SDK retries or model fallback chains", () => {
+  assert.match(providerSource, /retryOptions:\s*\{\s*attempts:\s*1\s*\}/);
+  assert.match(providerSource, /GEMINI_REFERENCE_IMAGE_MODEL/);
+  assert.doesNotMatch(providerSource, /for \(const model of this\.models\)/);
+  assert.match(providerSource, /if \(this\.inFlight\)/);
+  assert.match(providerSource, /finally \{\s*this\.inFlight = false/);
+  assert.match(routeSource, /windowMs:\s*60_000,\s*\n\s*max:\s*1/);
+  assert.match(routeSource, /keyGenerator:\s*\(req\)\s*=>\s*getRequestUserPhone/);
+  assert.match(serviceSource, /REFERENCE_GENERATION_MAX_ATTEMPTS/);
+  assert.match(serviceSource, /ATTEMPT_LIMIT_REACHED/);
 });
