@@ -313,8 +313,14 @@ export function validateSceneScriptReferences(scriptInput: unknown, repositoryRo
       else {
         if (asset.category !== event.category) errors.push(`sound ${event.assetId} category mismatch`);
         if (event.loop && !asset.loopSafe) errors.push(`sound ${event.assetId} is not loop-safe`);
-        const assetPath = path.resolve(repositoryRoot, "public", asset.publicUrl.replace(/^\//, ""));
-        if (!fs.existsSync(assetPath)) errors.push(`sound ${event.assetId} asset is missing on disk`);
+        const relativeAssetPath = asset.publicUrl.replace(/^\//, "");
+        const assetPaths = [
+          path.resolve(repositoryRoot, "public", relativeAssetPath),
+          path.resolve(repositoryRoot, "dist", relativeAssetPath),
+        ];
+        if (!assetPaths.some((assetPath) => fs.existsSync(assetPath))) {
+          errors.push(`sound ${event.assetId} asset is missing on disk`);
+        }
       }
     }
   }

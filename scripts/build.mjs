@@ -54,11 +54,31 @@ export function removeReleaseMetadata(directory = path.join(rootDir, "dist")) {
   return removed;
 }
 
-export function runBuild({ runner = runCommand, clean = true, sanitizer = removeReleaseMetadata } = {}) {
+export function copyRuntimeAssets(
+  sourceRoot = rootDir,
+  targetRoot = path.join(rootDir, "dist"),
+) {
+  const source = path.join(sourceRoot, "server", "animator", "environments");
+  const destination = path.join(targetRoot, "server", "animator", "environments");
+  if (!fs.existsSync(source)) throw new Error(`Animator environment presets are missing: ${source}`);
+  fs.mkdirSync(destination, { recursive: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    filter: (entry) => fs.statSync(entry).isDirectory() || entry.endsWith(".json"),
+  });
+}
+
+export function runBuild({
+  runner = runCommand,
+  clean = true,
+  sanitizer = removeReleaseMetadata,
+  runtimeAssetCopier = copyRuntimeAssets,
+} = {}) {
   if (clean) fs.rmSync(path.join(rootDir, "dist"), { recursive: true, force: true });
   for (const stage of BUILD_STAGES) {
     runner(stage);
     if (stage.name === "client") sanitizer(path.join(rootDir, "dist"));
+    if (stage.name === "server") runtimeAssetCopier();
   }
 }
 

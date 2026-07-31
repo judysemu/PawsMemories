@@ -104,6 +104,25 @@ test("V2 reference validation rejects missing collection, clip, sound, and envir
   assert.ok(validateSceneScriptReferences(soundBad).some((e) => e.includes("sound")));
 });
 
+test("historical sound validation accepts the production dist asset layout", () => {
+  const deployRoot = fs.mkdtempSync(path.join(os.tmpdir(), "historical-sound-deploy-"));
+  try {
+    for (const asset of ANIMATOR_SOUND_MANIFEST.assets) {
+      const destination = path.join(deployRoot, "dist", asset.publicUrl.replace(/^\//, ""));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(ROOT, "public", asset.publicUrl.replace(/^\//, "")), destination);
+    }
+    for (const script of HISTORICAL_SCENE_SCRIPTS) {
+      assert.ok(
+        !validateSceneScriptReferences(script, deployRoot).some((error) => error.includes("sound") && error.includes("missing on disk")),
+        script.id,
+      );
+    }
+  } finally {
+    fs.rmSync(deployRoot, { recursive: true, force: true });
+  }
+});
+
 test("sound manifest hashes and decoded mono WAV metadata match bounded declarations", () => {
   assert.equal(ANIMATOR_SOUND_MANIFEST.version, "1");
   assert.equal(ANIMATOR_SOUND_MANIFEST.assets.length, 4);
