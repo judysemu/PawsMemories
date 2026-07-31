@@ -33,7 +33,7 @@ import { assetsRouter } from "./server/assets/routes";
 import { referenceSessionsRouter } from "./server/reference-sessions/routes";
 import { generateSignedUrlForVersion } from "./server/assets/access";
 import { modelBuildsRouter, modelBuildService } from "./server/model-builds/routes";
-import { spatialGeneratorRouter } from "./server/spatial-generator/routes";
+import { spatialGeneratorRouter, startSpatialGeneratorScheduler } from "./server/spatial-generator/routes";
 import { createPetGenerationRouter, createPetGlbWebhookHandler } from "./server/pet-generation/routes";
 import { buildPetGlbDeps } from "./server/pet-generation/wiring";
 import { isPetGlbEnabled } from "./server/pet-generation/featureFlag";
@@ -1096,7 +1096,8 @@ async function startServer() {
     });
   }
   if (isInhouseSpatialGeneratorEnabled()) {
-    console.log("[spatial-generator] Feature enabled - health check available at /api/spatial-generator/health");
+    startSpatialGeneratorScheduler();
+    console.log("[spatial-generator] Direct scheduler enabled - health check available at /api/spatial-generator/health");
   }
 
   app.post("/api/bim/import-ifc", requireAuth, async (req: AuthedRequest, res) => {

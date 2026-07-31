@@ -16,7 +16,11 @@ import {
   type ReviewSpatialJobInput,
   type CancelSpatialJobInput,
 } from "./schemas";
-import { SpatialGeneratorService, SpatialGeneratorServiceError } from "./service";
+import {
+  SpatialGeneratorService,
+  SpatialGeneratorServiceError,
+  setDirectSpatialSchedulerReady,
+} from "./service";
 import { DeterministicMathSolver } from "./service";
 import { CollarBuildSchema, COLLAR_SIZE_PRESETS, collarSpatialJob } from "./collar";
 
@@ -334,7 +338,33 @@ export function createSpatialGeneratorRouter(
     }
   });
 
+  Object.defineProperty(router, "__service", {
+    configurable: false,
+    enumerable: false,
+    get: () => getService(),
+  });
   return router;
 }
 
 export const spatialGeneratorRouter = createSpatialGeneratorRouter();
+
+let schedulerTimer: NodeJS.Timeout | null = null;
+
+/** Start the direct Layer8 → deterministic math → Blender scheduler once. */
+export function startSpatialGeneratorScheduler(intervalMs = 1_000): void {
+  if (schedulerTimer) return;
+  const routerService = (spatialGeneratorRouter as Router & { __service?: SpatialGeneratorService }).__service;
+  // The router keeps its service private for dependency injection. Attach the
+  // singleton only at construction time below; tests that create routers are
+  // unaffected and production gets one durable scheduler per process.
+  if (!routerService) {
+    setDirectSpatialSchedulerReady(false);
+    console.error("[spatial-scheduler] production service was not initialized");
+    return;
+  }
+  schedulerTimer = setInterval(() => {
+    void routerService.runNextScheduledAttempt();
+  }, Math.max(250, intervalMs));
+  schedulerTimer.unref?.();
+  setDirectSpatialSchedulerReady(true);
+}

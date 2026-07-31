@@ -55,6 +55,38 @@ import { validateGlb, validateMathAgainstGlb } from "./validation";
 import { spatialStorage } from "./storage";
 import { registerAsset, addAssetVersion } from "../assets/service";
 
+// The direct spatial pipeline deliberately does not depend on the retired
+// Pixel/Gemma bridge.  The scheduler flips this state only after it has
+// started successfully; readiness therefore cannot be spoofed by a flag.
+let directSchedulerReady = false;
+
+export function setDirectSpatialSchedulerReady(ready: boolean): void {
+  directSchedulerReady = ready;
+}
+
+export function isDirectSpatialSchedulerReady(): boolean {
+  return directSchedulerReady;
+}
+
+async function checkDirectBlenderWorker(): Promise<boolean> {
+  const rawUrl = String(process.env.BLENDER_WORKER_URL || "").trim();
+  const sharedSecret = String(process.env.WORKER_SHARED_SECRET || "").trim();
+  if (!rawUrl || !sharedSecret) return false;
+  const baseUrl = rawUrl.replace(/\/render\/?$/, "").replace(/\/$/, "");
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { "x-worker-secret": sharedSecret, Accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return false;
+    const body = await response.json() as { status?: unknown; bridge?: unknown };
+    return body.status === "ok" && body.bridge === "connected";
+  } catch {
+    return false;
+  }
+}
+
 export class SpatialGeneratorServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -244,6 +276,7 @@ export class SpatialGeneratorService {
   private readonly mathExecutor: SpatialMathExecutor;
   private readonly verifyClient: SpatialVerifyClient;
   private readonly blenderWorker: BlenderWorkerClient;
+  private schedulerBusy = false;
 
   constructor(options: SpatialGeneratorOptions = {}) {
     this.pool = options.pool || getPool();
@@ -256,6 +289,54 @@ export class SpatialGeneratorService {
     this.mathExecutor = options.mathExecutor || new DeterministicMathSolver();
     this.verifyClient = options.verifyClient || this.createDefaultVerifyClient();
     this.blenderWorker = options.blenderWorker || this.createDefaultBlenderWorker();
+  }
+
+  /**
+   * Advance one durable attempt through the direct pipeline.  This is kept
+   * deliberately small and bounded: leases in the repository remain the
+   * concurrency/idempotency boundary, while each expensive provider/Blender
+   * call happens outside a SQL transaction in the existing stage methods.
+   */
+  async runNextScheduledAttempt(): Promise<boolean> {
+    if (this.schedulerBusy) return false;
+    this.schedulerBusy = true;
+    let conn: mysql.PoolConnection | null = null;
+    try {
+      conn = await this.pool.getConnection();
+      const runnable = await this.repo.findRunnableAttempts(conn, 1);
+      const next = runnable[0];
+      if (!next) return false;
+
+      switch (next.state) {
+        case "queued":
+          await this.observeAndPlan(next.job_id);
+          break;
+        case "awaiting_math":
+          await this.executeMath(next.id);
+          break;
+        case "compiling":
+        case "building_draft":
+          await this.buildDraft(next.id);
+          break;
+        case "verifying_draft":
+          await this.verifyDraft(next.id);
+          break;
+        case "finalizing":
+          await this.finalizeJob(next.job_id);
+          break;
+        default:
+          return false;
+      }
+      return true;
+    } catch (error) {
+      // Stage methods persist typed failure/refund state. Keep the scheduler
+      // alive so one bad job cannot take down the web process.
+      console.error("[spatial-scheduler] attempt failed:", error instanceof Error ? error.message : error);
+      return true;
+    } finally {
+      conn?.release();
+      this.schedulerBusy = false;
+    }
   }
 
   // ─── Production Client Factories ─────────────────────────────────────────────
@@ -1819,6 +1900,8 @@ export class SpatialGeneratorService {
     ready: boolean;
     featureEnabled: boolean;
     layer8Configured: boolean;
+    directMathWorkerOnline: boolean;
+    /** @deprecated retained for one release for older admin clients. */
     pixelWorkerOnline: boolean;
     blenderWorkerHealthy: boolean;
     orchestratorReady: boolean;
@@ -1830,8 +1913,13 @@ export class SpatialGeneratorService {
     try {
       const featureEnabled = isInhouseSpatialGeneratorEnabled();
       
-      // Check Layer8 config
+      // Layer8 must expose all four direct spatial operations.  This path does
+      // not use Hermes, Pixel, Gemma, or a model fallback.
       const layer8Configured = !!(process.env.LAYER8_BASE_URL && process.env.LAYER8_TENANT_API_KEY);
+      const layer8Health = layer8Configured ? await checkLayer8Health() : null;
+      const layer8Healthy = layer8Health
+        ? Object.values(layer8Health).every(Boolean)
+        : false;
       
       // Count active jobs
       const [activeRows] = await conn.query(
@@ -1845,17 +1933,16 @@ export class SpatialGeneratorService {
       );
       const queuedAttempts = Number((queuedRows as any[])[0]?.count || 0);
 
-      // These remain false until health is backed by explicit, authenticated
-      // worker evidence and a scheduler actually advances newly-created jobs.
-      // Layer8's legacy operation health is not proof that a Pixel worker or
-      // Blender bridge is online.
-      const pixelWorkerOnline = false;
-      const blenderWorkerHealthy = false;
-      const orchestratorReady = false;
+      // Math is deterministic and runs in this process; no Pixel/Gemma worker
+      // is involved. Blender and the scheduler require independent evidence.
+      const directMathWorkerOnline = true;
+      const blenderWorkerHealthy = await checkDirectBlenderWorker();
+      const orchestratorReady = isDirectSpatialSchedulerReady();
+      const pixelWorkerOnline = directMathWorkerOnline;
       const blockers = [
         ...(!featureEnabled ? ["feature_flag"] : []),
-        ...(!layer8Configured ? ["layer8"] : []),
-        ...(!pixelWorkerOnline ? ["pixel_worker"] : []),
+        ...(!layer8Configured || !layer8Healthy ? ["layer8"] : []),
+        ...(!directMathWorkerOnline ? ["spatial_math_worker"] : []),
         ...(!blenderWorkerHealthy ? ["blender_worker"] : []),
         ...(!orchestratorReady ? ["orchestrator"] : []),
       ];
@@ -1863,7 +1950,8 @@ export class SpatialGeneratorService {
       return {
         ready: blockers.length === 0,
         featureEnabled,
-        layer8Configured,
+        layer8Configured: layer8Configured && layer8Healthy,
+        directMathWorkerOnline,
         pixelWorkerOnline,
         blenderWorkerHealthy,
         orchestratorReady,

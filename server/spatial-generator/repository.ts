@@ -516,4 +516,28 @@ export class SpatialGeneratorRepository {
     );
     return rows as any[];
   }
+
+  /**
+   * Return the oldest current attempt that can be advanced by the direct
+   * Layer8 → deterministic math → Blender scheduler.  Selecting only the
+   * job's current attempt prevents a late retry or cancelled attempt from
+   * being executed after ownership has moved on.
+   */
+  async findRunnableAttempts(
+    conn: mysql.PoolConnection,
+    limit = 1,
+  ): Promise<Array<{ id: number; job_id: number; state: SpatialAttemptState }>> {
+    const [rows] = await conn.query(
+      `SELECT a.id, a.job_id, a.state
+       FROM spatial_generation_attempts a
+       JOIN spatial_generation_jobs j ON j.current_attempt_id = a.id
+       WHERE j.state NOT IN ('completed', 'failed', 'cancelled')
+         AND a.state IN ('queued', 'awaiting_math', 'compiling', 'building_draft', 'verifying_draft', 'finalizing')
+         AND (a.lease_owner IS NULL OR a.lease_expires_at < NOW())
+       ORDER BY a.created_at ASC
+       LIMIT ?`,
+      [Math.max(1, Math.min(10, Math.floor(limit)))],
+    );
+    return rows as any;
+  }
 }
