@@ -17,6 +17,7 @@ import {
   TemplateVersionParamSchema,
   TemplateVersionPublicSchema,
   WorkerAssetRegistrationSchema,
+  WorkerUploadRequestSchema,
 } from "./apiContracts.ts";
 import type { ProviderWebhookAuthenticatorPort, RenderCallbackAuthenticatorPort } from "./apiPorts.ts";
 import { StationeryFeatureDisabledError, assertStationeryV2Enabled } from "./featureFlag.ts";
@@ -30,6 +31,7 @@ export interface StationeryV2RouterDependencies {
   providerWebhookAuthenticator: ProviderWebhookAuthenticatorPort;
   renderCallbackAuthenticator: RenderCallbackAuthenticatorPort;
   workerAssetRegistrar?: (input: z.infer<typeof WorkerAssetRegistrationSchema>) => Promise<{ assetUuid: string; versionNumber: number; sha256: string }>;
+  workerUploadSigner?: (input: z.infer<typeof WorkerUploadRequestSchema>) => Promise<{ uploadUrl: string; objectKey: string; expiresAt: string }>;
 }
 
 export function createStationeryV2Router(
@@ -153,6 +155,17 @@ export function createStationeryV2Router(
       await requireTrustedCallback(req, dependencies.renderCallbackAuthenticator);
       const body = WorkerAssetRegistrationSchema.parse(req.body);
       res.status(201).json(await dependencies.workerAssetRegistrar(body));
+    } catch (error) {
+      handleStationeryError(res, error);
+    }
+  });
+
+  router.post("/worker-assets/upload", async (req: RawBodyRequest, res: Response) => {
+    try {
+      if (!dependencies.workerUploadSigner) throw new StationeryApiError("Stationery worker upload signing is not configured.", "WORKER_UNAVAILABLE", 503);
+      await requireTrustedCallback(req, dependencies.renderCallbackAuthenticator);
+      const body = WorkerUploadRequestSchema.parse(req.body);
+      res.status(200).json(await dependencies.workerUploadSigner(body));
     } catch (error) {
       handleStationeryError(res, error);
     }

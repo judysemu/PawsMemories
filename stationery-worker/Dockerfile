@@ -6,7 +6,6 @@ RUN npm ci --ignore-scripts
 
 COPY stationery-worker ./stationery-worker
 COPY server/stationery-v2 ./server/stationery-v2
-COPY storage.private.ts storage.private.ts
 COPY tsconfig.json tsconfig.json
 
 ENV NODE_ENV=production

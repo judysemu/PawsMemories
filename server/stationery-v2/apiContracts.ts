@@ -127,6 +127,12 @@ export const WorkerAssetRegistrationSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 }).strict();
 
+export const WorkerUploadRequestSchema = z.object({
+  ownerId: z.string().trim().min(1).max(190),
+  jobUuid: z.string().uuid(),
+  mimeType: z.string().trim().min(1).max(120),
+}).strict();
+
 export const ProviderSubmissionAcknowledgementSchema = z.object({
   providerOrderId: z.string().trim().min(1).max(200),
   state: z.enum(["submitted", "processing"]),

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 import type mysql from "mysql2/promise";
 import { dbConfigured, getPool } from "../../db.ts";
-import { getPrivateSignedUrl } from "../../storage.private.ts";
+import { createPresignedUpload, getPrivateSignedUrl, headPrivateObject } from "../../storage.private.ts";
 import { PaymentEvidenceSchema, type PaymentEvidence, type RenderDispatch } from "./apiContracts.ts";
 import type {
   FrozenFileAccessPort,
@@ -15,7 +15,7 @@ import { MySqlStationeryV2Repository } from "./repository.ts";
 import { StationeryV2Service } from "./service.ts";
 import { PrintfulStationeryProvider, Slant3dStationeryProvider } from "./providers.ts";
 import { registerAsset } from "../assets/service.ts";
-import { WorkerAssetRegistrationSchema } from "./apiContracts.ts";
+import { WorkerAssetRegistrationSchema, WorkerUploadRequestSchema } from "./apiContracts.ts";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -165,6 +165,10 @@ export function createStationeryV2Production(options: {
       }),
       workerAssetRegistrar: async (rawInput) => {
         const input = WorkerAssetRegistrationSchema.parse(rawInput);
+        const head = await headPrivateObject(input.objectKey);
+        if (!head || head.sizeBytes !== input.sizeBytes || head.mimeType !== input.mimeType) {
+          throw new Error("Worker output object could not be verified against its registration claim.");
+        }
         const registered = await registerAsset({
           ...input,
           visibility: "private",
@@ -173,6 +177,11 @@ export function createStationeryV2Production(options: {
           commercialUseEligible: true,
         }, { authorization: { internal: true }, isNewObjectUpload: false, pool });
         return { assetUuid: registered.asset.asset_uuid, versionNumber: registered.version.version_number, sha256: registered.version.sha256 };
+      },
+      workerUploadSigner: async (rawInput) => {
+        const input = WorkerUploadRequestSchema.parse(rawInput);
+        const safeOwner = input.ownerId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
+        return createPresignedUpload(`marketplace/stationery/${safeOwner}/${input.jobUuid}.${input.mimeType === "application/pdf" ? "pdf" : input.mimeType === "image/jpeg" ? "jpg" : "png"}`, input.mimeType, 900);
       },
     },
   };

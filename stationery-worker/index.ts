@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
 import sharp from "sharp";
-import { putPrivateObject, sha256Hex } from "../storage.private.ts";
 import { RenderDispatchSchema, type RenderDispatch } from "../server/stationery-v2/apiContracts.ts";
 import { sealRenderManifest } from "../server/stationery-v2/manifests.ts";
 import { sha256Canonical } from "../server/stationery-v2/canonical.ts";
@@ -104,16 +103,18 @@ async function postSigned(url: string, body: unknown): Promise<any> {
 
 async function processDispatch(dispatch: RenderDispatch): Promise<void> {
   const rendered = await render(dispatch);
-  const objectKey = `marketplace/stationery/${dispatch.ownerId}/${dispatch.jobUuid}.${rendered.mimeType === "application/pdf" ? "pdf" : rendered.mimeType === "image/jpeg" ? "jpg" : "png"}`;
-  const stored = await putPrivateObject(objectKey, rendered.bytes, rendered.mimeType);
+  const digest = crypto.createHash("sha256").update(rendered.bytes).digest("hex");
+  const upload = await postSigned(`${CALLBACK_URL}/worker-assets/upload`, { ownerId: dispatch.ownerId, jobUuid: dispatch.jobUuid, mimeType: rendered.mimeType });
+  const uploaded = await fetch(String(upload.uploadUrl), { method: "PUT", headers: { "content-type": rendered.mimeType }, body: rendered.bytes, redirect: "error", signal: AbortSignal.timeout(60_000) });
+  if (!uploaded.ok) throw new Error(`Private output upload returned HTTP ${uploaded.status}.`);
   const asset = await postSigned(`${CALLBACK_URL}/worker-assets/register`, {
     ownerId: dispatch.ownerId,
     assetType: "stationery_print_file",
     mimeType: rendered.mimeType,
-    sizeBytes: stored.sizeBytes,
-    sha256: stored.sha256,
+    sizeBytes: rendered.bytes.byteLength,
+    sha256: digest,
     bucket: "private",
-    objectKey: stored.objectKey,
+    objectKey: String(upload.objectKey),
     metadata: { jobUuid: dispatch.jobUuid, renderer: RENDERER_VERSION },
   });
   const validationReport = { schemaVersion: "stationery.validation.v1", templateUuid: dispatch.template.templateUuid, templateVersionNumber: dispatch.template.versionNumber, findings: [], overallPass: true };
