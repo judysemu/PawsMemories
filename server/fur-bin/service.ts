@@ -146,9 +146,15 @@ export class FurBinService {
       page?: number;
       limit?: number;
     },
-  ): Promise<{ items: FurBinItemPublic[]; total: number }> {
+  ): Promise<{ items: FurBinItemPublic[]; total: number; page: number; limit: number }> {
     assertFurBinV5Enabled();
     const pool = this.getPoolFn();
+    const page = Number.isSafeInteger(params.page) && Number(params.page) > 0
+      ? Number(params.page)
+      : 1;
+    const limit = Number.isSafeInteger(params.limit) && Number(params.limit) > 0
+      ? Math.min(100, Number(params.limit))
+      : 20;
     const result = await searchFurBinItems(pool, {
       ownerId,
       query: params.query,
@@ -157,15 +163,15 @@ export class FurBinService {
       hasRig: params.hasRig,
       hasFacial: params.hasFacial,
       hasAnimations: params.hasAnimations,
-      page: params.page || 1,
-      limit: params.limit || 20,
+      page,
+      limit,
     });
 
     const publicItems = await Promise.all(
       result.items.map((item) => this.formatItemPublic(pool, ownerId, item)),
     );
 
-    return { items: publicItems, total: result.total };
+    return { items: publicItems, total: result.total, page, limit };
   }
 
   // ── 3. Short-lived Signed Viewing URL Generation ──────────────────────────

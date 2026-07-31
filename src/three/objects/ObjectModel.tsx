@@ -17,10 +17,14 @@ function GlbObject({ url, fitSize, spatialMetadata }: { url: string; fitSize: nu
     const longest = Math.max(size.x, size.y, size.z) || 1;
     const authoritative = spatialMetadata && !["unknown", "estimated"].includes(spatialMetadata.calibrationMethod);
     const s = authoritative ? spatialMetadata.physicalScale : fitSize / longest;
+    cloned.scale.setScalar(s);
+    cloned.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(cloned);
+    scaledBox.getCenter(center);
     cloned.position.x -= center.x;
     cloned.position.z -= center.z;
-    cloned.position.y -= box.min.y;
-    cloned.scale.setScalar(s);
+    cloned.position.y -= scaledBox.min.y;
+    cloned.updateMatrixWorld(true);
     cloned.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {

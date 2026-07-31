@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Screen } from "../../types";
 import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, ZoomIn, X, CheckCircle, Info } from "lucide-react";
@@ -45,6 +45,7 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
   const [zoomedView, setZoomedView] = useState<ViewItem | null>(null);
   const [isApproved, setIsApproved] = useState(false);
   const multiviewEnabled = import.meta.env.VITE_MULTIVIEW_APPROVAL_ENABLED === "true";
+  const automaticStartRef = useRef(false);
 
   const viewLabels: Record<string, string> = {
     front: "Front View",
@@ -176,13 +177,15 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
   };
 
   useEffect(() => {
+    if (automaticStartRef.current) return;
     const hasInput =
       state.inputMode === "text"
         ? !!(state.textPrompt || "").trim()
         : !!state.inputPhotoUrl;
     if (!state.candidateImageUrl && multiviewViews.length === 0 && !isGenerating && !error && hasInput) {
-      if (multiviewEnabled) initMultiviewSession();
-      else generateLegacyCandidate();
+      automaticStartRef.current = true;
+      if (multiviewEnabled) void initMultiviewSession();
+      else void generateLegacyCandidate();
     }
   }, []);
 
@@ -227,8 +230,14 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
         {isGenerating ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <RefreshCw className="animate-spin text-primary mb-6" size={48} />
-            <h3 className="text-xl font-bold text-on-surface mb-2">Generating Multiview Reference...</h3>
-            <p className="text-on-surface-variant">Synthesizing 5 high-resolution orthographic views and consistency report.</p>
+            <h3 className="text-xl font-bold text-on-surface mb-2">
+              {multiviewEnabled ? "Generating 5-View Reference..." : "Generating Reference Image..."}
+            </h3>
+            <p className="text-on-surface-variant">
+              {multiviewEnabled
+                ? "Synthesizing five high-resolution views and a visual consistency report."
+                : "Preparing a single reference image for your review."}
+            </p>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12 text-center max-w-md mx-auto">
@@ -237,12 +246,31 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
             </div>
             <h3 className="text-xl font-bold text-on-surface mb-2">Oops, something went wrong</h3>
             <p className="text-on-surface-variant mb-6">{error}</p>
-            <button
-              onClick={() => initMultiviewSession()}
-              className="px-6 py-3 bg-primary text-on-primary font-bold rounded-xl shadow-md hover:scale-105 transition-transform"
-            >
-              Try Again
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={() => multiviewEnabled
+                  ? (multiviewSessionUuid ? handleMultiviewRetry() : initMultiviewSession())
+                  : generateLegacyCandidate()}
+                className="px-6 py-3 bg-primary text-on-primary font-bold rounded-xl shadow-md hover:scale-105 transition-transform"
+              >
+                Try Again
+              </button>
+              {multiviewEnabled && multiviewSessionUuid && state.inputMode !== "text" && (
+                <label className="px-6 py-3 bg-surface-variant text-on-surface font-bold rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-variant/80">
+                  Replace Source Photo
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleReplaceSource(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              )}
+            </div>
           </div>
         ) : multiviewViews.length > 0 ? (
           <div className="w-full flex flex-col gap-6">

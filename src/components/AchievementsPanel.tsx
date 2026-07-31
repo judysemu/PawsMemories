@@ -14,7 +14,7 @@ export interface Achievement {
 interface AchievementsPanelProps {
   streak: number;
   achievements: Achievement[];
-  onClaimReward: (id: string, amount: number) => void;
+  onClaimReward: (id: string) => void;
   onClaimDailyStreak: () => void;
   dailyStreakClaimed: boolean;
 }
@@ -44,7 +44,7 @@ export default function AchievementsPanel({
               Achievements &amp; Streaks
             </h3>
             <p className="text-xs text-on-surface-variant font-medium">
-              Complete tasks to claim free AI design credits!
+              Complete milestones that Pawsome3D can verify from your account.
             </p>
           </div>
         </div>
@@ -65,7 +65,7 @@ export default function AchievementsPanel({
                 : "bg-orange-500 text-white hover:bg-orange-600 shadow-sm"
             }`}
           >
-            {dailyStreakClaimed ? "Claimed" : "Claim +10cr"}
+            {dailyStreakClaimed ? "Claimed" : "Claim reward"}
           </button>
         </div>
       </div>
@@ -134,7 +134,7 @@ export default function AchievementsPanel({
               {/* Claim Reward Button */}
               {achievement.isUnlocked && !achievement.isClaimed && (
                 <button
-                  onClick={() => onClaimReward(achievement.id, achievement.reward)}
+                  onClick={() => onClaimReward(achievement.id)}
                   className="mt-2 py-1 px-3 bg-primary text-white text-[10px] font-black uppercase rounded-lg hover:bg-primary/95 shadow-sm active:scale-95 duration-100 transition-all cursor-pointer flex items-center gap-1 w-fit"
                 >
                   Claim +{achievement.reward}cr Bonus

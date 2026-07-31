@@ -9,11 +9,19 @@ export class TripoError extends Error {
   constructor(
     public status: number,
     public code: number | null,
-    public rawMessage: string,
-    message: string
+    _rawMessage: string,
+    message: string,
+    public submissionDisposition:
+      | "definitive_rejection"
+      | "safe_retry"
+      | "ambiguous_acceptance" = "definitive_rejection",
   ) {
     super(message);
     this.name = "TripoError";
+  }
+
+  get retryable(): boolean {
+    return this.status === 429 || this.code === 2000;
   }
 }
 
@@ -116,7 +124,7 @@ async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
     } finally {
       clearTimeout(timeout);
     }
-    if (!imgRes.ok) throw new Error(`Failed to download image for Tripo: ${imgRes.statusText}`);
+    if (!imgRes.ok) throw new Error(`Failed to download image for Tripo: HTTP ${imgRes.status}`);
     const declaredLength = Number(imgRes.headers.get("content-length") || 0);
     if (declaredLength > MAX_TRIPO_SOURCE_IMAGE_BYTES) {
       throw new Error(`Tripo source image exceeds ${MAX_TRIPO_SOURCE_IMAGE_BYTES} bytes.`);
@@ -136,6 +144,14 @@ async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
   });
 
   const uploadJson: any = await uploadRes.json().catch(() => ({}));
+  if (uploadJson?.code === 2000) {
+    throw new TripoError(
+      uploadRes.status,
+      2000,
+      String(uploadJson?.message || ""),
+      `Tripo upload was rate limited (HTTP ${uploadRes.status}, code 2000)`,
+    );
+  }
   if (!uploadRes.ok) {
     const code = typeof uploadJson?.code === "number" ? uploadJson.code : null;
     const rawMsg = uploadJson?.message || "";
@@ -143,39 +159,90 @@ async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
       uploadRes.status,
       code,
       rawMsg,
-      `Tripo upload failed (${uploadRes.status}): ${rawMsg || JSON.stringify(uploadJson)}`
+      `Tripo upload failed (HTTP ${uploadRes.status}, code ${code ?? "unknown"})`
     );
   }
   const token = uploadJson?.data?.image_token;
   if (!token) {
-    throw new Error(`Tripo upload returned no image_token: ${JSON.stringify(uploadJson)}`);
+    throw new Error("Tripo upload returned no image token");
   }
   return { ext: "png", token };
 }
 
 async function submitTask(body: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${TRIPO_BASE}/task`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey()}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  const json: any = await res.json().catch(() => ({}));
+  let res: Response;
+  try {
+    res = await fetch(`${TRIPO_BASE}/task`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new TripoError(
+      0,
+      null,
+      "",
+      "Tripo task submission outcome is unknown after a transport failure",
+      "ambiguous_acceptance",
+    );
+  }
+
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    if (res.ok || res.status >= 500) {
+      throw new TripoError(
+        res.status,
+        null,
+        "",
+        "Tripo task submission outcome is unknown after an unreadable response",
+        "ambiguous_acceptance",
+      );
+    }
+    json = {};
+  }
+  if (json?.code === 2000) {
+    throw new TripoError(
+      res.status,
+      2000,
+      String(json?.message || ""),
+      `Tripo task submission was rate limited (HTTP ${res.status}, code 2000)`,
+      "safe_retry",
+    );
+  }
   if (!res.ok) {
     const code = typeof json?.code === "number" ? json.code : null;
     const rawMsg = json?.message || "";
+    if (res.status >= 500) {
+      throw new TripoError(
+        res.status,
+        code,
+        rawMsg,
+        `Tripo task submission outcome is unknown (HTTP ${res.status}, code ${code ?? "unknown"})`,
+        "ambiguous_acceptance",
+      );
+    }
     throw new TripoError(
       res.status,
       code,
       rawMsg,
-      `Tripo task failed (${res.status}): ${rawMsg || JSON.stringify(json)}`
+      `Tripo task failed (HTTP ${res.status}, code ${code ?? "unknown"})`,
+      "definitive_rejection",
     );
   }
   const taskId = json?.data?.task_id;
   if (!taskId) {
-    throw new Error(`Tripo task returned no task id: ${JSON.stringify(json)}`);
+    throw new TripoError(
+      res.status,
+      typeof json?.code === "number" ? json.code : null,
+      String(json?.message || ""),
+      "Tripo task submission succeeded without a recoverable task ID",
+      "ambiguous_acceptance",
+    );
   }
   return `${TRIPO_PREFIX}${taskId}`;
 }
@@ -344,6 +411,7 @@ export interface TripoPollResult {
   glbUrl?: string;
   error?: string;
   progress?: number;
+  failureCode?: string;
   capability?: {
     riggable: boolean;
     rigType:
@@ -367,14 +435,46 @@ export async function pollImageTo3D(operationName: string): Promise<TripoPollRes
     headers: { Authorization: `Bearer ${apiKey()}` },
   });
   const json: any = await res.json().catch(() => ({}));
+  const responseCode = typeof json?.code === "number" ? json.code : null;
+  const responseMessage = String(json?.message || "");
+  if (/task\s+not\s+found/i.test(responseMessage)) {
+    return {
+      done: true,
+      error: "Provider task was not found",
+      failureCode: "PROVIDER_TASK_NOT_FOUND",
+    };
+  }
+  if (responseCode === 2000) {
+    throw new TripoError(
+      res.status,
+      responseCode,
+      responseMessage,
+      `Tripo status check was rate limited (HTTP ${res.status}, code ${responseCode})`,
+    );
+  }
+  if (res.ok && responseCode !== null && responseCode !== 0) {
+    throw new TripoError(
+      res.status,
+      responseCode,
+      responseMessage,
+      `Tripo status check failed (HTTP ${res.status}, code ${responseCode})`,
+    );
+  }
   if (!res.ok) {
-    const code = typeof json?.code === "number" ? json.code : null;
+    const code = responseCode;
     const rawMsg = json?.message || "";
+    if (res.status === 404) {
+      return {
+        done: true,
+        error: "Provider task was not found",
+        failureCode: "PROVIDER_TASK_NOT_FOUND",
+      };
+    }
     throw new TripoError(
       res.status,
       code,
       rawMsg,
-      `Tripo status check failed (${res.status}): ${rawMsg || JSON.stringify(json)}`
+      `Tripo status check failed (HTTP ${res.status}, code ${code ?? "unknown"})`
     );
   }
 
@@ -396,13 +496,24 @@ export async function pollImageTo3D(operationName: string): Promise<TripoPollRes
     }
     // Try multiple possible field names for the GLB download URL
     const glbUrl = output.model || output.model_url || output.pbr_model || output.base_model;
-    console.log(`[Tripo] Task ${taskId} succeeded. Output keys: ${Object.keys(output).join(", ")}. glbUrl: ${glbUrl}`);
+    console.log(`[Tripo] Task ${taskId} reached success`);
     if (!glbUrl) {
-      throw new Error(`Tripo task succeeded but no model URL found in output: ${JSON.stringify(output)}`);
+      return {
+        done: true,
+        error: "Provider task succeeded without a model artifact",
+        failureCode: "PROVIDER_OUTPUT_MISSING",
+        progress: 100,
+      };
     }
     return { done: true, glbUrl, progress: 100 };
   } else if (status === "failed" || status === "cancelled") {
-    return { done: true, error: `Tripo generation failed: ${status}`, progress };
+    return { done: true, error: "Provider task failed", failureCode: "PROVIDER_TASK_FAILED", progress };
+  } else if (status === "banned") {
+    return { done: true, error: "Provider rejected the task under its content policy", failureCode: "PROVIDER_CONTENT_POLICY", progress };
+  } else if (status === "expired") {
+    return { done: true, error: "Provider task expired", failureCode: "PROVIDER_TASK_EXPIRED", progress };
+  } else if (status === "unknown") {
+    return { done: true, error: "Provider returned an unknown terminal task state", failureCode: "PROVIDER_TASK_UNKNOWN", progress };
   } else {
     return { done: false, progress };
   }

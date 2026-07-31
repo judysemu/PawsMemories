@@ -117,6 +117,7 @@ class MemoryRepository {
     this.claims = new Map();
     this.events = [];
     this.reconciliations = [];
+    this.consumedPayments = new Map();
     this.inTransaction = false;
   }
 
@@ -202,6 +203,9 @@ class MemoryRepository {
       const key = `${input.ownerId}:${input.clientIdempotencyKey}`;
       const existingUuid = this.orderKeys.get(key);
       if (existingUuid) return { order: this.orders.get(existingUuid), created: false };
+      if (this.consumedPayments.has(input.paymentEvidence.paymentUuid)) {
+        throw new Error("PAYMENT_ALREADY_CONSUMED");
+      }
       const snapshot = createProviderSubmission({
         localOrderUuid: input.localOrderUuid,
         provider: input.manifest.provider,
@@ -225,6 +229,7 @@ class MemoryRepository {
       this.orders.set(order.localOrderUuid, order);
       this.orderKeys.set(key, order.localOrderUuid);
       this.submissions.set(order.localOrderUuid, snapshot);
+      this.consumedPayments.set(input.paymentEvidence.paymentUuid, order.localOrderUuid);
       return { order, created: true };
     } finally {
       this.inTransaction = false;
@@ -329,7 +334,11 @@ function fixture(options = {}) {
           paymentUuid: PAYMENT_UUID,
           ownerId: OWNER,
           state: options.paymentState ?? "paid",
-          amountMinor: 2500,
+          fulfillmentProvider: options.paymentProvider ?? "printful",
+          providerSku: options.paymentSku ?? "CARD-5X7",
+          unitAmountMinor: options.unitAmountMinor ?? 100,
+          quantity: options.paymentQuantity ?? 25,
+          amountMinor: options.paymentAmountMinor ?? (options.unitAmountMinor ?? 100) * (options.paymentQuantity ?? 25),
           currency: "USD",
           confirmedAt: (options.paymentState ?? "paid") === "paid" ? "2026-07-22T11:59:00.000Z" : null,
           evidenceHash: HASHES.payment,
@@ -442,7 +451,7 @@ test("Phase 6 completion binds immutable worker evidence and freezes paid print 
 });
 
 test("Phase 6 provider submission is payment-gated, outside transactions, and replay-safe", async () => {
-  const f = fixture();
+  const f = fixture({ paymentQuantity: 10 });
   const ready = await readyRender(f);
   const order = await f.service.createPrintOrder(OWNER, {
     renderJobUuid: ready.jobUuid,
@@ -478,7 +487,28 @@ test("Phase 6 provider submission is payment-gated, outside transactions, and re
   assert.equal(duplicate.disposition, "duplicate");
   assert.equal(f.repository.events.filter((entry) => entry.event.eventId === "printful-fulfilled-1").length, 1);
 
-  const secondOrder = await f.service.createPrintOrder(OWNER, {
+});
+
+test("Phase 6 binds payment to the exact line item and consumes it once", async () => {
+  const mismatched = fixture({ paymentQuantity: 1 });
+  const mismatchedRender = await readyRender(mismatched);
+  await assert.rejects(
+    () => mismatched.service.createPrintOrder(OWNER, {
+      renderJobUuid: mismatchedRender.jobUuid,
+      provider: "printful",
+      providerSku: "CARD-5X7",
+      placement: "front",
+      quantity: 2,
+      recipient: RECIPIENT,
+      paidPaymentUuid: PAYMENT_UUID,
+      idempotencyKey: "print-payment-mismatch",
+    }),
+    (error) => error.code === "PAYMENT_BINDING_MISMATCH",
+  );
+
+  const f = fixture({ paymentQuantity: 1 });
+  const ready = await readyRender(f);
+  const request = {
     renderJobUuid: ready.jobUuid,
     provider: "printful",
     providerSku: "CARD-5X7",
@@ -486,11 +516,13 @@ test("Phase 6 provider submission is payment-gated, outside transactions, and re
     quantity: 1,
     recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
-    idempotencyKey: "print-request-replay-conflict",
-  });
+  };
+  const first = await f.service.createPrintOrder(OWNER, { ...request, idempotencyKey: "print-payment-first" });
+  const replay = await f.service.createPrintOrder(OWNER, { ...request, idempotencyKey: "print-payment-first" });
+  assert.equal(replay.localOrderUuid, first.localOrderUuid);
   await assert.rejects(
-    () => f.service.applyAuthenticatedProviderEvent("printful", { ...event, localOrderUuid: secondOrder.localOrderUuid }),
-    (error) => error.code === "PROVIDER_EVENT_CONFLICT",
+    () => f.service.createPrintOrder(OWNER, { ...request, idempotencyKey: "print-payment-second" }),
+    (error) => error.code === "PAYMENT_ALREADY_CONSUMED",
   );
 });
 
@@ -514,7 +546,7 @@ test("Phase 6 refuses to freeze print work without confirmed payment evidence", 
 });
 
 test("Phase 6 reconciliation adopts provider evidence without making claims before observation", async () => {
-  const f = fixture();
+  const f = fixture({ paymentQuantity: 10 });
   const ready = await readyRender(f);
   const order = await f.service.createPrintOrder(OWNER, {
     renderJobUuid: ready.jobUuid,

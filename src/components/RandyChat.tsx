@@ -38,7 +38,7 @@ function resolveScreen(screen?: string): Screen | null {
     PAWPRINTS: Screen.PAWPRINTS,
     PAWLISHER: Screen.PAWLISHER,
     FURBIN: Screen.FURBIN,
-    REQUEST_MEMORY: Screen.REQUEST_MEMORY,
+    REQUEST_MEMORY: Screen.PAWPRINTS,
     WAGS_INBOX: Screen.WAGS_INBOX,
   };
   return map[screen] ?? null;

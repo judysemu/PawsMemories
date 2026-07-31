@@ -274,6 +274,16 @@ export class StationeryV2Service {
     if (payment.ownerId !== ownerId || payment.state !== "paid" || !payment.confirmedAt) {
       throw new StationeryApiError("Confirmed paid-payment evidence is required.", "PAYMENT_REQUIRED", 402);
     }
+    if (payment.fulfillmentProvider !== request.provider
+      || payment.providerSku !== request.providerSku
+      || payment.quantity !== request.quantity
+      || payment.amountMinor !== payment.unitAmountMinor * payment.quantity) {
+      throw new StationeryApiError(
+        "Payment evidence does not match the exact provider, SKU, quantity, and amount requested.",
+        "PAYMENT_BINDING_MISMATCH",
+        409,
+      );
+    }
 
     const localOrderUuid = crypto.randomUUID();
     const now = this.now();
@@ -299,17 +309,31 @@ export class StationeryV2Service {
       paymentState: "paid",
       createdAt: now,
     });
-    const result = await this.repository.createFrozenPrintOrderIdempotent({
-      localOrderUuid,
-      ownerId,
-      renderJobUuid: renderJob.jobUuid,
-      clientIdempotencyKey: request.idempotencyKey,
-      requestHash,
-      manifest,
-      paymentEvidence: payment,
-      providerIdempotencyKey: snapshot.idempotencyKey,
-      createdAt: now,
-    });
+    let result;
+    try {
+      result = await this.repository.createFrozenPrintOrderIdempotent({
+        localOrderUuid,
+        ownerId,
+        renderJobUuid: renderJob.jobUuid,
+        clientIdempotencyKey: request.idempotencyKey,
+        requestHash,
+        manifest,
+        paymentEvidence: payment,
+        providerIdempotencyKey: snapshot.idempotencyKey,
+        createdAt: now,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "PAYMENT_ALREADY_CONSUMED") {
+        throw new StationeryApiError("Payment evidence has already been consumed by another print order.", "PAYMENT_ALREADY_CONSUMED", 409);
+      }
+      if (error instanceof Error && error.message === "PAYMENT_BINDING_MISMATCH") {
+        throw new StationeryApiError("Payment evidence changed or does not match this print order.", "PAYMENT_BINDING_MISMATCH", 409);
+      }
+      if (error instanceof Error && error.message === "PAYMENT_REQUIRED") {
+        throw new StationeryApiError("Confirmed paid-payment evidence is required.", "PAYMENT_REQUIRED", 402);
+      }
+      throw error;
+    }
     this.assertPrintRequestBinding(result.order, request, requestHash);
     return PrintOrderPublicSchema.strip().parse(result.order);
   }

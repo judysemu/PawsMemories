@@ -7,11 +7,11 @@ const source = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8"
 
 test("global shell keeps stable desktop dimensions", () => {
   assert.match(source, /h-16/);
-  assert.match(source, /hidden w-64[^\n]+md:flex/);
-  assert.match(source, /md:ml-64/);
-  assert.match(source, /md:w-\[calc\(100%-16rem\)\]/);
+  assert.match(source, /hidden w-56[^\n]+md:flex/);
+  assert.match(source, /md:ml-56/);
+  assert.match(source, /md:w-\[calc\(100%-14rem\)\]/);
   assert.match(source, /min-w-0/);
-  assert.doesNotMatch(source, /md:ml-64 w-full/);
+  assert.doesNotMatch(source, /md:ml-56 w-full/);
 });
 
 test("signed-out shell does not expose product navigation", () => {

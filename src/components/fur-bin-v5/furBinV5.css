@@ -37,6 +37,7 @@
 .furbin-v5-empty,
 .furbin-v5-loading,
 .furbin-v5-error,
+.furbin-v5-pagination,
 .furbin-v5-tabs { width: min(100%, 1180px); margin-inline: auto; }
 
 .furbin-v5-hero { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
@@ -97,6 +98,10 @@
 .furbin-v5-empty p { max-width: 440px; margin: 0; line-height: 1.6; }
 .furbin-v5-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--color-error) 32%, transparent); border-radius: 14px; color: var(--color-on-error-container); background: var(--color-error-container); }
 .furbin-v5-error button { border: 0; color: inherit; background: transparent; font-weight: 800; text-decoration: underline; cursor: pointer; }
+.furbin-v5-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 22px; }
+.furbin-v5-pagination span { color: var(--furbin-muted); font-size: .78rem; font-weight: 800; }
+.furbin-v5-pagination button { min-height: 42px; padding: 8px 16px; border: 1px solid var(--furbin-line); border-radius: 999px; color: var(--color-primary); background: var(--furbin-paper); font-weight: 800; cursor: pointer; }
+.furbin-v5-pagination button:disabled { cursor: not-allowed; opacity: .42; }
 
 .furbin-v5-modal-backdrop { position: fixed; z-index: 150; inset: 0; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: rgba(20, 15, 13, .72); backdrop-filter: blur(12px); }
 .furbin-v5-modal { width: min(100%, 980px); max-height: 94dvh; overflow: auto; border: 1px solid var(--furbin-line); border-radius: 30px 10px 30px 10px; padding: 20px; color: var(--furbin-ink); background: var(--color-surface); box-shadow: 0 28px 90px rgba(0, 0, 0, .36); }

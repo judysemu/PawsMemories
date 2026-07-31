@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { spawnSync, execSync } from "child_process";
+import { spawnSync } from "child_process";
 
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
@@ -44,18 +44,14 @@ async function run() {
     if (version < "v18.0.0") throw new Error(`Node >= v18 required, got ${version}`);
   })) && allPass;
 
-  // 2. CLI
-  allPass = (await check("@gltf-transform/cli is available", () => {
-    execSync("npx gltf-transform --version", { stdio: "ignore" });
-  })) && allPass;
-
-  // 3. Imports
+  // 2. Runtime imports. The application uses the library APIs directly; it
+  // does not shell out to the gltf-transform CLI.
   allPass = (await check("@gltf-transform core/functions importable", async () => {
     await import("@gltf-transform/core");
     await import("@gltf-transform/functions");
   })) && allPass;
 
-  // 3.5 Optional Dependencies
+  // 3. Optional Dependencies
   try {
     await import("sharp");
     console.log(`- sharp is available... ${GREEN}✓${RESET}`);
@@ -188,28 +184,24 @@ async function run() {
   allPass = (await probeWarning("meshoptimizer (Node bindings)", async () => {
     try {
       await import("meshoptimizer");
-    } catch (e) {
-      // Check if package is installed but import failed
-      try {
-        execSync("node -e \"require('meshoptimizer')\"", { stdio: "ignore" });
-      } catch {
-        throw new Error("meshoptimizer not installed or importable");
-      }
+    } catch {
+      throw new Error("meshoptimizer not installed or importable");
     }
   })) && allPass;
 
   // 10. Worker reachability (blender-worker HTTP health endpoint)
   const workerUrl = process.env.BLENDER_WORKER_URL || "http://localhost:8080";
-  allPass = (await probeWarning(`Worker reachability (${workerUrl}/health)`, async () => {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execAsync = promisify(exec);
+  const workerHealthUrl = `${workerUrl.replace(/\/+$/, "")}/health`;
+  allPass = (await probeWarning(`Worker reachability (${workerHealthUrl})`, async () => {
+    let response;
     try {
-      await execAsync(`curl -sf --max-time 3 "${workerUrl}/health" || true`, { stdio: "pipe" });
-      // If curl succeeds (exit 0) or returns health data, worker is reachable
-      // If curl fails (exit non-zero but no crash), worker is down — that's ok for optional
-    } catch {
-      // curl not available or unreachable — degrade gracefully
+      response = await fetch(workerHealthUrl, { signal: AbortSignal.timeout(3000) });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown error";
+      throw new Error(`Worker health request failed: ${detail}`);
+    }
+    if (!response.ok) {
+      throw new Error(`Worker health request returned HTTP ${response.status}`);
     }
   })) && allPass;
 

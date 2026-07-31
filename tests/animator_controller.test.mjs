@@ -57,3 +57,18 @@ test("AnimationController - selectClip, loop, speed, pause, seek, reset", () => 
   // resetToBindPose
   ctrl.resetToBindPose();
 });
+
+test("AnimationController - global speed applies to clips selected or added later", () => {
+  const obj = new THREE.Object3D();
+  const walk = new THREE.AnimationClip("walk", 2, []);
+  const ctrl = createAnimationController(obj, [walk]);
+
+  ctrl.setSpeed(1.5);
+  ctrl.selectClip("walk");
+  assert.equal(ctrl.getClipAction("walk")?.timeScale, 1.5);
+
+  const run = new THREE.AnimationClip("run", 1, []);
+  ctrl.addClip(run);
+  ctrl.selectClip("run");
+  assert.equal(ctrl.getClipAction("run")?.timeScale, 1.5);
+});

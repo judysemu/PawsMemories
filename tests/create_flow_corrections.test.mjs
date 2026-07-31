@@ -61,7 +61,9 @@ class MockConnection {
           id: params[0], 
           user_phone: "user_build_starting_match", 
           status: "build_starting", 
-          idempotency_key: "idem_match" 
+          idempotency_key: "idem_match",
+          credits_reserved: 20,
+          credit_debit_correlation_id: "pipeline-test-debit",
         }]];
       }
       if (params[1] === "user_build_starting_mismatch") {
@@ -92,12 +94,26 @@ class MockConnection {
     }
 
     // Stub for user locking
-    if (sqlLower.includes('select * from users')) {
+    if (sqlLower.includes('from users') && sqlLower.includes('for update')) {
       return [[{ phone: params[0], credits: 100, is_admin: 0 }]];
+    }
+
+    if (sqlLower.includes('from credit_transactions') && sqlLower.includes('idempotency_key')) {
+      if (params[0] === "pipeline-test-debit") {
+        return [[{
+          user_phone: "user_build_starting_match",
+          delta: -20,
+          reason: "create_pipeline_model",
+        }]];
+      }
+      return [[]];
     }
     
     if (sqlLower.includes('update users set credits')) {
       return [{ affectedRows: 1 }];
+    }
+    if (sqlLower.includes('insert into credit_transactions')) {
+      return [{ affectedRows: 1, insertId: 1 }];
     }
     if (sqlLower.includes('update create_pipeline_sessions set status = \'build_starting\'')) {
       return [{ affectedRows: 1 }];
@@ -158,8 +174,8 @@ test("State machine transactions: successful flow", async (t) => {
   
   // Verify deduct queries
   const conn = pool.lastConn;
-  const deductQ = conn.queries.find(q => q.sql.includes('UPDATE users SET credits = credits - ?'));
-  assert.ok(deductQ, "Credits should be deducted");
+  const debitLedgerQ = conn.queries.find(q => q.sql.includes('INSERT INTO credit_transactions') && q.params[1] === -20);
+  assert.ok(debitLedgerQ, "The debit and its durable ledger evidence should be committed together");
 });
 
 test("Idempotency rules", async (t) => {
@@ -185,7 +201,7 @@ test("Provider failure refunds once", async (t) => {
   
   // Verify it updates to reference_ready
   const conn = pool.lastConn;
-  const statusQ = conn.queries.find(q => q.sql.includes('UPDATE create_pipeline_sessions SET status = \'reference_ready\''));
+  const statusQ = conn.queries.find(q => /UPDATE create_pipeline_sessions\s+SET status = 'reference_ready'/s.test(q.sql));
   assert.ok(statusQ, "Should set status back to reference_ready");
 });
 

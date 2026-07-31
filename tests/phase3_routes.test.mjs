@@ -136,12 +136,14 @@ describe("Phase 3 HTTP Routes Test Suite", {
   });
 
   it("should reject unauthenticated requests with 401", async () => {
+    fakeProvider.reset();
     const res = await fetch(`${baseUrl}/api/model-builds/quote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referenceSessionUuid: "00000000-0000-0000-0000-000000000000" }),
     });
     assert.equal(res.status, 401);
+    assert.equal(fakeProvider.startCalls, 0);
   });
 
   it("should return 400 for invalid body payload", async () => {
@@ -154,6 +156,7 @@ describe("Phase 3 HTTP Routes Test Suite", {
       body: JSON.stringify({ referenceSessionUuid: "invalid-uuid" }),
     });
     assert.equal(res.status, 400);
+    assert.equal(fakeProvider.startCalls, 0);
   });
 
   it("should return 422 preflight error for unapproved reference session", async () => {
@@ -168,6 +171,7 @@ describe("Phase 3 HTTP Routes Test Suite", {
     assert.equal(res.status, 200); // quote endpoint returns JSON with preflightPassed=false
     const json = await res.json();
     assert.equal(json.data.preflightPassed, false);
+    assert.equal(fakeProvider.startCalls, 0);
   });
 
   it("should enforce admin authentication for reconcile endpoint", async () => {

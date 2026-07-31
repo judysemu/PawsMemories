@@ -1,26 +1,10 @@
-export const CC0_CLIPS = [
-  {
-    id: "quadruped_run",
-    name: "Run (Quadruped)",
-    skeleton: "quadruped",
-    url: "/animator-files/animations/quadruped_run_cc0.glb",
-    author: "CC0",
-    description: "Standard run cycle for quadrupeds."
-  },
-  {
-    id: "quadruped_sit",
-    name: "Sit (Quadruped)",
-    skeleton: "quadruped",
-    url: "/animator-files/animations/quadruped_sit_cc0.glb",
-    author: "CC0",
-    description: "Sitting down to idle."
-  },
-  {
-    id: "biped_dance",
-    name: "Dance (Biped)",
-    skeleton: "biped",
-    url: "/animator-files/animations/biped_dance_cc0.glb",
-    author: "CC0",
-    description: "Silly dance for bipeds."
-  }
-];
+// Do not advertise clips until their reviewed, licensed GLB files are shipped.
+// Animator still exposes animations embedded in each customer's owned model.
+export const CC0_CLIPS: Array<{
+  id: string;
+  name: string;
+  skeleton: string;
+  url: string;
+  author: string;
+  description: string;
+}> = [];

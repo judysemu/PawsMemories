@@ -112,6 +112,8 @@ function Viewport({
   weather,
   cameraState,
   soundMuted,
+  soundUnlocked,
+  soundReady,
   lightTarget,
   soundCue,
   ikOptions,
@@ -123,6 +125,8 @@ function Viewport({
   weather: WeatherType,
   cameraState: { position: [number, number, number], fov: number },
   soundMuted: boolean,
+  soundUnlocked: boolean,
+  soundReady: boolean,
   lightTarget: any,
   soundCue: any,
   ikOptions: any,
@@ -133,7 +137,7 @@ function Viewport({
   
   const lighting = useMemo(() => {
     if (environment) {
-      const baseTime = typeof lightTarget === 'string' ? lightTarget : (environment.defaultTimeOfDay || "afternoon");
+      const baseTime = typeof lightTarget === 'string' ? lightTarget : (lightTarget?.preset || environment.defaultTimeOfDay || "afternoon");
       const baseLighting = lightingFor(baseTime as any, environment);
       return typeof lightTarget === 'object' ? { ...baseLighting, ...lightTarget } : baseLighting;
     }
@@ -155,10 +159,13 @@ function Viewport({
       
       {environment && (
         <SoundSystem 
-          ambientUrl={environment.ambientSound} 
+          ambientSoundId={environment.ambientSoundId}
           weather={weather} 
-          volume={soundMuted ? 0 : ANIMATOR_DEFAULTS.sound.volume} 
+          volume={ANIMATOR_DEFAULTS.sound.volume}
           soundCue={soundCue}
+          muted={soundMuted}
+          unlocked={soundUnlocked}
+          ready={soundReady}
         />
       )}
 
@@ -250,6 +257,7 @@ export default function AnimatorScreen({
   const [lightTarget, setLightTarget] = useState<any>(null);
   const [soundTarget, setSoundTarget] = useState<any>(null);
   const [soundMuted, setSoundMuted] = useState(false);
+  const [soundUnlocked, setSoundUnlocked] = useState(false);
   const [activeSequenceId, setActiveSequenceId] = useState<string>("");
   
   const [morphInfluences, setMorphInfluences] = useState<Record<string, number>>({});
@@ -257,6 +265,7 @@ export default function AnimatorScreen({
   
   const [voiceoverText, setVoiceoverText] = useState("");
   const [isVoiceoverRunning, setIsVoiceoverRunning] = useState(false);
+  const [voiceoverJob, setVoiceoverJob] = useState<{ jobId: number; status: string; progress: number; error: string | null; resultUrl: string | null; mimeType?: string | null } | null>(null);
   const [isVoicePreviewRunning, setIsVoicePreviewRunning] = useState(false);
   const [voicePreviewTier, setVoicePreviewTier] = useState<"A" | "B" | "C" | null>(null);
   
@@ -403,7 +412,7 @@ export default function AnimatorScreen({
         if (state.cameraTarget) setCameraState(state.cameraTarget);
         if (state.weatherTarget) setWeather(state.weatherTarget as WeatherType);
         if (state.lightTarget) setLightTarget(state.lightTarget);
-        if (state.soundTarget) setSoundTarget(state.soundTarget);
+        setSoundTarget((previous: any) => JSON.stringify(previous) === JSON.stringify(state.soundTarget ?? null) ? previous : (state.soundTarget ?? null));
 
         for (const [roleId, clipTarget] of Object.entries(state.clipTargets)) {
           const actorId = mappedRoles[roleId];
@@ -414,8 +423,7 @@ export default function AnimatorScreen({
               const clips = controller.listClips();
               const normalized = requested.toLowerCase().replace(/[_\s]+/g, "-");
               const playable = clips.find((clip) => clip.name === requested)
-                || clips.find((clip) => clip.name.toLowerCase().replace(/[_\s]+/g, "-") === normalized)
-                || clips.find((clip) => clip.name.toLowerCase() === "idle");
+                || clips.find((clip) => clip.name.toLowerCase().replace(/[_\s]+/g, "-") === normalized);
               if (!playable) {
                 setStudioNotice(`The cast model has no playable rig clips for “${requested}”.`);
                 continue;
@@ -454,6 +462,7 @@ export default function AnimatorScreen({
   }, [initialAssetId, sceneController]);
 
   const handlePlayPause = () => {
+    if (!isPlaying) setSoundUnlocked(true);
     if (isPlaying) sceneController.pauseAll();
     else sceneController.playAll();
     setIsPlaying(!isPlaying);
@@ -490,6 +499,24 @@ export default function AnimatorScreen({
   };
   
   const [recordingId, setRecordingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!voiceoverJob || ["done", "failed"].includes(voiceoverJob.status)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/animator/voiceover-jobs/${voiceoverJob.jobId}`, { headers: { "Authorization": `Bearer ${getToken()}` } });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Voiceover status failed");
+        if (!cancelled) setVoiceoverJob(payload);
+      } catch (error: any) {
+        if (!cancelled) setVoiceoverJob((current) => current ? { ...current, status: "failed", progress: 100, error: error.message } : current);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [voiceoverJob?.jobId, voiceoverJob?.status]);
 
   const stopVoicePreview = () => {
     voicePreviewAbortRef.current?.abort();
@@ -550,7 +577,7 @@ export default function AnimatorScreen({
           return;
         }
         const data = await captureSession.saveToBackend();
-        currentRecordingId = data.filename;
+        currentRecordingId = data.recordingId;
         setRecordingId(currentRecordingId);
       }
 
@@ -569,7 +596,7 @@ export default function AnimatorScreen({
       if (!data.success) {
         alert("Failed: " + data.error);
       } else {
-        alert("Voiceover queued! Job ID: " + data.jobId);
+        setVoiceoverJob({ jobId: Number(data.jobId), status: data.status || "queued", progress: 20, error: null, resultUrl: null });
       }
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -599,10 +626,29 @@ export default function AnimatorScreen({
         setStudioNotice("Choose at least one ready rigged model for the script cast.");
         return;
       }
+      if (activeDirectorScript.schemaVersion === "2") {
+        const required = Array.isArray(activeDirectorScript.requiredCapabilities) ? activeDirectorScript.requiredCapabilities : [];
+        for (const [roleId, actorId] of Object.entries(newMappedRoles)) {
+          const controller = sceneController.getActorController(actorId);
+          const available = new Set((controller?.listClips() || []).map((clip) => clip.name.toLowerCase().replace(/[_\s]+/g, "-")));
+          const missing = required.filter((capability: string) => !available.has(capability.toLowerCase().replace(/[_\s]+/g, "-")));
+          if (missing.length > 0) {
+            sceneController.pauseAll();
+            setMappedRoles({});
+            setStudioNotice(`This cast is not compatible with ${activeDirectorScript.name}. Missing motion: ${missing.join(", ")}. Choose a ${activeDirectorScript.requiredSkeleton} rig that includes every required clip.`);
+            return;
+          }
+          if (!activeDirectorScript.roleIds?.includes(roleId)) {
+            setStudioNotice("This cast contains a role that the selected script does not declare.");
+            return;
+          }
+        }
+      }
       setMappedRoles(newMappedRoles);
       directorRuntimeRef.current = { scriptId: activeDirectorScript.id, lastTime: 0, clips: {} };
       sceneController.seekAll(0);
       sceneController.playAll();
+      setSoundUnlocked(true);
       setTimeline(0);
       setIsPlaying(true);
       setStudioNotice("Script is playing. Motion is generated from the model rig and updated every frame.");
@@ -621,8 +667,9 @@ export default function AnimatorScreen({
     setStudioNotice("Script selected. Confirm the cast, then choose Apply Cast & Play.");
     setActiveSequenceId("");
     directorRuntimeRef.current = { scriptId: script.id, lastTime: 0, clips: {} };
-    if (script.recommendedEnvironment) {
-      const environment = environments.find((candidate) => candidate.id === script.recommendedEnvironment);
+    const scriptEnvironmentId = script.environmentId || script.recommendedEnvironment;
+    if (scriptEnvironmentId) {
+      const environment = environments.find((candidate) => candidate.id === scriptEnvironmentId);
       if (environment) setActiveEnvId(environment.id);
     }
     const initialCast: Record<string, string> = {};
@@ -793,6 +840,8 @@ export default function AnimatorScreen({
                 weather={weather}
                 cameraState={cameraState}
                 soundMuted={soundMuted}
+                soundUnlocked={soundUnlocked}
+                soundReady={isPlaying}
                 lightTarget={lightTarget}
                 soundCue={soundTarget}
                 ikOptions={ikOptions}
@@ -1020,7 +1069,7 @@ export default function AnimatorScreen({
                 </select>
                 
                 <button 
-                  onClick={() => setSoundMuted(!soundMuted)}
+                  onClick={() => { setSoundUnlocked(true); setSoundMuted(!soundMuted); }}
                   className={`flex items-center gap-2 text-xs p-2 rounded-xl justify-center transition-colors border ${soundMuted ? 'bg-red-500/20 border-red-500 text-red-400' : 'bg-white/10 border-transparent hover:bg-white/20'}`}
                 >
                   {soundMuted ? <VolumeX size={14} /> : <Volume2 size={14} />} 
@@ -1095,10 +1144,28 @@ export default function AnimatorScreen({
                         disabled={isVoiceoverRunning || !voiceoverText}
                         className="bg-primary text-on-primary text-xs font-bold px-3 py-1.5 rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        {isVoiceoverRunning ? "Generating..." : "Generate Audio"}
+                        {isVoiceoverRunning ? "Queueing..." : "Generate voiced video"}
                       </button>
                     </div>
                   </div>
+                  {voiceoverJob && (
+                    <div role="status" className="rounded-xl border border-white/15 bg-black/35 p-2 text-[10px] text-white/75">
+                      {voiceoverJob.status === "failed" ? (
+                        <span className="text-red-300">Voiced export failed: {voiceoverJob.error || "Unknown error"}</span>
+                      ) : voiceoverJob.status === "done" && voiceoverJob.resultUrl ? (
+                        <div className="space-y-2">
+                          <span className="font-bold text-emerald-300">Verified voiced video ready</span>
+                          <video src={voiceoverJob.resultUrl} controls playsInline className="w-full rounded-lg bg-black" />
+                          <a href={voiceoverJob.resultUrl} download className="block rounded-lg bg-primary px-3 py-2 text-center font-bold text-on-primary">Download voiced video</a>
+                        </div>
+                      ) : (
+                        <div>
+                          <span>Voiced export {voiceoverJob.status} · {voiceoverJob.progress}%</span>
+                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-primary" style={{ width: `${voiceoverJob.progress}%` }} /></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="w-full h-px bg-white/10 my-1"></div>
 

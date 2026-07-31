@@ -181,6 +181,16 @@ export async function findAttemptById(
   return rows[0] || null;
 }
 
+export async function findAttemptByIdForUpdate(
+  conn: mysql.PoolConnection,
+  id: number,
+): Promise<BuildAttemptRecord | null> {
+  const [rows] = await conn.query(
+    "SELECT * FROM model_build_attempts WHERE id = ? FOR UPDATE", [id],
+  ) as any;
+  return rows[0] || null;
+}
+
 export async function findAttemptsByJobId(
   conn: mysql.PoolConnection | mysql.Pool,
   jobId: number,
@@ -206,9 +216,12 @@ export async function updateAttemptState(
   attemptId: number,
   state: BuildAttemptState,
   extra?: {
-    providerTaskHandle?: string;
-    leaseOwner?: string;
-    leaseExpiresAt?: Date;
+    providerTaskHandle?: string | null;
+    leaseOwner?: string | null;
+    leaseExpiresAt?: Date | null;
+    submissionClaimedAt?: Date;
+    recoveryRequiredAt?: Date;
+    handlePersistAttempts?: number;
     failureCode?: string;
     errorMessage?: string;
     completedAt?: Date;
@@ -228,6 +241,18 @@ export async function updateAttemptState(
   if (extra?.leaseExpiresAt !== undefined) {
     sets.push("lease_expires_at = ?");
     params.push(extra.leaseExpiresAt);
+  }
+  if (extra?.submissionClaimedAt !== undefined) {
+    sets.push("submission_claimed_at = ?");
+    params.push(extra.submissionClaimedAt);
+  }
+  if (extra?.recoveryRequiredAt !== undefined) {
+    sets.push("recovery_required_at = ?");
+    params.push(extra.recoveryRequiredAt);
+  }
+  if (extra?.handlePersistAttempts !== undefined) {
+    sets.push("handle_persist_attempts = ?");
+    params.push(extra.handlePersistAttempts);
   }
   if (extra?.failureCode !== undefined) {
     sets.push("failure_code = ?");
@@ -258,7 +283,7 @@ export async function claimLease(
   const [result] = await conn.query(
     `UPDATE model_build_attempts
      SET lease_owner = ?, lease_expires_at = ?
-     WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at < NOW())`,
+     WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at < NOW())`,
     [leaseOwner, leaseExpiresAt, attemptId],
   ) as any;
   return result.affectedRows === 1;
@@ -286,7 +311,7 @@ export async function renewLease(
   const [result] = await db.query(
     `UPDATE model_build_attempts
      SET lease_expires_at = ?
-     WHERE id = ? AND lease_owner = ?`,
+     WHERE id = ? AND lease_owner = ? AND lease_expires_at >= NOW()`,
     [leaseExpiresAt, attemptId, leaseOwner],
   ) as any;
   return result.affectedRows === 1;
@@ -297,10 +322,78 @@ export async function findExpiredLeases(
 ): Promise<BuildAttemptRecord[]> {
   const [rows] = await conn.query(
     `SELECT * FROM model_build_attempts
-     WHERE lease_owner IS NOT NULL AND lease_expires_at < NOW()
-       AND state IN ('submitted', 'processing', 'downloading')`,
+     WHERE (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at < NOW())
+       AND state IN ('submitted', 'processing', 'downloading', 'validating')`,
   ) as any;
   return rows;
+}
+
+export async function findAmbiguousSubmissions(
+  conn: mysql.PoolConnection | mysql.Pool,
+): Promise<BuildAttemptRecord[]> {
+  const [rows] = await conn.query(
+    `SELECT * FROM model_build_attempts
+     WHERE state IN ('submitted', 'recovery_required')
+       AND provider_task_handle IS NULL
+       AND (lease_owner IS NULL OR lease_expires_at < NOW())`,
+  ) as any;
+  return rows;
+}
+
+export async function findRefundPendingJobs(
+  conn: mysql.PoolConnection | mysql.Pool,
+): Promise<BuildJobRecord[]> {
+  const [rows] = await conn.query(
+    `SELECT * FROM model_build_jobs
+     WHERE state IN ('failed_provider', 'failed_validation', 'cancelled')
+       AND credit_correlation_id IS NOT NULL
+       AND refund_correlation_id IS NULL
+       AND current_attempt_id IS NOT NULL
+     ORDER BY id ASC`,
+  ) as any;
+  return rows;
+}
+
+export async function markRefundPending(
+  conn: mysql.PoolConnection,
+  jobId: number,
+  errorCode: string | null,
+): Promise<void> {
+  await conn.query(
+    `UPDATE model_build_jobs
+     SET refund_pending_at = COALESCE(refund_pending_at, NOW()),
+         refund_attempts = refund_attempts + 1,
+         last_refund_error_code = ?
+     WHERE id = ?`,
+    [errorCode, jobId],
+  );
+}
+
+export async function markRefundComplete(
+  conn: mysql.PoolConnection,
+  jobId: number,
+  refundCorrelationId: string,
+): Promise<void> {
+  await conn.query(
+    `UPDATE model_build_jobs
+     SET refund_correlation_id = ?, refund_pending_at = NULL,
+         last_refund_error_code = NULL
+     WHERE id = ?`,
+    [refundCorrelationId, jobId],
+  );
+}
+
+export async function markRefundFailure(
+  conn: mysql.PoolConnection,
+  jobId: number,
+): Promise<void> {
+  await conn.query(
+    `UPDATE model_build_jobs
+     SET refund_pending_at = COALESCE(refund_pending_at, NOW()),
+         last_refund_error_code = 'REFUND_RETRY_REQUIRED'
+     WHERE id = ? AND refund_correlation_id IS NULL`,
+    [jobId],
+  );
 }
 
 // ─── Provider Events ────────────────────────────────────────────────────────

@@ -25,14 +25,15 @@
     "test:security": "tsx --test tests/security/*.test.mjs",
     "test:coverage": "node --import tsx --experimental-test-coverage --test tests/*.test.mjs tests/contracts/*.test.mjs tests/security/*.test.mjs",
     "animator:doctor": "node scripts/animator-doctor.mjs",
-    "seed:wags": "node scripts/seed-wags-catalog.mjs"
-    ,"stationery:worker": "tsx stationery-worker/index.ts"
+    "seed:wags": "node scripts/seed-wags-catalog.mjs",
+    "stationery:worker": "tsx stationery-worker/index.ts",
+    "wardrobe:pbr": "tsx scripts/generate-wardrobe-pbr.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",
     "@aws-sdk/client-sns": "^3.1085.0",
     "@aws-sdk/s3-request-presigner": "^3.1090.0",
-    "@gltf-transform/cli": "^4.4.1",
+    "@fal-ai/client": "^1.10.1",
     "@gltf-transform/core": "^4.4.1",
     "@gltf-transform/extensions": "^4.4.1",
     "@gltf-transform/functions": "^4.4.1",
@@ -80,7 +81,6 @@
     "sharp": "$sharp"
   },
   "devDependencies": {
-    "@react-three/eslint-plugin": "^0.1.2",
     "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
     "@types/express-rate-limit": "^5.1.3",

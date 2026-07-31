@@ -46,8 +46,9 @@ export type SceneDescriptor = z.infer<typeof SceneDescriptorSchema>;
 
 export function createScene(userPhone: string, partial: Partial<SceneDescriptor>): SceneDescriptor {
   const now = new Date().toISOString();
-  // Allow client to provide an ID, otherwise generate one
-  const id = partial.id || uuidv4();
+  // Scene identity is always server-generated; caller IDs can never select an
+  // existing owner's filename or overwrite it.
+  const id = uuidv4();
   
   const record: SceneDescriptor = {
     id,

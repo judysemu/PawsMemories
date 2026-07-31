@@ -147,7 +147,7 @@ export default function OrderAlbumModal({ creation, userCredits, onClose }: Orde
               <p className="font-bold">Insufficient Credits</p>
               <p className="leading-relaxed">
                 This physical album requires **800 credits** to process. You currently have **{userCredits} credits**. 
-                You can earn credits by completing daily streaks, sharing generated artwork, or finishing achievements.
+                You can earn credits through daily streaks and verified account achievements.
               </p>
             </div>
           </div>

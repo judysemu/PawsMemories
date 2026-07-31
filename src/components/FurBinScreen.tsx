@@ -27,6 +27,14 @@ function outputUrl(creation: Creation) {
   return creation.video_url || creation.model_url || creation.image_url || "";
 }
 
+export function legacyCreationIsRepresented(
+  creation: Pick<Creation, "id">,
+  models: Array<Pick<ModelLibraryItem, "id" | "source_type">>,
+): boolean {
+  return models.some((model) =>
+    model.source_type === "creation" && Number(model.id) === Number(creation.id));
+}
+
 export default function FurBinScreen(props: FurBinScreenProps) {
   if (import.meta.env.VITE_FUR_BIN_V5_ENABLED === "true") {
     return <React.Suspense fallback={<div className="flex min-h-[50vh] items-center justify-center text-on-surface-variant"><Loader2 className="animate-spin" aria-label="Loading Fur Bin" /></div>}><FurBinV5Experience /></React.Suspense>;
@@ -106,9 +114,9 @@ function LegacyFurBinScreen({ creations, userProfile, onOpenCreditStore }: FurBi
   }, []);
 
   const visible = useMemo(() => [...creations]
-    .filter((creation) => models.length === 0 || outputType(creation) !== "models")
+    .filter((creation) => outputType(creation) !== "models" || !legacyCreationIsRepresented(creation, models))
     .filter((creation) => filter === "all" || outputType(creation) === filter)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), [creations, filter, models.length]);
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), [creations, filter, models]);
 
   const beginPrint = async () => {
     if (!selectedModel) return;

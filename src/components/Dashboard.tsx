@@ -10,11 +10,10 @@ interface DashboardProps {
   onAddMemory: () => void;
   onCreate: () => void;
   onClaimDailyBonus: () => void;
-  onShareCompleted: (platform: string, reward: number) => void;
   onSelectCreation: (creation: Creation) => void;
   streak: number;
   achievements: Achievement[];
-  onClaimReward: (id: string, amount: number) => void;
+  onClaimReward: (id: string) => void;
   onClaimDailyStreak: () => void;
   dailyStreakClaimed: boolean;
   onSelectAlbum: (album: Album) => void;

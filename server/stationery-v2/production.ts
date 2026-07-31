@@ -104,7 +104,8 @@ export class SqlStationeryPaymentEvidenceReader implements PaymentEvidenceReader
 
   async getPaymentEvidence(ownerId: string, paymentUuid: string): Promise<PaymentEvidence | null> {
     const [rows]: any = await this.pool.query(
-      `SELECT payment_uuid, owner_id, state, amount_minor, currency, confirmed_at, evidence_hash
+      `SELECT payment_uuid, owner_id, state, fulfillment_provider, provider_sku,
+              unit_amount_minor, quantity, amount_minor, currency, confirmed_at, evidence_hash
        FROM stationery_payment_evidence
        WHERE payment_uuid = ? AND owner_id = ? LIMIT 1`,
       [paymentUuid, ownerId],
@@ -114,6 +115,10 @@ export class SqlStationeryPaymentEvidenceReader implements PaymentEvidenceReader
       paymentUuid: String(rows[0].payment_uuid),
       ownerId: String(rows[0].owner_id),
       state: rows[0].state,
+      fulfillmentProvider: rows[0].fulfillment_provider,
+      providerSku: String(rows[0].provider_sku),
+      unitAmountMinor: Number(rows[0].unit_amount_minor),
+      quantity: Number(rows[0].quantity),
       amountMinor: Number(rows[0].amount_minor),
       currency: String(rows[0].currency),
       confirmedAt: rows[0].confirmed_at ? toIso(rows[0].confirmed_at) : null,

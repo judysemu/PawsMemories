@@ -267,6 +267,33 @@ function extractBlenderError(stdout, stderr) {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+function requireWorkerAuth(req, res, next) {
+  const expected = process.env.WORKER_SHARED_SECRET;
+  const provided = req.get("x-worker-secret");
+  if (!expected || !provided) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const providedBuffer = Buffer.from(provided, "utf8");
+  if (
+    expectedBuffer.length !== providedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, providedBuffer)
+  ) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+}
+
+// The worker can execute arbitrary Blender/Python code and perform expensive
+// downloads/renders. Keep only liveness public, and authenticate before the
+// 100 MB JSON parser so anonymous traffic cannot allocate large request bodies.
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  return requireWorkerAuth(req, res, next);
+});
+
 // Auth runs before this route-specific parser so unauthenticated callers cannot
 // force the legacy 100 MB parser to allocate for the rig pipeline endpoint.
 app.post(
@@ -317,14 +344,6 @@ app.get("/health", async (req, res) => {
 // =============================================================================
 // NEW: Bridge proxy endpoints (for the multi-agent system)
 // =============================================================================
-
-function requireWorkerAuth(req, res, next) {
-  const provided = req.get("x-worker-secret");
-  if (!provided || provided !== process.env.WORKER_SHARED_SECRET) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-}
 
 const IFC_WORKER = path.join(__dirname, "ifc_worker", "ifc_worker.py");
 const IFC_CACHE = path.join(os.tmpdir(), "pawsome3d-ifc-cache");
@@ -451,12 +470,6 @@ app.use([
   "/texture/rebake",
   "/texture/render-views",
 ], requireWorkerAuth, requireBridge);
-
-// NOT protected, deliberately, for now: /render, /rig-model, /bake-clips,
-// /bake-sprites. Their callers do NOT send the secret yet,
-// so adding them here would break avatar generation and rigging in production.
-// Closing that gap means adding the header at each call site first, then
-// extending the list above — a separate change with its own deploy.
 
 // Read the current Blender scene graph
 app.get("/scene", async (req, res) => {

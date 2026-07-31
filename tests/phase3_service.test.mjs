@@ -13,6 +13,7 @@ const MYSQL_PORT = Number(process.env.MYSQL_TEST_PORT || 3306);
 const MYSQL_USER = process.env.MYSQL_TEST_USER || "root";
 const MYSQL_PASSWORD = process.env.MYSQL_TEST_PASSWORD || "";
 const TEST_DB = "paws_phase3_service_test_db";
+const FAST_DURABILITY_RUNTIME = { sleep: async () => {}, random: () => 0 };
 
 async function isMysqlServerReachable() {
   try {
@@ -96,7 +97,7 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
     await runMigrations(pool);
 
     fakeProvider = new FakeModelBuildProvider();
-    service = new ModelBuildService(fakeProvider, () => pool);
+    service = new ModelBuildService(fakeProvider, () => pool, FAST_DURABILITY_RUNTIME);
   });
 
   after(async () => {
@@ -219,6 +220,30 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
     const quote = await service.getQuote(owner, "00000000-0000-0000-0000-000000000000");
     assert.equal(quote.preflightPassed, false);
     assert.ok(quote.preflightErrors.some(e => e.includes("not found")));
+  });
+
+  it("should make zero provider calls on validation and balance failures", async () => {
+    fakeProvider.reset();
+    await assert.rejects(
+      service.startBuild("+15553002", {
+        referenceSessionUuid: "00000000-0000-0000-0000-000000000000",
+        idempotencyKey: "11111111-1111-4111-8111-111111111111",
+      }),
+      (error) => error.code === "PREFLIGHT_FAILED",
+    );
+    assert.equal(fakeProvider.startCalls, 0);
+
+    const owner = "+15553005";
+    const { sessionUuid } = await createApprovedReferenceSession(owner);
+    await pool.query("UPDATE users SET credits = 0 WHERE phone = ?", [owner]);
+    await assert.rejects(
+      service.startBuild(owner, {
+        referenceSessionUuid: sessionUuid,
+        idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      }),
+      (error) => error.code === "PREFLIGHT_FAILED",
+    );
+    assert.equal(fakeProvider.startCalls, 0);
   });
 
   it("should execute full build pipeline: start -> background process -> ready -> accept", async () => {

@@ -18,8 +18,6 @@ import { CreateRigReviewScreen } from "./components/create-flow/CreateRigReviewS
 import { CreateFlowProvider } from "./components/create-flow/CreateFlowContext";
 import UnderConstructionLock from "./components/UnderConstructionLock";
 import EditMemory from "./components/EditMemory";
-import RequestMemory from "./components/RequestMemory";
-import AdminRequestPanel from "./components/AdminRequestPanel";
 import ShareMemory from "./components/ShareMemory";
 // Lazy-loaded: these are the only screens/widgets that pull the three.js + R3F
 // runtime. Loading them on demand keeps three.js OUT of the initial bundle so the
@@ -27,8 +25,8 @@ import ShareMemory from "./components/ShareMemory";
 const RandyChat = lazy(() => import("./components/RandyChat"));
 import AlbumView from "./components/AlbumView";
 import AlbumsPage from "./components/AlbumsPage";
-import { fetchMe, fetchCreations, fetchAlbums, createAlbum, clearToken, claimAchievement, claimDailyStreak, claimShareReward, confirmCreditsSession, acceptCurrentTerms } from "./api";
-import { Sun, Moon, LogOut, RefreshCw, Zap, Bell, ShoppingCart, Users, HelpCircle, PackageCheck, Activity, PlusCircle, Mic2, PawPrint, User as UserIcon, MoreHorizontal, House, Archive, Building2, Gift } from "lucide-react";
+import { fetchMe, fetchCreations, fetchAlbums, createAlbum, clearToken, claimAchievement, claimDailyStreak, confirmCreditsSession, acceptCurrentTerms } from "./api";
+import { Sun, Moon, LogOut, RefreshCw, Zap, ShoppingCart, Users, HelpCircle, PackageCheck, Activity, PlusCircle, Mic2, PawPrint, User as UserIcon, MoreHorizontal, House, Archive, Building2, Gift } from "lucide-react";
 import CreditStore from "./components/CreditStore";
 const AvatarDashboard = lazy(() => import("./components/AvatarDashboard"));
 import Store from "./components/Store";
@@ -76,7 +74,6 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
   [Screen.COMMUNITY]: "/community",
   [Screen.PROFILE]: "/profile",
   [Screen.ALBUMS]: "/albums",
-  [Screen.REQUEST_MEMORY]: "/request-memory",
   [Screen.CREATE]: "/create",
   [Screen.CREATE_REFERENCE]: "/create/reference",
   [Screen.CREATE_CUSTOMIZE]: "/create/customize",
@@ -102,6 +99,9 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
 function screenFromPath(pathname: string): Screen | null {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/creations") return Screen.FURBIN;
+  // Retire the unsupported paid concierge surface until its payment and
+  // fulfillment routes exist. Old bookmarks land on a working keepsake flow.
+  if (normalized === "/request-memory") return Screen.PAWPRINTS;
   // Retire bookmarked create-wizard steps. Signed-in customers must enter the
   // customer-gated model lifecycle instead of bypassing its approval stages.
   if (normalized.startsWith("/create/")) return Screen.CREATE;
@@ -114,6 +114,25 @@ function screenFromPath(pathname: string): Screen | null {
   const entry = Object.entries(SCREEN_PATHS).find(([, path]) => path === normalized);
   return entry ? entry[0] as Screen : null;
 }
+
+const PUBLIC_SCREENS = new Set<Screen>([
+  Screen.DASHBOARD,
+  Screen.CREATE,
+  Screen.PAWPRINTS,
+  Screen.PRINT_SHOP,
+  Screen.LANDING_MODELS,
+  Screen.LANDING_DOGS,
+  Screen.LANDING_CATS,
+  Screen.LANDING_PROFESSIONALS,
+  Screen.LANDING_GLB_GUIDE,
+  Screen.LANDING_DENVER,
+  Screen.LANDING_PHILADELPHIA,
+  Screen.GUIDES_HUB,
+  Screen.PRODUCT_VIEW,
+  Screen.LANDING_MEMORIALS,
+  Screen.HOW_IT_WORKS,
+  Screen.PRICING,
+]);
 
 const getBackgroundImage = (screen: Screen) => {
   switch (screen) {
@@ -193,7 +212,12 @@ export default function App() {
   const [isAuthed, setIsAuthed] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
-  const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.DASHBOARD);
+  const [currentScreen, setCurrentScreen] = useState<Screen>(() => {
+    if (typeof window === "undefined") return Screen.DASHBOARD;
+    const routed = screenFromPath(window.location.pathname);
+    return routed && PUBLIC_SCREENS.has(routed) ? routed : Screen.DASHBOARD;
+  });
+  const [incompleteUser, setIncompleteUser] = useState<PublicUser | null>(null);
   const [animatorAssetId, setAnimatorAssetId] = useState<string | null>(null);
   // Video Creator is the Animate landing screen; the full 3D builder is its
   // advanced workspace, opened from within that parent module.
@@ -204,8 +228,6 @@ export default function App() {
   const [successOrderSessionId, setSuccessOrderSessionId] = useState("");
   const [showCreditStore, setShowCreditStore] = useState(false);
   const [creditSuccessMsg, setCreditSuccessMsg] = useState("");
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [requestSuccessMsg, setRequestSuccessMsg] = useState("");
   const [showHelpModal, setShowHelpModal] = useState(false);
   /** Header overflow menu — holds the controls demoted from the icon row. */
   const [showShellMenu, setShowShellMenu] = useState(false);
@@ -218,6 +240,7 @@ export default function App() {
   const refreshCreations = async () => {
     const serverCreations = await fetchCreations();
     setCreations(serverCreations);
+    if (serverCreations.length > 0) handleUnlockAchievement("creation");
   };
 
   const openAnimationStudio = () => {
@@ -236,9 +259,6 @@ export default function App() {
   const [dailyStreakClaimed, setDailyStreakClaimed] = useState<boolean>(false);
   const [achievements, setAchievements] = useState<any[]>([
       { id: "pioneer", title: "Pioneer Parent", desc: "Successfully completed user profile registration", reward: 25, icon: "🎉", isUnlocked: false, isClaimed: false },
-      { id: "camera_use", title: "Shutter Pup", desc: "Snapped a direct real-time photo with your camera viewfinder", reward: 15, icon: "📸", isUnlocked: false, isClaimed: false },
-      { id: "voice_use", title: "Voice Whisperer", desc: "Dictated a details description using your microphone hardware", reward: 15, icon: "🎙️", isUnlocked: false, isClaimed: false },
-      { id: "randy_chat", title: "Golden Buddy", desc: "Chatted with Randy the retriever AI pet companion", reward: 10, icon: "🦮", isUnlocked: false, isClaimed: false },
       { id: "creation", title: "Art Keepsake", desc: "Created your first styled AI animal masterpiece memory", reward: 20, icon: "🎨", isUnlocked: false, isClaimed: false },
   ]);
 
@@ -246,28 +266,39 @@ export default function App() {
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      const user = await fetchMe();
-      if (cancelled) return;
-      if (user && user.profileComplete) {
-        applyUser(user);
-        setIsAuthed(true);
-        setCurrentScreen(screenFromPath(window.location.pathname) || Screen.DASHBOARD);
-        // Login/check-in rewards are server-side and idempotent per calendar day.
-        try {
-          const checkedIn = await claimDailyStreak();
-          applyUser(checkedIn);
-        } catch {
-          // A reward outage must never block a returning user from entering the app.
+      try {
+        const user = await fetchMe();
+        if (cancelled) return;
+        if (user?.profileComplete) {
+          applyUser(user);
+          setIncompleteUser(null);
+          setIsAuthed(true);
+          setCurrentScreen(screenFromPath(window.location.pathname) || Screen.DASHBOARD);
+          // Login/check-in rewards are server-side and idempotent per calendar day.
+          try {
+            const checkedIn = await claimDailyStreak();
+            applyUser(checkedIn);
+          } catch {
+            // A reward outage must never block a returning user from entering the app.
+          }
+          // Phase 1.7: Fetch persistent creations from backend
+          await refreshCreations();
+          const serverAlbums = await fetchAlbums();
+          setAlbums(serverAlbums);
+        } else if (user) {
+          applyUser(user);
+          setIncompleteUser(user);
+          setIsAuthed(false);
+          setCurrentScreen(Screen.SIGN_UP);
+        } else {
+          setIsAuthed(false);
         }
-        // Phase 1.7: Fetch persistent creations from backend
-        await refreshCreations();
-        const serverAlbums = await fetchAlbums();
-        setAlbums(serverAlbums);
-      } else {
-        clearToken();
+      } catch {
+        // A transient /api/me outage must not destroy a valid local session.
         setIsAuthed(false);
+      } finally {
+        if (!cancelled) setAuthChecked(true);
       }
-      setAuthChecked(true);
     })();
     return () => {
       cancelled = true;
@@ -276,7 +307,7 @@ export default function App() {
 
   // Keep state-driven navigation addressable and make browser back/forward work.
   React.useEffect(() => {
-    if (!authChecked || !isAuthed) return;
+    if (!authChecked || (!isAuthed && !PUBLIC_SCREENS.has(currentScreen))) return;
     const path = SCREEN_PATHS[currentScreen];
     if (path && window.location.pathname !== path) window.history.pushState({ screen: currentScreen }, "", path);
   }, [authChecked, isAuthed, currentScreen]);
@@ -340,18 +371,6 @@ export default function App() {
     }
   }, []);
 
-  // Handle photo request success/cancel redirects
-  React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("request_success") === "true") {
-      setRequestSuccessMsg("✅ Your memory request has been submitted and payment received! We'll notify you by SMS when it's ready.");
-      window.history.replaceState({}, document.title, window.location.pathname);
-      setTimeout(() => setRequestSuccessMsg(""), 8000);
-    } else if (params.get("request_cancelled") === "true") {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []);
-
   const applyUser = (user: PublicUser) => {
     setUserProfile({
       fullName: user.fullName,
@@ -375,9 +394,16 @@ export default function App() {
     setDailyStreak(user.dailyStreak || 0);
     const today = new Date().toISOString().split('T')[0];
     setDailyStreakClaimed(user.lastStreakClaim?.startsWith(today) || false);
-    if (user.achievements && user.achievements.length > 0) {
-      setAchievements(user.achievements);
-    }
+    const claimed = new Set(
+      Array.isArray(user.achievements)
+        ? user.achievements.filter((value): value is string => typeof value === "string")
+        : [],
+    );
+    setAchievements((current) => current.map((achievement) => ({
+      ...achievement,
+      isUnlocked: achievement.isUnlocked || claimed.has(achievement.id) || (achievement.id === "pioneer" && user.profileComplete),
+      isClaimed: claimed.has(achievement.id),
+    })));
   };
 
   const toggleDarkMode = () => {
@@ -399,7 +425,7 @@ export default function App() {
     });
   };
 
-  const handleClaimReward = async (id: string, amount: number) => {
+  const handleClaimReward = async (id: string) => {
     try {
       const updatedUser = await claimAchievement(id);
       applyUser(updatedUser);
@@ -427,6 +453,13 @@ export default function App() {
   // Called by SignUp once the user is verified AND has a complete profile.
   const handleAuthenticated = (user: PublicUser, isNew: boolean) => {
     applyUser(user);
+    if (!user.profileComplete) {
+      setIncompleteUser(user);
+      setIsAuthed(false);
+      setCurrentScreen(Screen.SIGN_UP);
+      return;
+    }
+    setIncompleteUser(null);
     setIsAuthed(true);
     if (isNew) {
       handleUnlockAchievement("pioneer");
@@ -482,17 +515,6 @@ export default function App() {
       applyUser(updatedUser);
     } catch (err: any) {
       alert(err.message || "Daily bonus already claimed today.");
-    }
-  };
-
-  const handleShareCompleted = async (platform: string) => {
-    // Server-persisted, per-day capped reward — no more client-only credits.
-    try {
-      const { reward, user } = await claimShareReward(platform);
-      applyUser(user);
-      alert(`Thanks for sharing to ${platform}! +${reward} PupCoins added.`);
-    } catch (err: any) {
-      alert(err.message || "Couldn't grant the share reward right now.");
     }
   };
 
@@ -885,7 +907,7 @@ export default function App() {
         {!isAuthed && ![
           Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_CATS, Screen.LANDING_PROFESSIONALS, Screen.LANDING_GLB_GUIDE, Screen.LANDING_DENVER, Screen.LANDING_PHILADELPHIA, Screen.GUIDES_HUB, Screen.PRODUCT_VIEW, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING
         ].includes(currentScreen) ? (
-          <SignUp onAuthenticated={handleAuthenticated} />
+          <SignUp onAuthenticated={handleAuthenticated} resumeProfile={incompleteUser} />
         ) : (
           isAuthed && (
             <>
@@ -913,19 +935,23 @@ export default function App() {
               />
             )}
 
-            {/* Non-admin users who somehow reach EDIT_MEMORY are bounced to REQUEST_MEMORY */}
+            {/* The paid concierge request flow is retired until real server
+                routes and fulfillment exist. Never route a customer into its
+                preserved legacy source. */}
             {currentScreen === Screen.EDIT_MEMORY && !userProfile.isAdmin && (
-              <RequestMemory
-                onNavigateBack={() => setCurrentScreen(Screen.DASHBOARD)}
-                onUnlockAchievement={handleUnlockAchievement}
-              />
+              <main className="mx-auto w-full max-w-xl px-4 py-12 text-center">
+                <h1 className="text-2xl font-black text-on-surface">Create a supported keepsake</h1>
+                <p className="mt-3 text-on-surface-variant">Concierge photo and video requests are not accepting payment. Pawprints and 3D Create remain available.</p>
+                <button type="button" onClick={() => setCurrentScreen(Screen.PAWPRINTS)} className="mt-6 min-h-12 rounded-xl bg-primary px-5 font-black text-on-primary">Open Pawprints</button>
+              </main>
             )}
 
             {currentScreen === Screen.REQUEST_MEMORY && (
-              <RequestMemory
-                onNavigateBack={() => setCurrentScreen(Screen.DASHBOARD)}
-                onUnlockAchievement={handleUnlockAchievement}
-              />
+              <main className="mx-auto w-full max-w-xl px-4 py-12 text-center">
+                <h1 className="text-2xl font-black text-on-surface">Create a supported keepsake</h1>
+                <p className="mt-3 text-on-surface-variant">Concierge photo and video requests are not accepting payment. Pawprints and 3D Create remain available.</p>
+                <button type="button" onClick={() => setCurrentScreen(Screen.PAWPRINTS)} className="mt-6 min-h-12 rounded-xl bg-primary px-5 font-black text-on-primary">Open Pawprints</button>
+              </main>
             )}
 
             {currentScreen === Screen.ALBUMS && (
@@ -1147,14 +1173,6 @@ export default function App() {
         </Suspense>
       )}
 
-      {/* Request success toast */}
-      {requestSuccessMsg && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl text-sm font-bold animate-fade-in flex items-center gap-2 max-w-sm text-center">
-          <Bell size={16} />
-          {requestSuccessMsg}
-        </div>
-      )}
-
       {/* PupCoins success toast */}
       {creditSuccessMsg && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-primary text-white px-5 py-3 rounded-2xl shadow-xl text-sm font-bold animate-fade-in flex items-center gap-2">
@@ -1174,16 +1192,6 @@ export default function App() {
         />
       )}
 
-      {/* Admin Request Panel */}
-      {showAdminPanel && userProfile.isAdmin && (
-        <AdminRequestPanel
-          onClose={() => setShowAdminPanel(false)}
-          onGenerateForRequest={(photoUrl, comment) => {
-            setCurrentScreen(Screen.EDIT_MEMORY);
-          }}
-        />
-      )}
-
       {/* Order Success Modal */}
       {showOrderSuccessModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -1191,8 +1199,8 @@ export default function App() {
             <span className="text-5xl animate-bounce mb-4 inline-block">🎉</span>
             <h3 className="text-lg font-extrabold text-primary mb-2">Order Confirmed!</h3>
             <p className="text-xs text-on-surface-variant leading-relaxed mb-4">
-              Your payment of **$12.00 USD** succeeded, and **800 PupCoins** have been deducted.
-              Randy is sending your custom physical pet album to print!
+              Your payment was confirmed. The order is now being processed; its
+              exact amount and status remain available in the order record.
             </p>
             <div className="bg-surface-container rounded-xl p-3 text-[10px] text-on-surface-variant font-mono mb-6 text-left break-all">
               <strong>Session ID:</strong> {successOrderSessionId}

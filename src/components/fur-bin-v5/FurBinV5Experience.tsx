@@ -33,10 +33,14 @@ import type {
 } from "./types";
 import {
   archivePrivateItem,
+  clampLibraryPage,
+  createLatestLibraryRequestGate,
   formatBytes,
   formatDimensions,
-  loadPrivateLibrary,
+  libraryPageCount,
+  loadLatestLibraryPage,
   mergeItem,
+  normalizeLibraryFilters,
   publishPublicDerivative,
   refreshSignedView,
   rollbackToVersion,
@@ -366,27 +370,45 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
   const [publicUuid, setPublicUuid] = useState("");
   const [publicShowcase, setPublicShowcase] = useState<FurBinShowcase | null>(null);
   const [publicLoading, setPublicLoading] = useState(false);
+  const libraryRequestGateRef = useRef(createLatestLibraryRequestGate());
 
   const load = async (nextFilters = filters) => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await loadPrivateLibrary(api, nextFilters);
-      setItems(result.items);
-      setTotal(result.total);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setLoading(false);
-    }
+    const normalized = normalizeLibraryFilters(nextFilters);
+    await loadLatestLibraryPage(api, normalized, libraryRequestGateRef.current, {
+      start: () => {
+        setLoading(true);
+        setError("");
+      },
+      success: (result) => {
+        const clampedPage = clampLibraryPage(result.total, result.page, result.limit);
+        if (clampedPage !== result.page) {
+          const clampedFilters = { ...normalized, page: clampedPage, limit: result.limit };
+          setFilters(clampedFilters);
+          void load(clampedFilters);
+          return;
+        }
+        setItems(result.items);
+        setTotal(result.total);
+        setFilters({ ...normalized, page: result.page, limit: result.limit });
+      },
+      failure: (cause) => setError(errorMessage(cause)),
+      finish: () => setLoading(false),
+    });
   };
 
   useEffect(() => {
+    let active = true;
     void load(filters);
     if (api.capabilities.listCollections) {
-      api.listCollections().then(setCollections).catch(() => setCollections([]));
+      api.listCollections()
+        .then((next) => { if (active) setCollections(next); })
+        .catch(() => { if (active) setCollections([]); });
     }
-    // The API instance is stable for production and deliberately injectable in tests/stories.
+    return () => {
+      active = false;
+      libraryRequestGateRef.current.invalidate();
+    };
+    // The API instance is deliberately injectable in tests/stories.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
@@ -408,12 +430,15 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
   };
 
   const updateFilter = (next: LibraryFilters) => {
-    setFilters(next);
-    void load(next);
+    const normalized = normalizeLibraryFilters(next);
+    setFilters(normalized);
+    void load(normalized);
   };
 
   const hasFilters = Boolean(filters.query || filters.tag || filters.collectionUuid || filters.hasRig || filters.hasFacial || filters.hasAnimations);
   const availableTags = [...new Set(items.flatMap((item) => item.tags))].sort().slice(0, 10);
+  const currentPage = clampLibraryPage(total, filters.page || 1, filters.limit || 40);
+  const totalPages = libraryPageCount(total, filters.limit || 40);
 
   return (
     <main className="furbin-v5-shell">
@@ -491,6 +516,27 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
               {items.map((item) => <ItemCard key={item.itemUuid} item={item} onOpen={openItem} />)}
             </section>
           ) : <EmptyState filtered={hasFilters} />}
+          {totalPages > 1 && (
+            <nav className="furbin-v5-pagination" aria-label="Private library pages">
+              <button
+                type="button"
+                aria-label="Previous library page"
+                disabled={loading || currentPage <= 1}
+                onClick={() => updateFilter({ ...filters, page: currentPage - 1 })}
+              >
+                Previous
+              </button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button
+                type="button"
+                aria-label="Next library page"
+                disabled={loading || currentPage >= totalPages}
+                onClick={() => updateFilter({ ...filters, page: currentPage + 1 })}
+              >
+                Next
+              </button>
+            </nav>
+          )}
         </>
       ) : (
         <section className="furbin-v5-showcase-search">

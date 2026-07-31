@@ -18,7 +18,7 @@ import sharp from "sharp";
 import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, deductCredits, addCredits, getCreditBalance, getCreditHistory, wasSessionCredited, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, restoreReservedGenerationCredits, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserPhone, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getPawprintCategories, getPawprintTemplatesSync, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, consumePasswordReset, setUserPassword, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getPawprintCategories, getPawprintTemplatesSync, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -81,7 +81,7 @@ import {
   ConfirmAssetSchema,
   UpdateAssetSchema,
 } from "./server/marketplaceSchemas";
-import { ANIMATOR_DATA_DIR } from "./server/animator/paths.ts";
+import { ANIMATOR_DATA_DIR, resolveWithinWorkspace } from "./server/animator/paths.ts";
 import { studioRouter } from "./server/animator/studio_proxy.ts";
 import { refundRouter } from "./server/refunds.ts";
 import { setRefundReviewGenerate } from "./server/refunds.ts";
@@ -92,8 +92,17 @@ import {
 import { createProductionHermesApp } from "./server/hermes/app.ts";
 import { privacyHtml, termsHtml, smsTermsHtml } from "./server/legal.ts";
 import { startWorker as startAnimatorWorker } from "./server/animator/worker.ts";
+import { decodeAnimatorOperationMetadata } from "./server/animator/operationMetadata.ts";
+import { getOwnedVoicedResult } from "./server/animator/voicedResults.ts";
+import { getOwnedRecording } from "./server/animator/recordings.ts";
+import { fetchBoundedRemoteBuffer } from "./server/safeRemoteFetch.ts";
+import {
+  failGenerationJobAndRefundOnce,
+  markGenerationJobDoneOnce,
+  sweepPendingGenerationRefunds,
+} from "./server/generationRefunds.ts";
 import { phraseKey } from "./src/three/ar/voice";
-import { decayCompliance, pointsForTrial, creditsFromPoints, type TrialType } from "./src/brain";
+import { decayCompliance, pointsForTrial, type TrialType } from "./src/brain";
 import { createHash, randomUUID } from "crypto";
 import { resolveBreedProfile } from "./server/breedProfiles";
 import { decayDrives, DEFAULT_DRIVES, DEFAULT_HORMONES, weightsFromTemperament } from "./src/brain";
@@ -109,7 +118,7 @@ import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
 import { SKELETON_CONTRACTS } from "./skeletonContract";
 import { TERMS_VERSION } from "./src/legal";
-import { avatarGenerationCost, bimModelCost, CREDIT_PACKS, CREDIT_PRICES, REUSE_DISCOUNT, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
+import { avatarGenerationCost, bimModelCost, CREDIT_PRICES, REUSE_DISCOUNT, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
 import { executeBlenderTool } from "./agent/tools/blender_mcp";
 import {
   formatPipelineRecoveryDiagnostic,
@@ -125,11 +134,20 @@ import { buildAndVerifyShell } from "./server/bim/shell";
 import { buildBimPostBuildVerification, buildBimPreBuildVerification } from "./server/bim/verification";
 import { isBimV2Enabled } from "./server/bim/featureFlag";
 import { BIM_PROPOSAL_SYSTEM_INSTRUCTION, BimProposalRequestSchema, buildBimProposalPrompt, parseBimProposal, validateBimProposalImages } from "./server/bim/proposal";
-import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS } from "./src/wardrobe/catalog";
+import { isAtLeastAge } from "./server/accountValidation";
+import { PrintUploadValidationError, validatePrintUpload } from "./server/printUploadValidation";
+import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
 import { confirmPrintfulOrderIfDraft, createPrintfulOrder, getPrintfulOrder, verifyPrintfulConfiguration } from "./server/printful";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
+import {
+  CreditPurchaseValidationError,
+  createCreditsSessionHandler,
+  fulfillCreditPurchaseSession,
+  ignoreUnsupportedCheckoutSession,
+  retiredAlbumCheckoutHandler,
+} from "./server/creditPurchases";
 import { pawprintDisplayCatalog, publicPawprintPrintProducts, requirePawprintPrintProduct } from "./server/pawprintProducts";
 import { buildFulfillmentReadiness } from "./server/fulfillmentReadiness";
 import { buildRandySystemInstruction } from "./server/randy/prompt";
@@ -607,7 +625,7 @@ async function startServer() {
   if (stripeSecretKey && stripeSecretKey !== "MY_STRIPE_SECRET_KEY" && stripeSecretKey !== "") {
     stripe = new Stripe(stripeSecretKey);
   } else {
-    console.warn("⚠️ STRIPE_SECRET_KEY is missing or invalid. Server will run in Sandbox Simulation mode.");
+    console.warn("⚠️ STRIPE_SECRET_KEY is missing or invalid. Stripe-backed purchases are unavailable.");
   }
 
   // A paid print must never depend on a single webhook delivery. Reclaim a
@@ -719,23 +737,6 @@ async function startServer() {
   void recoverPaidPrintfulOrders();
   setInterval(() => void recoverPaidPrintfulOrders(), 5 * 60 * 1000);
 
-  // Local persistent order saving
-  const ORDERS_FILE = path.join(process.cwd(), "orders.json");
-  const saveOrder = (order: any) => {
-    try {
-      let orders: any[] = [];
-      if (fs.existsSync(ORDERS_FILE)) {
-        const data = fs.readFileSync(ORDERS_FILE, "utf-8");
-        orders = JSON.parse(data);
-      }
-      orders.push(order);
-      fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
-      console.log(`Order ${order.orderId} saved successfully to orders.json`);
-    } catch (err) {
-      console.error("Failed to save order to local orders.json file:", err);
-    }
-  };
-
   // Raw-body authenticated v2 webhooks must be mounted before the global JSON
   // parser. Production factories are constructed only when their dark-launch
   // flags are explicitly enabled, so missing rollout secrets cannot break the
@@ -774,17 +775,14 @@ async function startServer() {
     }
 
     const handleSuccessfulPayment = async (session: Stripe.Checkout.Session) => {
-      const metadata = session.metadata;
-      if (!metadata) return;
+      const metadata = session.metadata || {};
 
-      if (metadata.type === "credit_purchase" && metadata.userPhone && metadata.creditsToAdd) {
-        const creditsToAdd = parseInt(metadata.creditsToAdd, 10);
-        // Idempotency: skip if the redirect-confirm path already credited this session.
-        if (await wasSessionCredited(session.id)) {
+      if (metadata.type === "credit_purchase") {
+        const result = await fulfillCreditPurchaseSession(session, undefined, grantPurchasedCredits);
+        if (!result.applied) {
           console.log(`↩︎ Session ${session.id} already credited; webhook skipping.`);
         } else {
-          await addCredits(metadata.userPhone, creditsToAdd, "purchase:" + session.id);
-          console.log(`✅ Added ${creditsToAdd} credits to ${metadata.userPhone} via Stripe purchase.`);
+          console.log(`✅ Added ${result.credits} credits to ${metadata.userPhone} via Stripe purchase.`);
         }
       } else if (metadata.type === "pawprint_print_order" && metadata.printOrderId && metadata.userPhone) {
         const printOrderId = Number(metadata.printOrderId);
@@ -872,31 +870,7 @@ async function startServer() {
           console.log(`✅ Granted marketplace entitlement for listing ${metadata.listingId} to ${metadata.userPhone}.`);
         }
       } else {
-        // Standard physical album order
-        const order = {
-          orderId: `ord_${Date.now()}`,
-          creationId: metadata.creationId,
-          creationName: metadata.creationName,
-          style: metadata.style,
-          creditsDeducted: parseInt(metadata.creditsDeducted || "800", 10),
-          cashPaid: parseFloat(metadata.cashPaid || "12.00"),
-          shippingName: metadata.shippingName,
-          shippingAddress: metadata.shippingAddress,
-          shippingCity: metadata.shippingCity,
-          shippingState: metadata.shippingState,
-          shippingZip: metadata.shippingZip,
-          shippingCountry: metadata.shippingCountry,
-          createdAt: new Date().toISOString(),
-          status: "pending",
-          stripeSessionId: session.id,
-          mode: "live_stripe"
-        };
-        saveOrder(order);
-
-        if (metadata.userPhone) {
-          await deductCredits(metadata.userPhone, parseInt(metadata.creditsDeducted || "800", 10));
-          console.log(`✅ Deducted ${metadata.creditsDeducted} credits from ${metadata.userPhone} for album order.`);
-        }
+        ignoreUnsupportedCheckoutSession(session);
       }
     };
 
@@ -1121,7 +1095,7 @@ async function startServer() {
   });
 
   app.post("/api/bim/build", requireAuth, async (req: AuthedRequest, res) => {
-    let creditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const mode = req.body?.mode as BimBuildMode;
       if (!req.body?.model || typeof req.body.model !== "object" || !["shell", "ifc"].includes(mode)) return res.status(400).json({ error: "Choose Shell or IFC and provide a model." });
@@ -1139,9 +1113,8 @@ async function startServer() {
       const isAdmin = await isUserAdmin(userPhone);
       const price = bimModelCost(mode);
       if (!isAdmin) {
-        const paid = await deductCredits(userPhone, price, `bim_${mode}_build`);
-        if (!paid) return res.status(402).json({ error: `You need ${price} credits for this ${mode === "ifc" ? "IFC/BIM model" : "Shell model"}.`, price });
-        creditsDebited = price;
+        creditReservationId = await reserveCredits(userPhone, price, `bim_${mode}_build`);
+        if (!creditReservationId) return res.status(402).json({ error: `You need ${price} credits for this ${mode === "ifc" ? "IFC/BIM model" : "Shell model"}.`, price });
       }
 
       // Persist verified artifacts to the Backblaze bucket so users can
@@ -1235,10 +1208,10 @@ async function startServer() {
       res.json({ ...result, mode, price, preflight, postBuild: accuracyPostBuild || postBuild, saved, balance: await getCreditBalance(userPhone) });
     } catch (err: any) {
       let refundPending = false;
-      if (creditsDebited > 0) {
+      if (creditReservationId) {
         try {
-          await restoreReservedGenerationCredits(req.user!.phone, creditsDebited);
-          creditsDebited = 0;
+          await refundReservedCredits(creditReservationId);
+          creditReservationId = null;
         } catch (refundError) {
           refundPending = true;
           console.error("[BIM] refund failed:", refundError);
@@ -1266,6 +1239,14 @@ async function startServer() {
   const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { error: "Too many requests from this IP, please try again after a minute" } });
   const bimProposalLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: "Too many building proposal requests; please wait one minute." } });
   const randyChatLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, message: { error: "Randy needs a short pause; please wait one minute." } });
+  const printUploadLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: any) => req.user?.phone || "unauthenticated",
+    message: { success: false, error: "Too many model uploads. Please try again later." },
+  });
   app.use("/api/auth/login", authLimiter);
   app.use("/api/auth/signup", authLimiter);
   app.use("/api/create-video", authLimiter);
@@ -1280,11 +1261,16 @@ async function startServer() {
   // public routes are registered BEFORE any shared-prefix catch-all or guard to ensure
   // they remain reachable regardless of registration order.
   // 
-  // Here, we guard ONLY the animator + scenes namespaces so public routes stay reachable.
+  // Guard every Animator route, including legacy aliases. The router remains
+  // mounted on /api so unrelated public /api routes are not intercepted.
+  const animatorAliasPrefixes = [
+    "/animator", "/scenes", "/rig", "/retarget", "/repurpose",
+    "/lipsync", "/reconstruct", "/bake", "/rig-profiles",
+  ];
   app.use(
     "/api",
     (req, res, next) => {
-      if (req.path.startsWith("/animator") || req.path.startsWith("/scenes")) {
+      if (animatorAliasPrefixes.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))) {
         return requireAuth(req as AuthedRequest, res, next);
       }
       return next();
@@ -1316,8 +1302,53 @@ async function startServer() {
     refundRouter
   );
 
-  // Serve animator files statically
-  app.use("/animator-files", express.static(ANIMATOR_DATA_DIR));
+  // Tenant animator artifacts are never exposed through a directory-wide
+  // static mount. Public curated sounds live under dist/public and are served
+  // by the normal SPA static layer later.
+  app.get("/animator-files/originals/:assetId/:filename", requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const assetId = z.string().uuid().parse(req.params.assetId);
+      const filename = z.string().regex(/^[A-Za-z0-9_.-]+\.(?:glb|gltf)$/).parse(req.params.filename);
+      const metadataPath = resolveWithinWorkspace(`originals/${assetId}/metadata.json`);
+      if (!fs.existsSync(metadataPath)) return res.status(404).json({ error: "Asset not found." });
+      const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+      if (metadata.userPhone !== req.user!.phone || metadata.originalFilename !== filename) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      return res.sendFile(resolveWithinWorkspace(`originals/${assetId}/${filename}`));
+    } catch {
+      return res.status(404).json({ error: "Asset not found." });
+    }
+  });
+  app.get("/animator-files/outputs/:assetId/:filename", requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const assetId = z.string().uuid().parse(req.params.assetId);
+      const filename = z.string().regex(/^[A-Za-z0-9_.-]+\.(?:glb|gltf)$/).parse(req.params.filename);
+      const metadataPath = resolveWithinWorkspace(`originals/${assetId}/metadata.json`);
+      if (!fs.existsSync(metadataPath)) return res.status(404).json({ error: "Output not found." });
+      const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+      if (metadata.userPhone !== req.user!.phone) return res.status(403).json({ error: "Forbidden" });
+      return res.sendFile(resolveWithinWorkspace(`outputs/${assetId}/${filename}`));
+    } catch {
+      return res.status(404).json({ error: "Output not found." });
+    }
+  });
+  app.get("/animator-files/recordings/:filename", requireAuth, (req: AuthedRequest, res) => {
+    const parsed = /^([0-9a-f-]{36})\.(webm|mp4)$/i.exec(String(req.params.filename));
+    if (!parsed) return res.status(404).json({ error: "Recording not found." });
+    const recording = getOwnedRecording(parsed[1], req.user!.phone);
+    if (!recording || recording.fileName !== req.params.filename) return res.status(404).json({ error: "Recording not found." });
+    return res.sendFile(resolveWithinWorkspace(`recordings/${recording.fileName}`));
+  });
+  app.get("/animator-files/screenshots/:filename", requireAuth, (req: AuthedRequest, res) => {
+    const ownerKey = req.user!.phone.replace(/[^A-Za-z0-9]/g, "");
+    const filename = String(req.params.filename);
+    if (!new RegExp(`^screenshot_[0-9]+_${ownerKey}\\.png$`).test(filename)) {
+      return res.status(404).json({ error: "Screenshot not found." });
+    }
+    try { return res.sendFile(resolveWithinWorkspace(`screenshots/${filename}`)); }
+    catch { return res.status(404).json({ error: "Screenshot not found." }); }
+  });
   
   if (process.env.ANIMATOR_WORKER_ENABLED !== "false") {
     startAnimatorWorker();
@@ -1408,11 +1439,7 @@ async function startServer() {
         return res.status(400).json({ error: "Full name, birthdate, and city are required." });
       }
 
-      const dob = new Date(birthdate);
-      const ageDifMs = Date.now() - dob.getTime();
-      const ageDate = new Date(ageDifMs);
-      const age = Math.abs(ageDate.getUTCFullYear() - 1970);
-      if (age < 13) {
+      if (!isAtLeastAge(birthdate, 13)) {
          return res.status(400).json({ error: "You must be at least 13 years old to use Paws & Memories." });
       }
 
@@ -1509,11 +1536,10 @@ async function startServer() {
       if (newPassword.length < 8) {
         return res.status(400).json({ error: "Password must be at least 8 characters." });
       }
-      const userPhone = await consumePasswordReset(hashResetToken(token));
-      if (!userPhone) {
+      const reset = await resetPasswordWithToken(hashResetToken(token), hashPassword(newPassword));
+      if (!reset) {
         return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
       }
-      await setUserPassword(userPhone, hashPassword(newPassword));
       return res.json({ success: true, message: "Your password has been updated. You can now sign in." });
     } catch (err: any) {
       console.error("reset-password error:", err?.message || err);
@@ -1545,20 +1571,20 @@ async function startServer() {
   // Upload a model file for a 3D-print request. Accepts a base64 data URL, mirrors
   // it to object storage, and returns a durable URL to include in the request
   // email. (GLB/OBJ/STL supported; the client caps size before sending.)
-  app.post("/api/print-uploads", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/print-uploads", requireAuth, printUploadLimiter, async (req: AuthedRequest, res) => {
     try {
       const { fileBase64, mime } = req.body || {};
-      if (!fileBase64 || typeof fileBase64 !== "string") {
-        return res.status(400).json({ success: false, error: "No file provided." });
+      const validated = validatePrintUpload(fileBase64, mime);
+      const dailyCount = await bumpDailyUsage(req.user!.phone, "print_upload");
+      if (dailyCount > 20) {
+        return res.status(429).json({ success: false, error: "Today's model upload limit has been reached." });
       }
-      let resolvedMime = typeof mime === "string" && mime.trim() ? mime.trim() : "";
-      if (!resolvedMime && fileBase64.startsWith("data:")) {
-        const match = fileBase64.match(/^data:([A-Za-z0-9-+\/.]+);base64,/);
-        if (match) resolvedMime = match[1];
-      }
-      const url = await uploadBase64Binary(fileBase64, resolvedMime || "image/png");
+      const url = await uploadBase64Binary(validated.base64, validated.mime, "print-requests");
       res.json({ success: true, url });
     } catch (err: any) {
+      if (err instanceof PrintUploadValidationError) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
       console.error("[POST /api/print-uploads] Error:", err?.message || err);
       res.status(500).json({ success: false, error: "Upload failed." });
     }
@@ -1654,7 +1680,7 @@ async function startServer() {
   });
 
   app.post("/api/voice-clones", requireAuth, async (req: AuthedRequest, res) => {
-    let debited = false;
+    let creditReservationId: string | null = null;
     try {
       const name = String(req.body?.name || "Voice clone").trim().slice(0, 120);
       const audioBase64 = String(req.body?.audioBase64 || "");
@@ -1673,8 +1699,8 @@ async function startServer() {
       }
       const isAdmin = await isUserAdmin(req.user!.phone);
       if (!isAdmin) {
-        debited = await deductCredits(req.user!.phone, CREDIT_PRICES.VOICE_CLONE, "voice_clone");
-        if (!debited) {
+        creditReservationId = await reserveCredits(req.user!.phone, CREDIT_PRICES.VOICE_CLONE, "voice_clone");
+        if (!creditReservationId) {
           return res.status(402).json({ error: `You need ${CREDIT_PRICES.VOICE_CLONE} credits to create a voice clone.` });
         }
       }
@@ -1690,8 +1716,8 @@ async function startServer() {
       const user = await findUserByPhone(req.user!.phone);
       res.status(201).json({ success: true, asset, storage: usage, user: toPublicUser(user, TERMS_VERSION) });
     } catch (err: any) {
-      if (debited) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, CREDIT_PRICES.VOICE_CLONE); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("[POST /api/voice-clones] Error:", err?.message || err);
       res.status(500).json({ error: "Could not save the voice clone. Your credits were returned." });
@@ -1775,60 +1801,6 @@ async function startServer() {
     }
   });
 
-  // Phone verification — Telnyx Verify
-  app.post("/api/verify/phone/start", requireAuth, async (req: AuthedRequest, res) => {
-    try {
-      const telnyxKey = process.env.TELNYX_API_KEY;
-      const verifyProfileId = process.env.TELNYX_VERIFY_PROFILE_ID;
-      if (!telnyxKey || !verifyProfileId) {
-        return res.status(503).json({ error: "Phone verification is not configured." });
-      }
-      // Use the user's real phone if stored, otherwise use body param
-      const phoneNumber = req.body?.phone;
-      if (!phoneNumber) return res.status(400).json({ error: "Phone number is required." });
-      const resp = await fetch("https://api.telnyx.com/v2/verifications/sms", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${telnyxKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ phone_number: phoneNumber, verify_profile_id: verifyProfileId }),
-      });
-      if (!resp.ok) {
-        const text = await resp.text();
-        console.warn("[Telnyx Verify] start failed:", text);
-        return res.status(502).json({ error: "Could not send verification code." });
-      }
-      res.json({ success: true, message: "Verification code sent." });
-    } catch (err: any) {
-      console.error("[POST /api/verify/phone/start] Error:", err?.message || err);
-      res.status(500).json({ error: "Could not start verification." });
-    }
-  });
-
-  app.post("/api/verify/phone/check", requireAuth, async (req: AuthedRequest, res) => {
-    try {
-      const telnyxKey = process.env.TELNYX_API_KEY;
-      if (!telnyxKey) return res.status(503).json({ error: "Phone verification not configured." });
-      const { phone, code } = req.body || {};
-      if (!phone || !code) return res.status(400).json({ error: "Phone and code are required." });
-      const resp = await fetch(`https://api.telnyx.com/v2/verifications/by_phone_number/${encodeURIComponent(phone)}/actions/verify`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${telnyxKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const data = await resp.json();
-      if (data?.data?.status === "verified" || resp.ok) {
-        await verifyUserPhone(req.user!.phone);
-        const bonus = await checkAndGrantProfileBonus(req.user!.phone);
-        const user = await findUserByPhone(req.user!.phone);
-        res.json({ success: true, phoneVerified: true, bonusGranted: bonus.granted, user: toPublicUser(user) });
-      } else {
-        res.status(400).json({ error: "Invalid verification code." });
-      }
-    } catch (err: any) {
-      console.error("[POST /api/verify/phone/check] Error:", err?.message || err);
-      res.status(500).json({ error: "Could not verify code." });
-    }
-  });
-
   // Referral — get my code and stats
   app.get("/api/referral", requireAuth, async (req: AuthedRequest, res) => {
     try {
@@ -1863,31 +1835,10 @@ async function startServer() {
 
   // Share reward claim
   app.post("/api/share/claim", requireAuth, async (req: AuthedRequest, res) => {
-    try {
-      const { network } = req.body || {};
-      if (!network || typeof network !== "string") {
-        return res.status(400).json({ error: "network is required." });
-      }
-      // Check if already claimed (per network, per user lifetime)
-      const [existing] = await getPool().query(
-        `SELECT 1 FROM share_rewards WHERE user_phone = ? AND network = ? LIMIT 1`,
-        [req.user!.phone, network]
-      ) as any;
-      if (Array.isArray(existing) && existing.length > 0) {
-        return res.status(409).json({ error: "Share reward already claimed for this network." });
-      }
-      const SHARE_NETWORK_REWARD = 12;
-      await addCredits(req.user!.phone, SHARE_NETWORK_REWARD, `share_reward:${network}`);
-      await getPool().query(
-        `INSERT INTO share_rewards (user_phone, network, reward_type) VALUES (?, ?, ?)`,
-        [req.user!.phone, network, "credits"]
-      );
-      const user = await findUserByPhone(req.user!.phone);
-      res.json({ success: true, reward: SHARE_NETWORK_REWARD, user: toPublicUser(user) });
-    } catch (err: any) {
-      console.error("[POST /api/share/claim] Error:", err?.message || err);
-      res.status(500).json({ error: "Could not claim share reward." });
-    }
+    return res.status(410).json({
+      success: false,
+      error: "Share rewards are disabled because a browser share cannot be independently verified.",
+    });
   });
 
   // Per-user wardrobe catalog and selections
@@ -1910,6 +1861,13 @@ async function startServer() {
       const selected: string[] = [...new Set(requested.filter((id): id is string => typeof id === "string"))];
       if (selected.length > 15) return res.status(400).json({ error: "Choose at most 15 wardrobe items." });
       if (selected.some((id) => !WARDROBE_ITEM_IDS.has(id))) return res.status(400).json({ error: "Unknown wardrobe item." });
+      const selectedExclusive = selected.filter((id) => WAGS_EXCLUSIVE_ITEM_IDS.has(id));
+      if (selectedExclusive.length) {
+        const ownedExclusive = await getOwnedWardrobeItems(getPool(), req.user!.phone);
+        if (selectedExclusive.some((id) => !ownedExclusive.has(id))) {
+          return res.status(403).json({ error: "This Wags wardrobe item has not been delivered to this account." });
+        }
+      }
       const connection = await getPool().getConnection();
       try {
         await connection.beginTransaction();
@@ -2230,8 +2188,16 @@ async function startServer() {
   });
 
   // ── Wardrobe Wags: subscription endpoints (W1) ─────────────────────────────
-  // POST /api/wags/subscribe — create a Stripe subscription for Wags
+  // POST /api/wags/subscribe — legacy checkout is fail-closed. It could create
+  // recurring Stripe billing before the durable local ownership/idempotency
+  // record existed. New checkout belongs to the Wags v2 service.
   app.post("/api/wags/subscribe", requireAuth, async (req: AuthedRequest, res) => {
+    return res.status(410).json({
+      error: "This Wags checkout has been retired while the upgraded subscription flow is activated.",
+      code: "LEGACY_WAGS_CHECKOUT_RETIRED",
+    });
+
+    /* c8 ignore start -- retained only for legacy data-flow reference */
     if (!stripe) return res.status(503).json({ error: "Payments not configured." });
     const { pet_id, species, tier, billing_period, payment_method_id } = req.body ?? {};
     if (!pet_id || !species || !tier || !billing_period || !payment_method_id)
@@ -2294,6 +2260,7 @@ async function startServer() {
       console.error("[wags/subscribe]", err?.message || err);
       res.status(500).json({ error: err.message || "Could not create subscription." });
     }
+    /* c8 ignore stop */
   });
 
   // POST /api/wags/cancel — cancel a Wags subscription at period end
@@ -2564,7 +2531,7 @@ async function startServer() {
   //
   //   1. It debits `user_credits` and writes `credit_ledger`. Neither table
   //      exists. This app bills through `users.credits` + `credit_transactions`
-  //      via deductCredits()/addCredits() in db.ts. The query throws
+  //      via the transactional wallet helpers in db.ts. The query throws
   //      ER_NO_SUCH_TABLE, so today the route 500s — which is the only reason
   //      it has never actually taken money for an impossible job.
   //   2. It calls the worker at /texture/render-views and /texture/bake.
@@ -3101,7 +3068,7 @@ async function startServer() {
   });
 
   app.post("/api/pawprints/generate", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
-    let debited = false;
+    let creditReservationId: string | null = null;
     let pawprintPrice: number = CREDIT_PRICES.PAWPRINT;
     try {
       const idempotencyKey = String(req.header("Idempotency-Key") || req.body?.idempotencyKey || "").trim().slice(0, 120);
@@ -3155,8 +3122,8 @@ async function startServer() {
 
       const isAdmin = await isUserAdmin(req.user!.phone);
       if (!isAdmin) {
-        debited = await deductCredits(req.user!.phone, pawprintPrice, "pawprint_generation");
-        if (!debited) {
+        creditReservationId = await reserveCredits(req.user!.phone, pawprintPrice, "pawprint_generation");
+        if (!creditReservationId) {
           return res.status(402).json({ error: `You need ${pawprintPrice} PupCoins to create a Pawprint.` });
         }
       }
@@ -3168,9 +3135,9 @@ async function startServer() {
       const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
       const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
       if (!renderedMatch) {
-        if (debited) {
-          await restoreReservedGenerationCredits(req.user!.phone, pawprintPrice);
-          debited = false;
+        if (creditReservationId) {
+          await refundReservedCredits(creditReservationId);
+          creditReservationId = null;
         }
         return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
       }
@@ -3214,8 +3181,8 @@ async function startServer() {
       const user = await findUserByPhone(req.user!.phone);
       res.status(201).json({ pawprintId: inserted.insertId, url: finalUrl, creationId, user: toPublicUser(user, TERMS_VERSION) });
     } catch (err: any) {
-      if (debited) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, pawprintPrice); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("[POST /api/pawprints/generate] Error:", err?.message || err);
       res.status(500).json({ error: "Could not create the Pawprint. Your credits were returned." });
@@ -3576,11 +3543,19 @@ async function startServer() {
 
   app.post("/api/achievements/claim", requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { id } = req.body;
+      const id = typeof req.body?.id === "string" ? req.body.id : "";
       const result = await claimAchievement(req.user!.phone, id);
-      if (!result.success) return res.status(400).json({ success: false, error: "Already claimed" });
+      if (!result.success) {
+        const status = result.reason === "unknown" ? 400 : result.reason === "ineligible" ? 403 : 409;
+        const error = result.reason === "unknown"
+          ? "Unknown achievement."
+          : result.reason === "ineligible"
+            ? "Achievement completion is not proven by server records."
+            : "Achievement already claimed.";
+        return res.status(status).json({ success: false, error });
+      }
       const user = await findUserByPhone(req.user!.phone);
-      res.json({ success: true, user: toPublicUser(user) });
+      res.json({ success: true, reward: result.reward, user: toPublicUser(user) });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to claim achievement" });
     }
@@ -3589,27 +3564,25 @@ async function startServer() {
   // Redirect-confirm fallback: after Stripe checkout, the browser lands on
   // success_url with ?session_id=. This verifies the session server-side and
   // credits it if the webhook hasn't already — so a misconfigured/failed webhook
-  // can never silently swallow a purchase. Idempotent with the webhook via the
-  // "purchase:<sessionId>" ledger key.
+  // can never silently swallow a purchase. The shared transaction uses the
+  // Stripe session ID as its durable idempotency key.
   app.get("/api/credits/confirm", requireAuth, async (req: AuthedRequest, res) => {
     try {
       const sessionId = req.query.session_id as string;
       if (!sessionId) return res.status(400).json({ success: false, error: "Missing session_id" });
       if (!stripe) {
-        return res.json({ success: true, credited: 0, balance: await getCreditBalance(req.user!.phone) });
-      }
-      if (await wasSessionCredited(sessionId)) {
-        return res.json({ success: true, alreadyCredited: true, balance: await getCreditBalance(req.user!.phone) });
+        return res.status(503).json({ success: false, error: "Credit purchases are temporarily unavailable." });
       }
       const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const md = session.metadata || {};
-      const creditsToAdd = parseInt(md.creditsToAdd || "0", 10);
-      if (session.payment_status !== "paid" || md.type !== "credit_purchase" || md.userPhone !== req.user!.phone || !creditsToAdd) {
+      const result = await fulfillCreditPurchaseSession(session, req.user!.phone, grantPurchasedCredits);
+      if (!result.applied) {
+        return res.json({ success: true, alreadyCredited: true, balance: result.balance });
+      }
+      res.json({ success: true, credited: result.credits, balance: result.balance });
+    } catch (err: any) {
+      if (err instanceof CreditPurchaseValidationError) {
         return res.status(400).json({ success: false, error: "Session not eligible for crediting." });
       }
-      await addCredits(req.user!.phone, creditsToAdd, "purchase:" + sessionId);
-      res.json({ success: true, credited: creditsToAdd, balance: await getCreditBalance(req.user!.phone) });
-    } catch (err: any) {
       res.status(500).json({ success: false, error: "Failed to confirm purchase." });
     }
   });
@@ -3624,28 +3597,13 @@ async function startServer() {
     }
   });
 
-  // Server-persisted share reward. Capped per day (via the ledger) to prevent farming.
-  const SHARE_REWARD = 3;
-  const SHARE_DAILY_CAP = 3;
+  // Sharing remains available, but browser-reported completion is not payment
+  // evidence and therefore cannot mint wallet credits.
   app.post("/api/credits/reward", requireAuth, async (req: AuthedRequest, res) => {
-    try {
-      const { platform } = req.body || {};
-      const platformName = typeof platform === "string" && platform ? platform.slice(0, 40) : "share";
-      const today = new Date().toISOString().split("T")[0];
-      const [rows] = await getPool().query(
-        `SELECT COUNT(*) AS c FROM credit_transactions
-          WHERE user_phone = ? AND reason LIKE 'share_reward%' AND DATE(created_at) = ?`,
-        [req.user!.phone, today]
-      ) as any;
-      if (Number(rows?.[0]?.c || 0) >= SHARE_DAILY_CAP) {
-        return res.status(429).json({ success: false, error: "Daily share reward limit reached" });
-      }
-      await addCredits(req.user!.phone, SHARE_REWARD, `share_reward:${platformName}`);
-      const user = await findUserByPhone(req.user!.phone);
-      res.json({ success: true, reward: SHARE_REWARD, user: toPublicUser(user) });
-    } catch (err: any) {
-      res.status(500).json({ error: "Failed to grant reward" });
-    }
+    return res.status(410).json({
+      success: false,
+      error: "Share rewards are disabled because a browser share cannot be independently verified.",
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -4137,7 +4095,7 @@ async function startServer() {
   }
 
   app.post("/api/avatars", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
-    let avatarCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     let freeAvatarClaimed = false;
     try {
       const { name, photo, photos, palette, avatar_type, face_photo, input_mode, subject, detail, texture, style, lighting, selection_mode, subject_subtype } = req.body;
@@ -4398,9 +4356,8 @@ async function startServer() {
 
       // Deduct credits ONLY now that we have a qualified image and are starting Tripo.
       if (!isAdmin && payableAvatarCost > 0) {
-        const paid = await deductCredits(req.user!.phone, payableAvatarCost, "avatar_generation");
-        if (!paid) return res.status(402).json({ error: `Insufficient PupCoins. You need ${payableAvatarCost} PupCoins.` });
-        avatarCreditsDebited = payableAvatarCost;
+        creditReservationId = await reserveCredits(req.user!.phone, payableAvatarCost, "avatar_generation");
+        if (!creditReservationId) return res.status(402).json({ error: `Insufficient PupCoins. You need ${payableAvatarCost} PupCoins.` });
       }
 
       // Compact analysis record persisted for the build/rig stage (§8 "memory").
@@ -4444,8 +4401,8 @@ async function startServer() {
 
       res.json({ avatarId, status: "pending", referenceImageUrl: finalImageUrl, usedReferenceImage, avatarType, notice: detectNotice, chargedCredits: payableAvatarCost });
     } catch (err: any) {
-      if (avatarCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, avatarCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       if (freeAvatarClaimed) {
         try { await releaseFreeAvatar(req.user!.phone); } catch {}
@@ -4733,7 +4690,7 @@ async function startServer() {
   });
 
   app.post("/api/avatars/:id/retry", requireAuth, async (req: AuthedRequest, res) => {
-    let retryCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const avatarId = Number(req.params.id);
       const avatar = await getAvatarById(avatarId, req.user!.phone);
@@ -4751,9 +4708,8 @@ async function startServer() {
       const retryCount = Number((avatar as any).retry_count || 0);
       const retryCost = retryCount === 0 ? CREDIT_PRICES.FIRST_REGENERATION : CREDIT_PRICES.ADDITIONAL_REGENERATION;
       if (!isAdmin && retryCost > 0) {
-        const paid = await deductCredits(req.user!.phone, retryCost, "avatar_regeneration");
-        if (!paid) return res.status(402).json({ error: `You need ${retryCost} credits for another regeneration.` });
-        retryCreditsDebited = retryCost;
+        creditReservationId = await reserveCredits(req.user!.phone, retryCost, "avatar_regeneration");
+        if (!creditReservationId) return res.status(402).json({ error: `You need ${retryCost} credits for another regeneration.` });
       }
 
       // Optional "Fix the vibe" restyle: attach the chosen softer-look preset to
@@ -4810,8 +4766,8 @@ async function startServer() {
       const user = await findUserByPhone(req.user!.phone);
       res.json({ success: true, status: "pending", chargedCredits: retryCost, user: toPublicUser(user, TERMS_VERSION) });
     } catch (err: any) {
-      if (retryCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, retryCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("[POST /api/avatars/:id/retry] Error retrying avatar:", err);
       res.status(500).json({ error: err.message || "Failed to retry avatar generation." });
@@ -5350,8 +5306,10 @@ async function startServer() {
         score: Number(score) || 0,
       });
       const trainerScore = await incrementTrainerScore(Number(petId), req.user!.phone, points);
-      const credits = creditsFromPoints(points);
-      if (credits > 0) await addCredits(req.user!.phone, credits, `trial_${type}`);
+      // Client-submitted scores are useful for play feedback but are not trusted
+      // wallet evidence. Credits stay disabled until a signed server session
+      // records the trial events and final score.
+      const credits = 0;
 
       res.json({ type, points, trainerScore, credits });
     } catch (err: any) {
@@ -5482,52 +5440,15 @@ async function startServer() {
   });
 
   // API route to create custom styled pet images using Imagen or Gemini
-  // Fix 5: Credit store — let users purchase credit packs via Stripe
-  app.post("/api/create-credits-session", requireAuth, async (req: AuthedRequest, res) => {
-    try {
-      const { packId } = req.body;
-      const pack = CREDIT_PACKS.find((p) => p.id === packId && !p.comingSoon);
-      if (!pack) return res.status(400).json({ success: false, error: "Invalid credit pack selected." });
-
-      const appUrl = process.env.APP_URL || "http://localhost:3000";
-
-      // Sandbox mode — simulate instantly
-      if (!stripe) {
-        await addCredits(req.user!.phone, pack.credits);
-        const simulatedUrl = `${appUrl}/?credits_success=true&pack=${pack.id}&added=${pack.credits}`;
-        return res.json({ success: true, url: simulatedUrl, mode: "sandbox" });
-      }
-
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [{
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `Paws & Memories — ${pack.label}`,
-              description: `${pack.credits} AI creation credits`,
-            },
-            unit_amount: Math.round(pack.price * 100),
-          },
-          quantity: 1,
-        }],
-        mode: "payment",
-        metadata: {
-          type: "credit_purchase",
-          userPhone: req.user!.phone,
-          packId: pack.id,
-          creditsToAdd: String(pack.credits),
-        },
-        success_url: `${appUrl}/?credits_success=true&pack=${pack.id}&added=${pack.credits}&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${appUrl}/?credits_cancelled=true`,
-      });
-
-      return res.json({ success: true, url: session.url, mode: "live_stripe" });
-    } catch (err: any) {
-      console.error("Error creating credits checkout session:", err);
-      res.status(500).json({ success: false, error: err.message || "Failed to initiate credit purchase." });
-    }
-  });
+  // Credit store — live Stripe only. Missing Stripe fails closed with 503.
+  app.post(
+    "/api/create-credits-session",
+    requireAuth,
+    createCreditsSessionHandler({
+      stripe,
+      appUrl: process.env.APP_URL || "http://localhost:3000",
+    }),
+  );
 
   // Street View Coverage Check Endpoint (Phase 1.2)
   app.get("/api/streetview/coverage", requireAuth, async (req, res) => {
@@ -5574,7 +5495,7 @@ async function startServer() {
   });
 
   app.post("/api/create-creation", requireAuth, async (req, res) => {
-    let imageCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       if (!apiKey || apiKey === "placeholder-key" || apiKey === "MY_GEMINI_API_KEY") {
         throw new Error("Missing or invalid GEMINI_API_KEY. Please configure your Gemini API key in the AI Studio Secrets panel.");
@@ -5595,11 +5516,10 @@ async function startServer() {
             error: `Insufficient PupCoins. You need ${GENERATION_COST} PupCoins but only have ${currentBalance}. Purchase more PupCoins to continue.`
           });
         }
-        const paid = await deductCredits(userPhone, GENERATION_COST, "hd_image_generation");
-        if (!paid) {
+        creditReservationId = await reserveCredits(userPhone, GENERATION_COST, "hd_image_generation");
+        if (!creditReservationId) {
           return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${GENERATION_COST} PupCoins.` });
         }
-        imageCreditsDebited = GENERATION_COST;
       }
 
       const { style, background, photo, breed, name, brightness, contrast, location } = req.body;
@@ -5810,8 +5730,8 @@ async function startServer() {
         throw new Error("All image generation methods failed.");
       }
     } catch (err: any) {
-      if (imageCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits((req as AuthedRequest).user!.phone, imageCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("create-creation error:", err);
       const status = err instanceof ImageGenerationBudgetError
@@ -5825,104 +5745,8 @@ async function startServer() {
     }
   });
 
-
-  // Stripe Checkout Session Creation Route
-  app.post("/api/create-checkout-session", requireAuth, async (req, res) => {
-    try {
-      const {
-        creationId,
-        creationName,
-        imageUrl,
-        style,
-        creditsDeducted,
-        cashPaid,
-        shippingName,
-        shippingAddress,
-        shippingCity,
-        shippingState,
-        shippingZip,
-        shippingCountry,
-      } = req.body;
-
-      const appUrl = process.env.APP_URL || "http://localhost:3000";
-
-      // If Stripe client is not initialized, run in Sandbox Mode
-      if (!stripe) {
-        console.log("Stripe is not configured. Creating simulated checkout redirect url.");
-        const mockSessionId = `mock_sess_${Date.now()}`;
-        
-        // Save the mock order directly (simulating the webhook receiver completing it)
-        const mockOrder = {
-          orderId: `ord_${Date.now()}`,
-          creationId,
-          creationName,
-          imageUrl,
-          style,
-          creditsDeducted,
-          cashPaid,
-          shippingName,
-          shippingAddress,
-          shippingCity,
-          shippingState,
-          shippingZip,
-          shippingCountry,
-          createdAt: new Date().toISOString(),
-          status: "pending",
-          stripeSessionId: mockSessionId,
-          mode: "sandbox_simulation"
-        };
-        saveOrder(mockOrder);
-
-        const simulatedRedirectUrl = `${appUrl}/?order_success=true&session_id=${mockSessionId}`;
-        return res.json({ success: true, url: simulatedRedirectUrl, mode: "sandbox" });
-      }
-
-      // Real Stripe Checkout Session creation
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: `Physical Photo Album - ${creationName}`,
-                description: `Premium 20-page hardcover printed pet keepsake. Style: ${style}`,
-                images: imageUrl ? [imageUrl] : undefined,
-              },
-              unit_amount: Math.round(cashPaid * 100), // $12.00 in cents = 1200
-            },
-            quantity: 1,
-          },
-        ],
-        mode: "payment",
-        metadata: {
-          type: "album_order",
-          creationId,
-          creationName,
-          // Fix 4: Never put base64 data in Stripe metadata (500-char limit).
-          // Store only a short label; the image is already held in the client.
-          imageRef: imageUrl && imageUrl.startsWith("data:") ? "[base64-omitted]" : (imageUrl || ""),
-          style,
-          creditsDeducted: String(creditsDeducted),
-          cashPaid: String(cashPaid),
-          userPhone: (req as AuthedRequest).user!.phone,
-          shippingName,
-          shippingAddress,
-          shippingCity,
-          shippingState,
-          shippingZip,
-          shippingCountry,
-        },
-        success_url: `${appUrl}/?order_success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${appUrl}/?order_cancelled=true`,
-      });
-
-      return res.json({ success: true, url: session.url, mode: "live_stripe" });
-    } catch (err: any) {
-      console.error("Error creating stripe checkout session:", err);
-      res.status(500).json({ success: false, error: err.message || "Failed to initiate Stripe checkout." });
-    }
-  });
+  // The visible album product is Coming Soon. Keep its retired checkout closed.
+  app.post("/api/create-checkout-session", requireAuth, retiredAlbumCheckoutHandler);
 
   // --- Albums Endpoints ---
   app.get("/api/albums", requireAuth, async (req: AuthedRequest, res) => {
@@ -6583,26 +6407,41 @@ async function startServer() {
     }
   });
 
-  // Download proxy endpoint to avoid CORS issues and force file download behavior
+  async function userOwnsCreationMediaUrl(phone: string, url: string): Promise<boolean> {
+    const [rows] = await getPool().query(
+      `SELECT id FROM creations
+        WHERE user_phone = ?
+          AND (image_url = ? OR video_url = ? OR model_url = ? OR rigged_model_url = ?)
+        LIMIT 1`,
+      [phone, url, url, url, url],
+    ) as any;
+    return Array.isArray(rows) && rows.length === 1;
+  }
+
+  function configuredMediaOrigins(): string[] {
+    const endpoint = process.env.MEDIA_BUCKET_URL;
+    const bucket = process.env.MEDIA_BUCKET_NAME;
+    if (!endpoint || !bucket) return [];
+    const url = new URL(endpoint);
+    return [url.origin, `${url.protocol}//${bucket}.${url.host}`];
+  }
+
+  // Owner-scoped bounded download, not a general-purpose URL proxy.
   app.get("/api/download", requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const url = req.query.url as string;
+      const url = String(req.query.url || "");
       if (!url) return res.status(400).send("Missing url parameter");
-      const allowed = process.env.MEDIA_BUCKET_URL;
-      if (!allowed || !url.startsWith(allowed)) {
-        return res.status(403).send("URL not allowed");
-      }
-
-      // We use node's global fetch
-      const fetchReq = await fetch(url);
-      if (!fetchReq.ok) throw new Error(`Failed to fetch file: ${fetchReq.statusText}`);
-
-      const contentType = fetchReq.headers.get("content-type") || "application/octet-stream";
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Content-Disposition", `attachment`);
-
-      const buffer = await fetchReq.arrayBuffer();
-      res.send(Buffer.from(buffer));
+      if (!await userOwnsCreationMediaUrl(req.user!.phone, url)) return res.status(403).send("URL not owned");
+      const fetched = await fetchBoundedRemoteBuffer(url, {
+        allowedOrigins: configuredMediaOrigins(),
+        maxBytes: 100 * 1024 * 1024,
+        timeoutMs: 20_000,
+        allowedContentTypes: ["image/*", "video/*", "model/*", "application/octet-stream"],
+      });
+      res.setHeader("Content-Type", fetched.contentType);
+      res.setHeader("Content-Disposition", "attachment");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(fetched.buffer);
     } catch (err: any) {
       console.error("Download proxy error:", err);
       res.status(500).send("Download failed");
@@ -6614,7 +6453,7 @@ async function startServer() {
   const MAX_DAILY_VIDEOS = 5;
 
   app.post("/api/create-video", requireAuth, async (req: AuthedRequest, res) => {
-    let videoCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const { creationId, motionPrompt } = req.body || {};
       const aspectRatio = normalizeVideoAspectRatio(req.body?.aspectRatio);
@@ -6646,9 +6485,8 @@ async function startServer() {
 
       // 3. Deduct credits upfront (Admin bypass: skip deduction)
       if (!isAdmin) {
-        const paid = await deductCredits(userPhone, VIDEO_COST, "animated_video");
-        if (!paid) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${VIDEO_COST} PupCoins.` });
-        videoCreditsDebited = VIDEO_COST;
+        creditReservationId = await reserveCredits(userPhone, VIDEO_COST, "animated_video");
+        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${VIDEO_COST} PupCoins.` });
       }
 
       // 4. Prepare image bytes (fetch from URL if needed, or parse base64)
@@ -6693,14 +6531,16 @@ async function startServer() {
         user_phone: userPhone,
         creation_id: creationId,
         kind: "video",
-        credits_reserved: VIDEO_COST,
+        credits_reserved: creditReservationId ? VIDEO_COST : 0,
+        credit_debit_correlation_id: creditReservationId,
         operation_name: operationName,
       });
+      creditReservationId = null; // durable job now owns any refund decision
 
       res.status(202).json({ success: true, jobId, status: "queued" });
     } catch (err: any) {
-      if (videoCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, videoCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("Error creating video:", err);
       res.status(500).json({ success: false, error: err.message || "Failed to start video generation." });
@@ -6713,7 +6553,7 @@ async function startServer() {
   // is stored in operation_name with a "heygen:" prefix so the shared pollers
   // can route it correctly.
   app.post("/api/create-talking-video", requireAuth, async (req: AuthedRequest, res) => {
-    let lipSyncCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const { creationId, script, voiceId } = req.body;
       if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
@@ -6745,9 +6585,8 @@ async function startServer() {
 
       // Deduct credits upfront (Admin bypass: skip deduction).
       if (!isAdmin) {
-        const paid = await deductCredits(userPhone, CREDIT_PRICES.LIP_SYNC_30_SECONDS, "lip_sync");
-        if (!paid) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${CREDIT_PRICES.LIP_SYNC_30_SECONDS} PupCoins.` });
-        lipSyncCreditsDebited = CREDIT_PRICES.LIP_SYNC_30_SECONDS;
+        creditReservationId = await reserveCredits(userPhone, CREDIT_PRICES.LIP_SYNC_30_SECONDS, "lip_sync");
+        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${CREDIT_PRICES.LIP_SYNC_30_SECONDS} PupCoins.` });
       }
 
       // Prepare image bytes (parse base64 data URL, or fetch from storage URL).
@@ -6756,9 +6595,9 @@ async function startServer() {
       if (creation.image_url.startsWith("data:image")) {
         const matches = creation.image_url.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
         if (!matches) {
-          if (lipSyncCreditsDebited > 0) {
-            await restoreReservedGenerationCredits(userPhone, lipSyncCreditsDebited);
-            lipSyncCreditsDebited = 0;
+          if (creditReservationId) {
+            await refundReservedCredits(creditReservationId);
+            creditReservationId = null;
           }
           return res.status(400).json({ success: false, error: "Invalid creation image data." });
         }
@@ -6781,9 +6620,9 @@ async function startServer() {
           voiceId: voiceId || undefined,
         });
       } catch (genErr: any) {
-        if (lipSyncCreditsDebited > 0) {
-          await restoreReservedGenerationCredits(userPhone, lipSyncCreditsDebited);
-          lipSyncCreditsDebited = 0;
+        if (creditReservationId) {
+          await refundReservedCredits(creditReservationId);
+          creditReservationId = null;
         }
         console.error("HeyGen start error:", genErr);
         return res.status(502).json({ success: false, error: genErr.message || "Failed to start talking video." });
@@ -6794,14 +6633,16 @@ async function startServer() {
         user_phone: userPhone,
         creation_id: creationId,
         kind: "video",
-        credits_reserved: CREDIT_PRICES.LIP_SYNC_30_SECONDS,
+        credits_reserved: creditReservationId ? CREDIT_PRICES.LIP_SYNC_30_SECONDS : 0,
+        credit_debit_correlation_id: creditReservationId,
         operation_name: handle,
       });
+      creditReservationId = null; // durable job now owns any refund decision
 
       res.status(202).json({ success: true, jobId, status: "queued" });
     } catch (err: any) {
-      if (lipSyncCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, lipSyncCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("Error creating talking video:", err);
       res.status(500).json({ success: false, error: err.message || "Failed to start talking video generation." });
@@ -7026,6 +6867,7 @@ async function startServer() {
       // the customize screen (P3/P4). The client shows the same computation;
       // the server total is the one that gets reserved.
       const MODEL_COST = createModelCost(session.customization_state?.rigging as RiggingSelection | undefined);
+      const pipelineOwnerIsAdmin = await isUserAdmin(userPhone);
 
       // 1. Reserve
       const reserveResult = await reservePipelineSessionForBuild(sessionId, userPhone, idempotencyKey, MODEL_COST);
@@ -7059,7 +6901,7 @@ async function startServer() {
         // generation_jobs.kind is constrained to still/video/model; the
         // provider task handle is stored separately as operation_name.
         kind: 'model',
-        credits_reserved: MODEL_COST,
+        credits_reserved: pipelineOwnerIsAdmin ? 0 : MODEL_COST,
         operation_name: handle
       }, creationData);
 
@@ -7085,7 +6927,7 @@ async function startServer() {
   // model stored on the creation's model_url (media_type 'model').
   const MODEL_COST = CREDIT_PRICES.STATIC_3D_PHOTO;
   app.post("/api/create-3d-model", requireAuth, async (req: AuthedRequest, res) => {
-    let modelCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const { creationId } = req.body;
       if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
@@ -7125,9 +6967,8 @@ async function startServer() {
       }
 
       if (!isAdmin) {
-        const paid = await deductCredits(userPhone, MODEL_COST, "static_3d_photo");
-        if (!paid) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${MODEL_COST} PupCoins.` });
-        modelCreditsDebited = MODEL_COST;
+        creditReservationId = await reserveCredits(userPhone, MODEL_COST, "static_3d_photo");
+        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${MODEL_COST} PupCoins.` });
       }
 
       // Start Tripo/Meshy generation first.
@@ -7135,9 +6976,9 @@ async function startServer() {
       try {
         handle = await startImageTo3D({ imageUrl: publicImageUrl });
       } catch (genErr: any) {
-        if (modelCreditsDebited > 0) {
-          await restoreReservedGenerationCredits(userPhone, modelCreditsDebited);
-          modelCreditsDebited = 0;
+        if (creditReservationId) {
+          await refundReservedCredits(creditReservationId);
+          creditReservationId = null;
         }
         console.error("Tripo/Meshy start error:", genErr);
         if (isTripoInsufficientCredit(genErr)) {
@@ -7155,14 +6996,16 @@ async function startServer() {
         user_phone: userPhone,
         creation_id: creationId,
         kind: "model",
-        credits_reserved: MODEL_COST,
+        credits_reserved: creditReservationId ? MODEL_COST : 0,
+        credit_debit_correlation_id: creditReservationId,
         operation_name: handle,
       });
+      creditReservationId = null; // durable job now owns any refund decision
 
       res.status(202).json({ success: true, jobId, status: "queued" });
     } catch (err: any) {
-      if (modelCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, modelCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("Error creating 3D model:", err);
       res.status(500).json({ success: false, error: err.message || "Failed to start 3D model generation." });
@@ -7222,7 +7065,7 @@ async function startServer() {
   });
 
   app.post("/api/image-to-3d", requireAuth, async (req: AuthedRequest, res) => {
-    let modelCreditsDebited = 0;
+    let creditReservationId: string | null = null;
     try {
       const { image, multiview, geometry } = req.body || {};
       if (!image || typeof image !== "string") {
@@ -7272,9 +7115,8 @@ async function startServer() {
       }
 
       if (!isAdmin) {
-        const paid = await deductCredits(userPhone, MODEL_COST, "static_3d_photo");
-        if (!paid) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${MODEL_COST} PupCoins.` });
-        modelCreditsDebited = MODEL_COST;
+        creditReservationId = await reserveCredits(userPhone, MODEL_COST, "static_3d_photo");
+        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${MODEL_COST} PupCoins.` });
       }
 
       // Start Tripo generation directly — no pet AI reference image step
@@ -7282,9 +7124,9 @@ async function startServer() {
       try {
         handle = await startImageTo3D({ imageUrl: publicImageUrl, views, geometry: geo });
       } catch (genErr: any) {
-        if (modelCreditsDebited > 0) {
-          await restoreReservedGenerationCredits(userPhone, modelCreditsDebited);
-          modelCreditsDebited = 0;
+        if (creditReservationId) {
+          await refundReservedCredits(creditReservationId);
+          creditReservationId = null;
         }
         console.error("[image-to-3d] Tripo start error:", genErr);
         if (isTripoInsufficientCredit(genErr)) {
@@ -7302,15 +7144,17 @@ async function startServer() {
         user_phone: userPhone,
         creation_id: null as any, // no creation for arbitrary images
         kind: "model",
-        credits_reserved: MODEL_COST,
+        credits_reserved: creditReservationId ? MODEL_COST : 0,
+        credit_debit_correlation_id: creditReservationId,
         operation_name: handle,
       });
+      creditReservationId = null; // durable job now owns any refund decision
 
       console.log(`[image-to-3d] Job ${jobId} started for user ${userPhone} (handle: ${handle})`);
       res.status(202).json({ success: true, jobId, status: "queued" });
     } catch (err: any) {
-      if (modelCreditsDebited > 0) {
-        try { await restoreReservedGenerationCredits(req.user!.phone, modelCreditsDebited); } catch {}
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
       }
       console.error("[image-to-3d] Error:", err);
       res.status(500).json({ success: false, error: err.message || "Failed to start 3D generation." });
@@ -7328,8 +7172,7 @@ async function startServer() {
       const videoStaleMs = Number(process.env.VIDEO_JOB_STALE_MS) || 20 * 60 * 1000;
       if (job.kind === "video" && ["queued", "running"].includes(job.status)
         && Date.now() - new Date(job.created_at).getTime() > videoStaleMs) {
-        await updateJobStatus(job.id, "failed", "Video generation timed out before a durable file was returned.");
-        await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+        await failGenerationJobAndRefundOnce(getPool(), job.id, "Video generation timed out before a durable file was returned.");
         return res.json({ success: true, status: "failed", video_url: null, error: "Video generation timed out. Your PupCoins were returned." });
       }
 
@@ -7337,7 +7180,6 @@ async function startServer() {
         try {
           const poll = await pollTripoTask(job.operation_name);
           if (poll.done && !poll.error) {
-            await updateJobStatus(jobId, "done");
             // Mirror the provider's (temporary) GLB URL into our own Backblaze
             // bucket so the stored model_url stays valid after the provider link
             // expires. Matches the /api/jobs poller and AR bake path, which both
@@ -7349,8 +7191,12 @@ async function startServer() {
                 durableUrl = await uploadBinaryFromUrl(poll.glbUrl, "model/gltf-binary");
               } catch (mirrorErr) {
                 console.error(`[image-to-3d] Failed to mirror GLB for job ${jobId}:`, mirrorErr);
-                await updateJobStatus(jobId, "failed", "Failed to mirror model to durable storage (retryable).");
+                await failGenerationJobAndRefundOnce(getPool(), jobId, "Failed to mirror model to durable storage (retryable).");
                 return res.json({ status: "failed", error: "Failed to mirror model — retryable" });
+              }
+              if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
+                const current = await getJob(jobId, req.user!.phone);
+                return res.json({ status: current?.status || "failed", error: current?.error || "Job already finalized." });
               }
               await setCreationModelUrl(job.creation_id!, req.user!.phone, durableUrl).catch(() => {
                 // creation_id may be null for arbitrary images — that's fine
@@ -7382,9 +7228,10 @@ async function startServer() {
               });
               return res.json({ status: "done", model_url: durableUrl, progress: 100 });
             }
-            return res.json({ status: "done", model_url: null, progress: 100 });
+            await failGenerationJobAndRefundOnce(getPool(), jobId, "3D provider completed without a model file.");
+            return res.json({ status: "failed", error: "3D provider completed without a model file." });
           } else if (poll.done && poll.error) {
-            await updateJobStatus(jobId, "failed");
+            await failGenerationJobAndRefundOnce(getPool(), jobId, poll.error || "3D provider generation failed.");
             return res.json({ status: "failed", error: poll.error });
           } else {
             return res.json({ status: "running", progress: poll.progress || 0 });
@@ -7411,25 +7258,35 @@ async function startServer() {
       const job = await getJob(jobId, req.user!.phone);
       if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
+      const animatorOperation = decodeAnimatorOperationMetadata(job.operation_name);
+      if (animatorOperation) {
+        const voicedResult = getOwnedVoicedResult(jobId, req.user!.phone);
+        const progress = job.status === "done" || job.status === "failed" ? 100 : job.status === "running" ? 60 : 20;
+        return res.json({ success: true, status: job.status, progress, video_url: voicedResult?.resultUrl || null, error: job.error || null });
+      }
+
       // If running, poll the operation
       if (job.status === "running" || job.status === "queued") {
         // --- HeyGen talking-video branch ---
         if (job.operation_name && isHeyGenHandle(job.operation_name)) {
+          if (job.creation_id === null) {
+            return res.status(409).json({ success: false, status: job.status, error: "This video job has no creation target and cannot be finalized by the HTTP status route." });
+          }
           try {
-            const handleParts = job.operation_name.split(":animator:");
-            const realHandle = handleParts[0];
-            const result = await pollTalkingVideo(realHandle);
+            const result = await pollTalkingVideo(job.operation_name);
             if (result.done) {
               if (result.videoUrl) {
                 const dataUrl = await fetchMp4AsDataUrl(result.videoUrl);
                 const videoUrl = await uploadBase64Image(dataUrl);
-                await updateJobStatus(jobId, "done");
+                if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
+                  const current = await getJob(jobId, req.user!.phone);
+                  return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
+                }
                 await setCreationVideoUrl(job.creation_id!, req.user!.phone, videoUrl);
                 await sendSms(req.user!.phone, `🐾 Paws & Memories: Your talking pet video is ready! View it at ${process.env.APP_URL || "your app"}.`);
                 return res.json({ success: true, status: "done", video_url: videoUrl });
               } else {
-                await updateJobStatus(jobId, "failed", result.error || "HeyGen generation failed");
-                await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+                await failGenerationJobAndRefundOnce(getPool(), jobId, result.error || "HeyGen generation failed");
                 return res.json({ success: true, status: "failed", error: result.error || "HeyGen generation failed" });
               }
             } else {
@@ -7437,8 +7294,7 @@ async function startServer() {
             }
           } catch (pollErr: any) {
             console.error("HeyGen poll error:", pollErr);
-            await updateJobStatus(jobId, "failed", pollErr.message);
-            await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+            await failGenerationJobAndRefundOnce(getPool(), jobId, pollErr.message);
             return res.json({ success: true, status: "failed", error: pollErr.message });
           }
           return res.json({ success: true, status: job.status, video_url: null, error: job.error });
@@ -7457,8 +7313,8 @@ async function startServer() {
                 // Static model is ALWAYS stored first — a later rig failure can
                 // never cost the user their base model (P3 §5.3).
                 const modelUrl = await uploadBinaryFromUrl(result.glbUrl, "model/gltf-binary");
-                await setCreationModelUrl(job.creation_id!, req.user!.phone, modelUrl);
                 if (providerGate.isCreatePipeline && providerGate.claim) {
+                  await setCreationModelUrl(job.creation_id!, req.user!.phone, modelUrl);
                   const status = await finishStoredPipelineModel(jobId, providerGate.claim, modelUrl);
                   if (status === "done") {
                     await sendSms(req.user!.phone, `🐾 Paws & Memories: Your 3D pet model is ready! View it at ${process.env.APP_URL || "your app"}.`);
@@ -7490,15 +7346,18 @@ async function startServer() {
                   }
                   return res.json({ success: true, status, model_url: modelUrl });
                 }
-                await updateJobStatus(jobId, "done");
+                if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
+                  const current = await getJob(jobId, req.user!.phone);
+                  return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
+                }
+                await setCreationModelUrl(job.creation_id!, req.user!.phone, modelUrl);
                 await sendSms(req.user!.phone, `🐾 Paws & Memories: Your 3D pet model is ready! View it at ${process.env.APP_URL || "your app"}.`);
                 return res.json({ success: true, status: "done", model_url: modelUrl });
               } else {
                 if (providerGate.isCreatePipeline) {
                   await rejectPipelineRigRecovery(jobId, providerGate.claim?.context || null, result.error || "Provider returned no model", providerGate.claim?.leaseOwner);
                 } else {
-                  await updateJobStatus(jobId, "failed", result.error || "Meshy generation failed");
-                  await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+                  await failGenerationJobAndRefundOnce(getPool(), jobId, result.error || "Meshy generation failed");
                 }
                 return res.json({ success: true, status: "failed", error: result.error || "Meshy generation failed" });
               }
@@ -7514,8 +7373,7 @@ async function startServer() {
             if (providerGate.isCreatePipeline) {
               await rejectPipelineRigRecovery(jobId, providerGate.claim?.context || null, `Provider poll failed: ${pollErr.message}`, providerGate.claim?.leaseOwner);
             } else {
-              await updateJobStatus(jobId, "failed", pollErr.message);
-              await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+              await failGenerationJobAndRefundOnce(getPool(), jobId, pollErr.message);
             }
             return res.json({ success: true, status: "failed", error: pollErr.message });
           }
@@ -7541,7 +7399,10 @@ async function startServer() {
                 }
                 
                 // Update DB
-                await updateJobStatus(jobId, "done");
+                if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
+                  const current = await getJob(jobId, req.user!.phone);
+                  return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
+                }
                 await setCreationVideoUrl(job.creation_id!, req.user!.phone, videoUrl);
                 
                 await sendSms(req.user!.phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
@@ -7549,8 +7410,7 @@ async function startServer() {
                 return res.json({ success: true, status: "done", video_url: videoUrl });
               } else {
                 // Failed or empty response
-                await updateJobStatus(jobId, "failed", "No video generated");
-                await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+                await failGenerationJobAndRefundOnce(getPool(), jobId, "No video generated");
                 return res.json({ success: true, status: "failed", error: "Generation returned no video" });
               }
             } else {
@@ -7559,8 +7419,7 @@ async function startServer() {
             }
           } catch (pollErr: any) {
             console.error("Video poll error:", pollErr);
-            await updateJobStatus(jobId, "failed", pollErr.message);
-            await restoreReservedGenerationCredits(req.user!.phone, job.credits_reserved);
+            await failGenerationJobAndRefundOnce(getPool(), jobId, pollErr.message);
             return res.json({ success: true, status: "failed", error: pollErr.message });
           }
         }
@@ -7603,71 +7462,121 @@ async function startServer() {
   void recoverPipelineRigJobs();
   setInterval(() => void recoverPipelineRigJobs(), 60 * 1000);
 
+  let generationRefundSweepActive = false;
+  async function recoverPendingGenerationRefunds(): Promise<void> {
+    if (generationRefundSweepActive) return;
+    generationRefundSweepActive = true;
+    try {
+      const result = await sweepPendingGenerationRefunds(getPool(), 25);
+      if (result.failed > 0) {
+        console.error(`[Generation refunds] ${result.failed}/${result.attempted} pending refunds remain retryable.`);
+      }
+    } catch (error: any) {
+      console.error("[Generation refunds] sweep failed:", error?.message || error);
+    } finally {
+      generationRefundSweepActive = false;
+    }
+  }
+  void recoverPendingGenerationRefunds();
+  setInterval(() => void recoverPendingGenerationRefunds(), 60 * 1000);
+
   // Background poller for orphaned/running provider jobs (runs every 15s).
   // Create-pipeline model jobs must acquire a provider lease before polling.
   setInterval(async () => {
     try {
       const jobs = await getRunningJobs();
       for (const job of jobs) {
+        const animatorOperation = decodeAnimatorOperationMetadata(job.operation_name);
         const videoStaleMs = Number(process.env.VIDEO_JOB_STALE_MS) || 20 * 60 * 1000;
         if (job.kind === "video" && Date.now() - new Date(job.created_at).getTime() > videoStaleMs) {
-          await updateJobStatus(job.id, "failed", "Video generation timed out before a durable file was returned.");
-          await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+          if (animatorOperation) {
+            const { claimVoiceoverFinalizer, failVoiceoverAndRefundOnce } = await import("./server/animator/voicedResults.ts");
+            const leaseOwner = await claimVoiceoverFinalizer(job.id, job.user_phone);
+            if (leaseOwner) await failVoiceoverAndRefundOnce(job.id, leaseOwner, "Voiceover generation timed out before a durable verified video was published.");
+            continue;
+          }
+          await failGenerationJobAndRefundOnce(getPool(), job.id, "Video generation timed out before a durable file was returned.");
           continue;
         }
         if (!job.operation_name) continue;
         // --- HeyGen talking-video branch ---
-        if (isHeyGenHandle(job.operation_name)) {
+        const heyGenOperation = animatorOperation?.providerOperationName || job.operation_name;
+        if (isHeyGenHandle(heyGenOperation)) {
+          if (animatorOperation) {
+            const {
+              claimVoiceoverFinalizer,
+              releaseVoiceoverFinalizer,
+              markVoiceoverDone,
+              failVoiceoverAndRefundOnce,
+              persistVoicedResult,
+            } = await import("./server/animator/voicedResults.ts");
+            const leaseOwner = await claimVoiceoverFinalizer(job.id, job.user_phone);
+            if (!leaseOwner) continue;
+            const cleanup: string[] = [];
+            try {
+              const result = await pollTalkingVideo(animatorOperation.providerOperationName);
+              if (!result.done) {
+                await releaseVoiceoverFinalizer(job.id, leaseOwner);
+                continue;
+              }
+              if (!result.videoUrl) {
+                await failVoiceoverAndRefundOnce(job.id, leaseOwner, result.error || "Voiceover provider returned no video");
+                continue;
+              }
+              const { getOwnedRecording, validateRecordingUpload } = await import("./server/animator/recordings.ts");
+              const { resolveWithinWorkspace, ANIMATOR_DATA_DIR } = await import("./server/animator/paths.ts");
+              const { muxAudioBed } = await import("./server/animator/audioMux.ts");
+              const recording = getOwnedRecording(animatorOperation.recordingId, job.user_phone);
+              if (!recording) throw new Error("Owner recording is missing or inaccessible");
+              const providerResponse = await fetch(result.videoUrl);
+              if (!providerResponse.ok) throw new Error(`Voiceover download failed (${providerResponse.status})`);
+              const declaredLength = Number(providerResponse.headers.get("content-length") || 0);
+              if (declaredLength > 25 * 1024 * 1024) throw new Error("Voiceover download exceeds size limit");
+              const providerBytes = Buffer.from(await providerResponse.arrayBuffer());
+              if (providerBytes.length > 25 * 1024 * 1024) throw new Error("Voiceover download exceeds size limit");
+              validateRecordingUpload(providerBytes, "video/mp4");
+              const providerPath = resolveWithinWorkspace(`tmp/voiceover-${job.id}-${randomUUID()}.mp4`, ANIMATOR_DATA_DIR);
+              const outputExtension = recording.mimeType === "video/mp4" ? "mp4" : "webm";
+              const outputPath = resolveWithinWorkspace(`tmp/voiced-${job.id}-${randomUUID()}.${outputExtension}`, ANIMATOR_DATA_DIR);
+              cleanup.push(providerPath, outputPath);
+              await fs.promises.mkdir(path.dirname(providerPath), { recursive: true });
+              await fs.promises.writeFile(providerPath, providerBytes, { flag: "wx" });
+              await muxAudioBed({ workspaceRoot: ANIMATOR_DATA_DIR, videoPath: `recordings/${recording.fileName}`, audioSources: [{ path: path.relative(ANIMATOR_DATA_DIR, providerPath), gain: 1 }], outputPath: path.relative(ANIMATOR_DATA_DIR, outputPath), maxDuration: 10 });
+              const voicedBytes = await fs.promises.readFile(outputPath);
+              const outputMime = outputExtension === "mp4" ? "video/mp4" : "video/webm";
+              const durableUrl = await uploadBase64Binary(voicedBytes.toString("base64"), outputMime, "animator-voiced-results");
+              if (!durableUrl) throw new Error("Durable voiced-result publication returned no URL");
+              persistVoicedResult({ jobId: job.id, ownerId: job.user_phone, recordingId: animatorOperation.recordingId, resultUrl: durableUrl, mimeType: outputMime, bytes: voicedBytes });
+              if (!await markVoiceoverDone(job.id, leaseOwner)) throw new Error("Voiceover finalizer lease was lost before completion");
+            } catch (err: any) {
+              const reason = `Voiceover finalization failed: ${String(err?.message || err).replace(/[\r\n\t]+/g, " ").slice(0, 420)}`;
+              console.error(`Background Animator voiceover error for job ${job.id}:`, err);
+              await failVoiceoverAndRefundOnce(job.id, leaseOwner, reason);
+            } finally {
+              for (const candidate of cleanup) await fs.promises.rm(candidate, { force: true }).catch(() => undefined);
+            }
+            continue;
+          }
           try {
-            const handleParts = job.operation_name.split(":animator:");
-            const realHandle = handleParts[0];
-            const recordingId = handleParts[1]; // Will be undefined for creation jobs
-            
-            const result = await pollTalkingVideo(realHandle);
+            const result = await pollTalkingVideo(heyGenOperation);
             if (result.done) {
               if (result.videoUrl) {
-                if (recordingId) {
-                  // This is an Animator Voiceover job
-                  const { muxAudioBed } = await import("./server/animator/audioMux.ts");
-                  const path = await import("path");
-                  const fs = await import("fs");
-                  
-                  // Extract and mux
-                  const videoPath = path.join(process.cwd(), "data", "animator", "recordings", recordingId);
-                  const tempVoiceoverPath = path.join(process.cwd(), "data", "animator", "recordings", `temp_vo_${job.id}.mp4`);
-                  const finalOutputPath = path.join(process.cwd(), "data", "animator", "recordings", `voiced_${recordingId}`);
-                  
-                  // Download HeyGen video temporarily
-                  const voRes = await fetch(result.videoUrl);
-                  fs.writeFileSync(tempVoiceoverPath, Buffer.from(await voRes.arrayBuffer()));
-                  
-                  // For now, no ambient/weather included since we don't have their state here.
-                  // Mux only the voiceover onto the video
-                  await muxAudioBed(videoPath, [{ urlOrPath: tempVoiceoverPath, volume: 1.0 }], finalOutputPath, 10);
-                  
-                  fs.unlinkSync(tempVoiceoverPath);
-                  
-                  await updateJobStatus(job.id, "done");
-                } else {
-                  // Standard create-video HeyGen flow
-                  const dataUrl = await fetchMp4AsDataUrl(result.videoUrl);
-                  const videoUrl = await uploadBase64Image(dataUrl);
-                  await updateJobStatus(job.id, "done");
-                  if (job.creation_id) {
-                    await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
-                  }
-                  await sendSms(job.user_phone, `🐾 Paws & Memories: Your talking pet video is ready! View it at ${process.env.APP_URL || "your app"}.`);
+                // Standard create-video HeyGen flow
+                const dataUrl = await fetchMp4AsDataUrl(result.videoUrl);
+                const videoUrl = await uploadBase64Image(dataUrl);
+                if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
+                if (job.creation_id) {
+                  await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
                 }
+                await sendSms(job.user_phone, `🐾 Paws & Memories: Your talking pet video is ready! View it at ${process.env.APP_URL || "your app"}.`);
               } else {
-                await updateJobStatus(job.id, "failed", result.error || "HeyGen generation failed");
-                await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+                await failGenerationJobAndRefundOnce(getPool(), job.id, result.error || "HeyGen generation failed");
               }
             }
           } catch (err: any) {
             const reason = String(err?.message || err).slice(0, 480);
             console.error(`Background HeyGen poller error for job ${job.id}:`, err);
-            await updateJobStatus(job.id, "failed", `HeyGen poll failed: ${reason}`);
-            await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+            await failGenerationJobAndRefundOnce(getPool(), job.id, `HeyGen poll failed: ${reason}`);
           }
           continue;
         }
@@ -7681,10 +7590,10 @@ async function startServer() {
               if (result.glbUrl) {
                 // Static model is ALWAYS stored first (P3 §5.3).
                 const modelUrl = await uploadBinaryFromUrl(result.glbUrl, "model/gltf-binary");
-                if (job.creation_id) {
-                  await setCreationModelUrl(job.creation_id, job.user_phone, modelUrl);
-                }
                 if (providerGate.isCreatePipeline && providerGate.claim) {
+                  if (job.creation_id) {
+                    await setCreationModelUrl(job.creation_id, job.user_phone, modelUrl);
+                  }
                   const status = await finishStoredPipelineModel(job.id, providerGate.claim, modelUrl);
                   if (status === "done") {
                     await sendSms(job.user_phone, `🐾 Paws & Memories: Your 3D pet model is ready! View it at ${process.env.APP_URL || "your app"}.`);
@@ -7718,14 +7627,16 @@ async function startServer() {
                   }
                   continue;
                 }
-                await updateJobStatus(job.id, "done");
+                if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
+                if (job.creation_id) {
+                  await setCreationModelUrl(job.creation_id, job.user_phone, modelUrl);
+                }
                 await sendSms(job.user_phone, `🐾 Paws & Memories: Your 3D pet model is ready! View it at ${process.env.APP_URL || "your app"}.`);
               } else {
                 if (providerGate.isCreatePipeline) {
                   await rejectPipelineRigRecovery(job.id, providerGate.claim?.context || null, result.error || "Provider returned no model", providerGate.claim?.leaseOwner);
                 } else {
-                  await updateJobStatus(job.id, "failed", result.error || "Meshy generation failed");
-                  await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+                  await failGenerationJobAndRefundOnce(getPool(), job.id, result.error || "Meshy generation failed");
                 }
               }
             } else if (providerGate.isCreatePipeline && providerGate.claim?.leaseOwner) {
@@ -7740,8 +7651,7 @@ async function startServer() {
             if (providerGate.isCreatePipeline) {
               await rejectPipelineRigRecovery(job.id, providerGate.claim?.context || null, `Provider poll failed: ${reason}`, providerGate.claim?.leaseOwner);
             } else {
-              await updateJobStatus(job.id, "failed", `Tripo poll failed: ${reason}`);
-              await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+              await failGenerationJobAndRefundOnce(getPool(), job.id, `Tripo poll failed: ${reason}`);
             }
           }
           continue;
@@ -7764,21 +7674,19 @@ async function startServer() {
                 throw new Error("Veo returned no video URI or bytes");
               }
               
-              await updateJobStatus(job.id, "done");
+              if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
               if (job.creation_id) {
                 await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
               }
               
               await sendSms(job.user_phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
             } else {
-              await updateJobStatus(job.id, "failed", "No video generated");
-              await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+              await failGenerationJobAndRefundOnce(getPool(), job.id, "No video generated");
             }
           }
         } catch (err) {
           console.error(`Background poller error for job ${job.id}:`, err);
-          await updateJobStatus(job.id, "failed", "Poller error");
-          await restoreReservedGenerationCredits(job.user_phone, job.credits_reserved);
+          await failGenerationJobAndRefundOnce(getPool(), job.id, "Poller error");
         }
       }
     } catch (e) {

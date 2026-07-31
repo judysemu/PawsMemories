@@ -1,4 +1,4 @@
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   approveReferenceManifest,
   authedFetch,
@@ -238,7 +238,6 @@ export default function PetModelStudio() {
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
   const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("multi");
-  const [printHeight, setPrintHeight] = useState(100);
   const [collarSizeClass, setCollarSizeClass] = useState<CollarSizeClass>("medium_dog");
   const [neckCircumferenceMm, setNeckCircumferenceMm] = useState(400);
   const [collarWidthMm, setCollarWidthMm] = useState(25);
@@ -254,6 +253,12 @@ export default function PetModelStudio() {
   const [busy, setBusy] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const downloadRequestIdRef = useRef(0);
+  const downloadIdentity = view
+    ? `${view.order.orderUuid}:${view.order.approvedVersionId ?? "none"}`
+    : "none";
+  const activeDownloadIdentityRef = useRef(downloadIdentity);
+  activeDownloadIdentityRef.current = downloadIdentity;
 
   useEffect(() => {
     Promise.all([
@@ -275,6 +280,13 @@ export default function PetModelStudio() {
     setPreviewUrl(null);
     setRejectionReason("");
   }, [view?.currentStage?.attemptUuid]);
+
+  useEffect(() => {
+    // A signed URL belongs to one exact order/version. Changing either
+    // invalidates both the visible link and any response still in flight.
+    downloadRequestIdRef.current += 1;
+    setDownloadUrl(null);
+  }, [downloadIdentity]);
 
   useEffect(() => {
     if (!view?.order.approvedVersionId) {
@@ -326,13 +338,21 @@ export default function PetModelStudio() {
       + (includeRig ? product.prices.rig : 0);
   }, [product, includeTexture, includeRig]);
 
-  const applyView = useCallback((next: OrderView) => {
+  const selectOrder = useCallback((next: OrderView) => {
+    const nextIdentity = `${next.order.orderUuid}:${next.order.approvedVersionId ?? "none"}`;
+    activeDownloadIdentityRef.current = nextIdentity;
+    downloadRequestIdRef.current += 1;
+    setDownloadUrl(null);
     setView(next);
+  }, []);
+
+  const applyView = useCallback((next: OrderView) => {
+    selectOrder(next);
     setRecentOrders((current) => [
       next,
       ...current.filter((item) => item.order.orderUuid !== next.order.orderUuid),
     ]);
-  }, []);
+  }, [selectOrder]);
 
   const start = async () => {
     if (busy) return;
@@ -530,9 +550,22 @@ export default function PetModelStudio() {
   };
 
   const download = () => {
-    if (!view) return;
-    call(`/api/pet-glb/orders/${view.order.orderUuid}/download`, { method: "POST" })
-      .then((body) => setDownloadUrl(body.url))
+    if (!view?.order.approvedVersionId) return;
+    const orderUuid = view.order.orderUuid;
+    const approvedVersionId = view.order.approvedVersionId;
+    const identity = `${orderUuid}:${approvedVersionId}`;
+    const requestId = ++downloadRequestIdRef.current;
+    setDownloadUrl(null);
+    call(`/api/pet-glb/orders/${orderUuid}/download`, { method: "POST" })
+      .then((body) => {
+        if (
+          requestId === downloadRequestIdRef.current
+          && identity === activeDownloadIdentityRef.current
+          && body.versionId === approvedVersionId
+        ) {
+          setDownloadUrl(body.url);
+        }
+      })
       .catch(() => {});
   };
 
@@ -709,10 +742,6 @@ export default function PetModelStudio() {
                   <span className="mt-1 block opacity-55">AI behavior is not embedded in the GLB.</span>
                 )}
               </label>
-              <label className="block text-xs">
-                <span className="mb-1 flex justify-between opacity-70"><span>Finished print height</span><strong>{printHeight} mm</strong></span>
-                <input type="range" min="50" max="200" step="10" value={printHeight} onChange={(event) => setPrintHeight(Number(event.target.value))} className="w-full" />
-              </label>
               <div className="rounded-xl border border-amber-200/15 bg-amber-200/5 p-3 text-xs opacity-75">
                 For reliable printing, use clear full-body views with visible paws, tail, and floor contact. Fine fur becomes sculpted surface detail.
               </div>
@@ -829,24 +858,30 @@ export default function PetModelStudio() {
             <p className="text-xs opacity-60">Creating the order is free. The base charge happens only when you approve your reference set.</p>
             <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs">
               <strong className="block text-sm">Simple print checkout</strong>
-              Approve model → choose {printHeight} mm size → enter shipping → secure card checkout → Slant 3D prints and ships.
+              Approve model → choose the exact print size in Print Shop → enter shipping → secure card checkout → Slant 3D prints and ships.
             </div>
             <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs">
               Facial blendshapes are separate from the body/skeletal rig above and are not for sale. They return only after at least {Math.round(product.facialRig.minimumSuccessRate * 100)}% measured reliability.
             </div>
             {recentOrders.length > 0 && (
               <div className="space-y-2 border-t border-white/15 pt-4">
-                <h2 className="text-sm font-semibold">Recent successful models</h2>
-                {recentOrders.filter((item) => ["approved", "delivered"].includes(item.order.state)).slice(0, 3).map((item) => (
+                <h2 className="text-sm font-semibold">Recent model orders</h2>
+                {recentOrders.map((item) => (
                   <div
                     key={item.order.orderUuid}
                     className="space-y-2 rounded-xl border border-white/10 p-2 text-xs"
                   >
-                    <button type="button" onClick={() => setView(item)} className="flex w-full items-center gap-2 text-left">
-                      {item.order.referenceManifest?.frontUrl ? <img src={item.order.referenceManifest.frontUrl} alt="Successful model reference" className="h-12 w-12 rounded-lg object-cover" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-cyan-300/15 text-xl">🐾</span>}
-                      <span><strong className="block">{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} model</strong><span className="opacity-60">{item.order.subjectProfile}</span></span>
+                    <button type="button" onClick={() => selectOrder(item)} className="flex w-full items-center gap-2 text-left">
+                      {item.order.referenceManifest?.frontUrl ? <img src={item.order.referenceManifest.frontUrl} alt="Model order reference" className="h-12 w-12 rounded-lg object-cover" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-cyan-300/15 text-xl">🐾</span>}
+                      <span>
+                        <strong className="block">{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} model</strong>
+                        <span className="block opacity-60">{item.order.subjectProfile}</span>
+                        <span className="block capitalize text-cyan-200">{item.order.state.replaceAll("_", " ")}</span>
+                      </span>
                     </button>
-                    <a href={item.order.id ? `/print-shop?model=${item.order.id}` : "/print-shop"} className="block rounded-lg bg-cyan-400 px-2 py-1.5 text-center text-[11px] font-bold text-slate-950">Slant3D 3D-print checkout</a>
+                    {["approved", "delivered"].includes(item.order.state) && (
+                      <a href={item.order.id ? `/print-shop?model=${item.order.id}` : "/print-shop"} className="block rounded-lg bg-cyan-400 px-2 py-1.5 text-center text-[11px] font-bold text-slate-950">Slant3D 3D-print checkout</a>
+                    )}
                   </div>
                 ))}
               </div>

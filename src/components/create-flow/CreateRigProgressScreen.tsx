@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useCreateFlow } from "./CreateFlowContext";
 import { getRigJob } from "../../api";
 import { Screen } from "../../types";
@@ -11,35 +11,52 @@ export const CreateRigProgressScreen: React.FC<Props> = ({ onNavigate }) => {
   const { rigJobUuid, setRigJob } = useCreateFlow();
   const [job, setLocalJob] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const navigateRef = useRef(onNavigate);
+  const setRigJobRef = useRef(setRigJob);
+
+  useEffect(() => { navigateRef.current = onNavigate; }, [onNavigate]);
+  useEffect(() => { setRigJobRef.current = setRigJob; }, [setRigJob]);
 
   useEffect(() => {
     if (!rigJobUuid) return;
-    let isMounted = true;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const terminal = (state: string) =>
+      state === "ready" || state === "accepted" || state === "cancelled" || state.startsWith("failed_");
 
     const poll = async () => {
       try {
         const data = await getRigJob(rigJobUuid);
-        if (!isMounted) return;
+        if (stopped) return;
         setLocalJob(data);
-        setRigJob(data);
+        setRigJobRef.current(data);
+        setError(null);
 
-        if (data.state === "ready" || data.state === "accepted") {
-          onNavigate(Screen.CREATE_RIG_REVIEW);
-        } else if (data.state.startsWith("failed_") || data.state === "cancelled") {
+        if (terminal(String(data.state || "")) && (data.state === "ready" || data.state === "accepted")) {
+          stopped = true;
+          navigateRef.current(Screen.CREATE_RIG_REVIEW);
+        } else if (terminal(String(data.state || ""))) {
+          stopped = true;
           setError(`Rigging stopped: ${data.failureCode || data.state}. Your accepted static model is unchanged.`);
         }
       } catch (err: any) {
-        if (isMounted) setError(err.message || "Failed to poll rig status");
+        if (!stopped) setError(err.message || "Failed to poll rig status");
+      } finally {
+        // Sequential recursive timeout: the 2.5-second delay starts only after
+        // the prior request settles, so slow requests can never overlap.
+        if (!stopped) {
+          timer = setTimeout(() => { void poll(); }, 2500);
+        }
       }
     };
 
-    poll();
-    const timer = setInterval(poll, 2500);
+    void poll();
     return () => {
-      isMounted = false;
-      clearInterval(timer);
+      stopped = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [rigJobUuid, setRigJob, onNavigate]);
+  }, [rigJobUuid]);
 
   const stateLabels: Record<string, string> = {
     draft: "Initializing Rig Pipeline...",

@@ -44,8 +44,7 @@ if (!keyId || !appKey || !bucketName) {
   process.exit(1);
 }
 
-const corsRules = [
-  {
+const desiredDownloadRule = {
     corsRuleName: "allowAppOriginsDownload",
     allowedOrigins: origins,
     // Download (GET/HEAD) over both the S3 endpoint and the native download URL.
@@ -58,8 +57,7 @@ const corsRules = [
     allowedHeaders: ["*"],
     exposeHeaders: ["Content-Length", "Content-Type", "ETag"],
     maxAgeSeconds: 3600,
-  },
-];
+};
 
 async function j(res) {
   const text = await res.text();
@@ -94,11 +92,24 @@ async function j(res) {
   if (!bucket) throw new Error(`Bucket "${bucketName}" not found for this account/key.`);
   console.log(`  bucketId ${bucket.bucketId}, existing CORS rules: ${(bucket.corsRules || []).length}`);
 
-  console.log(`→ Setting CORS rules for origins: ${origins.join(", ")}`);
+  if (!Array.isArray(bucket.corsRules) || !Number.isInteger(bucket.revision)) {
+    throw new Error("Bucket response omitted CORS rules or revision; refusing a destructive update.");
+  }
+  const corsRules = [
+    ...bucket.corsRules.filter((rule) => rule?.corsRuleName !== desiredDownloadRule.corsRuleName),
+    desiredDownloadRule,
+  ];
+
+  console.log(`→ Merging download CORS rule for origins: ${origins.join(", ")}`);
   const updated = await j(await fetch(`${apiUrl}/b2api/v3/b2_update_bucket`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
-    body: JSON.stringify({ accountId, bucketId: bucket.bucketId, corsRules }),
+    body: JSON.stringify({
+      accountId,
+      bucketId: bucket.bucketId,
+      corsRules,
+      ifRevisionIs: bucket.revision,
+    }),
   }));
 
   console.log("✅ Done. CORS rules now:");

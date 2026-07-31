@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import mysql from "mysql2/promise";
 import { runMigrations, CURRENT_SCHEMA_VERSION } from "../server/migrations/runner.ts";
+import { updateSessionSource, updateSessionState } from "../server/reference-sessions/repository.ts";
 
 const mysqlHost = process.env.MYSQL_TEST_HOST || "127.0.0.1";
 const mysqlPort = Number(process.env.MYSQL_TEST_PORT || 3306);
@@ -87,6 +89,11 @@ test("Phase 2 Real MySQL 8.4 Migrations 20-21 Test Suite", async (t) => {
         [testDbName],
       );
       assert.equal(tables.length, 5, "All 5 reference session tables must be created");
+      const [allowanceColumns] = await pool.query(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'reference_sessions' AND COLUMN_NAME = 'source_attempt_count'",
+        [testDbName],
+      );
+      assert.equal(allowanceColumns.length, 1, "source-specific allowance column must be migrated");
     } finally {
       await pool.end();
     }
@@ -191,6 +198,100 @@ test("Phase 2 Real MySQL 8.4 Migrations 20-21 Test Suite", async (t) => {
 
       conn.release();
     } finally {
+      await pool.end();
+    }
+  });
+
+  await t.test("4. Replacing a source resets its allowance but preserves monotonic attempt history", async () => {
+    const pool = getTestPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const ownerId = "+15550041";
+      const createSource = async (suffix) => {
+        const [asset] = await conn.query(
+          "INSERT INTO assets (asset_uuid, owner_id, asset_type, visibility) VALUES (?, ?, 'reference_source_photo', 'private')",
+          [crypto.randomUUID(), ownerId],
+        );
+        const [version] = await conn.query(
+          `INSERT INTO asset_versions
+           (asset_id, version_number, sha256, mime_type, size_bytes, bucket, object_key)
+           VALUES (?, 1, ?, 'image/png', 1024, 'private', ?)`,
+          [asset.insertId, suffix.repeat(64), `references/source-${suffix}.png`],
+        );
+        await conn.query("UPDATE assets SET current_version_id = ? WHERE id = ?", [version.insertId, asset.insertId]);
+        return { assetId: asset.insertId, versionId: version.insertId };
+      };
+      const firstSource = await createSource("a");
+      const replacement = await createSource("b");
+      const [session] = await conn.query(
+        `INSERT INTO reference_sessions
+         (session_uuid, owner_id, input_mode, state, source_asset_id, source_asset_version_id,
+          retry_count, source_attempt_count)
+         VALUES (?, ?, 'photo', 'ready', ?, ?, 2, 2)`,
+        [crypto.randomUUID(), ownerId, firstSource.assetId, firstSource.versionId],
+      );
+      const attemptIds = [];
+      for (const attemptNumber of [1, 2]) {
+        const [attempt] = await conn.query(
+          `INSERT INTO reference_attempts
+           (session_id, attempt_number, idempotency_key, model, prompt_config_hash, state)
+           VALUES (?, ?, ?, 'fixture', ?, 'ready')`,
+          [session.insertId, attemptNumber, crypto.randomUUID(), "c".repeat(64)],
+        );
+        attemptIds.push(attempt.insertId);
+      }
+      await conn.query(
+        "UPDATE reference_sessions SET current_attempt_id = ?, approved_attempt_id = ? WHERE id = ?",
+        [attemptIds[1], attemptIds[1], session.insertId],
+      );
+
+      await updateSessionSource(conn, session.insertId, replacement.assetId, replacement.versionId);
+      const [afterReplacementRows] = await conn.query(
+        "SELECT state, retry_count, source_attempt_count, current_attempt_id, approved_attempt_id FROM reference_sessions WHERE id = ?",
+        [session.insertId],
+      );
+      assert.deepEqual(
+        {
+          state: afterReplacementRows[0].state,
+          lifetime: Number(afterReplacementRows[0].retry_count),
+          source: Number(afterReplacementRows[0].source_attempt_count),
+          current: afterReplacementRows[0].current_attempt_id,
+          approved: afterReplacementRows[0].approved_attempt_id,
+        },
+        { state: "draft", lifetime: 2, source: 0, current: null, approved: null },
+      );
+
+      const nextAttemptNumber = Number(afterReplacementRows[0].retry_count) + 1;
+      const [third] = await conn.query(
+        `INSERT INTO reference_attempts
+         (session_id, attempt_number, idempotency_key, model, prompt_config_hash, state)
+         VALUES (?, ?, ?, 'fixture', ?, 'queued')`,
+        [session.insertId, nextAttemptNumber, crypto.randomUUID(), "d".repeat(64)],
+      );
+      await updateSessionState(conn, session.insertId, "generating", {
+        currentAttemptId: third.insertId,
+        incrementRetry: true,
+        incrementSourceAttempt: true,
+      });
+
+      const [attemptRows] = await conn.query(
+        "SELECT attempt_number FROM reference_attempts WHERE session_id = ? ORDER BY attempt_number",
+        [session.insertId],
+      );
+      assert.deepEqual(attemptRows.map((row) => Number(row.attempt_number)), [1, 2, 3]);
+      const [finalRows] = await conn.query(
+        "SELECT retry_count, source_attempt_count FROM reference_sessions WHERE id = ?",
+        [session.insertId],
+      );
+      assert.equal(Number(finalRows[0].retry_count), 3);
+      assert.equal(Number(finalRows[0].source_attempt_count), 1);
+      await conn.commit();
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
       await pool.end();
     }
   });

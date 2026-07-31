@@ -98,6 +98,26 @@ describe("Phase 3 Migration 22 MySQL Integration", {
     for (const tbl of expected) {
       assert.ok(tableNames.includes(tbl), `Table ${tbl} should exist`);
     }
+
+    const [jobColumns] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'model_build_jobs'`,
+      [TEST_DB],
+    );
+    const jobColumnNames = new Set(jobColumns.map((row) => row.COLUMN_NAME));
+    for (const column of ["refund_pending_at", "refund_attempts", "last_refund_error_code"]) {
+      assert.equal(jobColumnNames.has(column), true, `model_build_jobs.${column} should exist`);
+    }
+
+    const [attemptColumns] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'model_build_attempts'`,
+      [TEST_DB],
+    );
+    const attemptColumnNames = new Set(attemptColumns.map((row) => row.COLUMN_NAME));
+    for (const column of ["submission_claimed_at", "recovery_required_at", "handle_persist_attempts"]) {
+      assert.equal(attemptColumnNames.has(column), true, `model_build_attempts.${column} should exist`);
+    }
   });
 
   it("should be idempotent when rerun on an already upgraded database", async () => {

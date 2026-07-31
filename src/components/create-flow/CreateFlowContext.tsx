@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState, ReactNode } from "react";
 import type { RigJobResponse } from "../../api";
 
 interface CreateFlowState {
@@ -49,7 +49,7 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
     };
   });
 
-  const handleSetState: React.Dispatch<React.SetStateAction<CreateFlowState>> = (action) => {
+  const handleSetState: React.Dispatch<React.SetStateAction<CreateFlowState>> = useCallback((action) => {
     setState((prev) => {
       const next = typeof action === "function" ? action(prev) : action;
       if (typeof window !== "undefined") {
@@ -58,32 +58,34 @@ export function CreateFlowProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  };
+  }, []);
 
-  const resetState = () => {
+  const resetState = useCallback(() => {
     if (typeof window !== "undefined") sessionStorage.removeItem(ACTIVE_JOB_KEY);
     setState({ species: "dog", inputMode: "image" });
-  };
+  }, []);
 
-  const setRigJobUuid = (uuid: string) => {
+  const setRigJobUuid = useCallback((uuid: string) => {
     setState((prev) => ({ ...prev, rigJobUuid: uuid }));
-  };
+  }, []);
 
-  const setRigJob = (job: RigJobResponse) => {
+  const setRigJob = useCallback((job: RigJobResponse) => {
     setState((prev) => ({ ...prev, rigJob: job, rigJobUuid: job?.jobUuid || prev.rigJobUuid }));
-  };
+  }, []);
+
+  const value = useMemo<CreateFlowContextValue>(() => ({
+    state,
+    setState: handleSetState,
+    resetState,
+    rigJobUuid: state.rigJobUuid,
+    rigJob: state.rigJob,
+    setRigJobUuid,
+    setRigJob,
+  }), [handleSetState, resetState, setRigJob, setRigJobUuid, state]);
 
   return (
     <CreateFlowContext.Provider
-      value={{
-        state,
-        setState: handleSetState,
-        resetState,
-        rigJobUuid: state.rigJobUuid,
-        rigJob: state.rigJob,
-        setRigJobUuid,
-        setRigJob,
-      }}
+      value={value}
     >
       {children}
     </CreateFlowContext.Provider>

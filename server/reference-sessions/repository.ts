@@ -51,7 +51,7 @@ export async function findSessionById(
   id: number,
 ): Promise<ReferenceSessionRecord | null> {
   const [rows]: any = await connection.query(
-    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, retry_count, created_at, updated_at
+    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, source_attempt_count, retry_count, created_at, updated_at
      FROM reference_sessions WHERE id = ? LIMIT 1`,
     [id],
   );
@@ -69,6 +69,7 @@ export async function findSessionById(
     state: r.state as SessionState,
     current_attempt_id: r.current_attempt_id ? Number(r.current_attempt_id) : null,
     approved_attempt_id: r.approved_attempt_id ? Number(r.approved_attempt_id) : null,
+    source_attempt_count: Number(r.source_attempt_count),
     retry_count: Number(r.retry_count),
     created_at: new Date(r.created_at),
     updated_at: new Date(r.updated_at),
@@ -80,7 +81,7 @@ export async function findSessionByUuid(
   sessionUuid: string,
 ): Promise<ReferenceSessionRecord | null> {
   const [rows]: any = await connection.query(
-    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, retry_count, created_at, updated_at
+    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, source_attempt_count, retry_count, created_at, updated_at
      FROM reference_sessions WHERE session_uuid = ? LIMIT 1`,
     [sessionUuid],
   );
@@ -98,6 +99,7 @@ export async function findSessionByUuid(
     state: r.state as SessionState,
     current_attempt_id: r.current_attempt_id ? Number(r.current_attempt_id) : null,
     approved_attempt_id: r.approved_attempt_id ? Number(r.approved_attempt_id) : null,
+    source_attempt_count: Number(r.source_attempt_count),
     retry_count: Number(r.retry_count),
     created_at: new Date(r.created_at),
     updated_at: new Date(r.updated_at),
@@ -109,7 +111,7 @@ export async function findSessionByUuidForUpdate(
   sessionUuid: string,
 ): Promise<ReferenceSessionRecord | null> {
   const [rows]: any = await connection.query(
-    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, retry_count, created_at, updated_at
+    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, source_attempt_count, retry_count, created_at, updated_at
      FROM reference_sessions WHERE session_uuid = ? LIMIT 1 FOR UPDATE`,
     [sessionUuid],
   );
@@ -122,7 +124,7 @@ export async function findSessionByUuidForUpdate(
     source_asset_version_id: r.source_asset_version_id ? Number(r.source_asset_version_id) : null,
     state: r.state as SessionState, current_attempt_id: r.current_attempt_id ? Number(r.current_attempt_id) : null,
     approved_attempt_id: r.approved_attempt_id ? Number(r.approved_attempt_id) : null,
-    retry_count: Number(r.retry_count), created_at: new Date(r.created_at), updated_at: new Date(r.updated_at),
+    source_attempt_count: Number(r.source_attempt_count), retry_count: Number(r.retry_count), created_at: new Date(r.created_at), updated_at: new Date(r.updated_at),
   };
 }
 
@@ -134,7 +136,8 @@ export async function updateSessionSource(
 ): Promise<void> {
   await connection.query(
     `UPDATE reference_sessions
-     SET source_asset_id = ?, source_asset_version_id = ?, state = 'draft', current_attempt_id = NULL
+     SET source_asset_id = ?, source_asset_version_id = ?, state = 'draft',
+         current_attempt_id = NULL, approved_attempt_id = NULL, source_attempt_count = 0
      WHERE id = ?`,
     [assetId, assetVersionId, sessionId],
   );
@@ -148,7 +151,7 @@ export async function findSessionsByOwner(
   const limit = options.limit || 20;
   const offset = options.offset || 0;
   const [rows]: any = await connection.query(
-    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, retry_count, created_at, updated_at
+    `SELECT id, session_uuid, owner_id, input_mode, subject_class, prompt, source_asset_id, source_asset_version_id, state, current_attempt_id, approved_attempt_id, source_attempt_count, retry_count, created_at, updated_at
      FROM reference_sessions WHERE owner_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`,
     [ownerId, limit, offset],
   );
@@ -165,6 +168,7 @@ export async function findSessionsByOwner(
     state: r.state as SessionState,
     current_attempt_id: r.current_attempt_id ? Number(r.current_attempt_id) : null,
     approved_attempt_id: r.approved_attempt_id ? Number(r.approved_attempt_id) : null,
+    source_attempt_count: Number(r.source_attempt_count),
     retry_count: Number(r.retry_count),
     created_at: new Date(r.created_at),
     updated_at: new Date(r.updated_at),
@@ -175,7 +179,12 @@ export async function updateSessionState(
   connection: mysql.PoolConnection | mysql.Pool,
   sessionId: number,
   state: SessionState,
-  extra: { currentAttemptId?: number | null; approvedAttemptId?: number | null; incrementRetry?: boolean } = {},
+  extra: {
+    currentAttemptId?: number | null;
+    approvedAttemptId?: number | null;
+    incrementRetry?: boolean;
+    incrementSourceAttempt?: boolean;
+  } = {},
 ): Promise<void> {
   const updates = ["state = ?"];
   const params: any[] = [state];
@@ -190,6 +199,9 @@ export async function updateSessionState(
   }
   if (extra.incrementRetry) {
     updates.push("retry_count = retry_count + 1");
+  }
+  if (extra.incrementSourceAttempt) {
+    updates.push("source_attempt_count = source_attempt_count + 1");
   }
 
   params.push(sessionId);

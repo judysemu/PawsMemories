@@ -46,7 +46,10 @@ from print_mesh_contract import (  # noqa: E402 - Blender initializes bpy first
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-TCP_HOST = "0.0.0.0"
+# The bridge executes arbitrary Python and has no protocol-level authentication.
+# It is an internal sidecar interface, so never publish it unless an operator
+# deliberately overrides the bind address inside a trusted private network.
+TCP_HOST = os.environ.get("BLENDER_BRIDGE_BIND_HOST", "127.0.0.1")
 TCP_PORT = int(os.environ.get("BLENDER_BRIDGE_PORT", "9876"))
 CHECKPOINT_DIR = "/tmp/blender_checkpoints"
 VIEWPORT_DIR = "/tmp/blender_viewports"

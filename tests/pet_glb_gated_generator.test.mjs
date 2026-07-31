@@ -217,7 +217,7 @@ test("model studio requires four source photos and generates approval views", ()
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  assert.equal(CURRENT_SCHEMA_VERSION, 39);
+  assert.equal(CURRENT_SCHEMA_VERSION, 44);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);

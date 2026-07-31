@@ -21,7 +21,11 @@ test("wags exclusives never collide with the base catalog", () => {
   const baseIds = new Set(WARDROBE_CATALOG.map((i) => i.id));
   for (const item of WAGS_EXCLUSIVE_CATALOG) {
     assert.ok(!baseIds.has(item.id), `${item.id} exists in both catalogs`);
-    assert.match(item.id, /^wags-/, `${item.id} must carry the wags- prefix so grants are auditable`);
+    assert.match(
+      item.id,
+      /^wags-/,
+      `${item.id} must carry the wags- prefix so grants are auditable`,
+    );
   }
   assert.equal(
     new Set(FULL_WARDROBE_CATALOG.map((i) => i.id)).size,
@@ -36,7 +40,10 @@ test("seed script stays in sync with the renderable catalog", () => {
   // must fail loudly here rather than surface as a broken unboxing.
   const seed = read("scripts/seed-wags-catalog.mjs");
   for (const item of FULL_WARDROBE_CATALOG) {
-    assert.ok(seed.includes(`"${item.id}"`), `seed script is missing ${item.id}`);
+    assert.ok(
+      seed.includes(`"${item.id}"`),
+      `seed script is missing ${item.id}`,
+    );
   }
 });
 
@@ -84,23 +91,70 @@ test("matcher is deterministic for unknown colours", () => {
 const deliverySource = read("server/wags/delivery.ts");
 
 test("delivery is idempotency-gated before any grant", () => {
+  assert.match(deliverySource, /beginTransaction\(\)/);
+  assert.match(deliverySource, /FOR UPDATE/);
   const gateIdx = deliverySource.indexOf("alreadyDelivered: true");
   const creditIdx = deliverySource.indexOf("credits = credits +");
   assert.ok(gateIdx > -1 && creditIdx > -1);
-  assert.ok(gateIdx < creditIdx, "the existing-items gate must run before the credit grant");
+  assert.ok(
+    gateIdx < creditIdx,
+    "the existing-items gate must run before the credit grant",
+  );
+});
+
+test("legacy Wags checkout cannot create recurring billing", () => {
+  const server = read("server.ts");
+  const routeStart = server.indexOf('app.post("/api/wags/subscribe"');
+  const retired = server.indexOf("LEGACY_WAGS_CHECKOUT_RETIRED", routeStart);
+  const providerCall = server.indexOf(
+    "stripe.subscriptions.create",
+    routeStart,
+  );
+  assert.ok(routeStart > -1 && retired > routeStart);
+  assert.ok(
+    providerCall === -1 || retired < providerCall,
+    "the route must return its retirement response before any provider call",
+  );
+});
+
+test("Wags materialization uses a connection-scoped advisory lock", () => {
+  const materializer = read("server/wags/materializer.ts");
+  assert.match(materializer, /GET_LOCK\(\?, 0\)/);
+  assert.match(materializer, /RELEASE_LOCK\(\?\)/);
+  assert.match(materializer, /connection\.release\(\)/);
 });
 
 test("credits are granted after their recording row, never before", () => {
-  const insertIdx = deliverySource.indexOf("INSERT INTO wardrobe_wags_box_items");
+  const insertIdx = deliverySource.indexOf(
+    "INSERT INTO wardrobe_wags_box_items",
+  );
   const grantIdx = deliverySource.indexOf("UPDATE users SET credits");
-  assert.ok(insertIdx > -1 && grantIdx > -1 && insertIdx < grantIdx,
-    "crash between row and grant must under-grant (visible), never over-grant (silent)");
+  assert.ok(
+    insertIdx > -1 && grantIdx > -1 && insertIdx < grantIdx,
+    "crash between row and grant must under-grant (visible), never over-grant (silent)",
+  );
 });
 
 test("wardrobe grants come only from the exclusive catalog", () => {
   assert.match(deliverySource, /WAGS_EXCLUSIVE_CATALOG/);
-  assert.doesNotMatch(deliverySource, /from "\.\.\/\.\.\/src\/wardrobe\/catalog"[\s\S]*WARDROBE_CATALOG\b/,
-    "granting from the free base catalog would deliver nothing of value");
+  assert.doesNotMatch(
+    deliverySource,
+    /from "\.\.\/\.\.\/src\/wardrobe\/catalog"[\s\S]*WARDROBE_CATALOG\b/,
+    "granting from the free base catalog would deliver nothing of value",
+  );
+});
+
+test("delivered Wags exclusives survive wardrobe load and are entitlement-gated on save", () => {
+  const screen = read("src/components/FidosStylesScreen.tsx");
+  const server = read("server.ts");
+  assert.match(screen, /FULL_WARDROBE_CATALOG\.some/);
+  assert.match(screen, /FULL_WARDROBE_CATALOG\.filter/);
+  assert.match(server, /WAGS_EXCLUSIVE_ITEM_IDS/);
+  assert.match(
+    server,
+    /getOwnedWardrobeItems\(getPool\(\), req\.user!\.phone\)/,
+  );
+  assert.match(server, /This Wags wardrobe item has not been delivered/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -109,12 +163,19 @@ test("wardrobe grants come only from the exclusive catalog", () => {
 
 test("approval delivers and user endpoints exist", () => {
   const server = read("server.ts");
-  assert.match(server, /deliverBox\(getPool\(\)/, "approve must call deliverBox");
+  assert.match(
+    server,
+    /deliverBox\(getPool\(\)/,
+    "approve must call deliverBox",
+  );
   assert.match(server, /app\.get\("\/api\/wags\/boxes"/);
   assert.match(server, /app\.post\("\/api\/wags\/boxes\/:id\/open"/);
   assert.match(server, /app\.get\("\/api\/wags\/wardrobe"/);
   // The open endpoint must be scoped to the owner and one-shot.
-  assert.match(server, /opened_at = CURRENT_TIMESTAMP\s+WHERE id = \? AND user_phone = \? AND opened_at IS NULL/);
+  assert.match(
+    server,
+    /opened_at = CURRENT_TIMESTAMP\s+WHERE id = \? AND user_phone = \? AND opened_at IS NULL/,
+  );
 });
 
 test("texturizer is visibly gated as digital-only", () => {

@@ -86,6 +86,8 @@ export interface LibraryFilters {
 export interface LibraryPage {
   items: FurBinItem[];
   total: number;
+  page: number;
+  limit: number;
 }
 
 export interface PublishShowcaseInput {

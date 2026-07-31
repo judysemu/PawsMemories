@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { MAX_GLB_DOWNLOAD_BYTES, PROVIDER_CONNECT_TIMEOUT_MS, PROVIDER_READ_TIMEOUT_MS } from "./types";
-import { startImageTo3D, pollImageTo3D, isTripoHandle, type TripoJobInput } from "../../tripo";
+import { startImageTo3D, pollImageTo3D, isTripoHandle, TripoError, type TripoJobInput } from "../../tripo";
 
 // ─── Provider Port ──────────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ export interface ModelBuildPollResult {
   done: boolean;
   glbUrl?: string;
   error?: string;
+  failureCode?: string;
   progress?: number;
   capability?: {
     riggable: boolean;
@@ -40,6 +41,54 @@ export interface ModelBuildPollResult {
       | "biped" | "quadruped" | "hexapod" | "octopod"
       | "avian" | "serpentine" | "aquatic" | null;
   };
+}
+
+export type ProviderSubmissionDisposition =
+  | "definitive_rejection"
+  | "safe_retry"
+  | "ambiguous_acceptance";
+
+export class ModelBuildProviderError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public retryable: boolean,
+    public submissionDisposition: ProviderSubmissionDisposition = retryable
+      ? "safe_retry"
+      : "definitive_rejection",
+  ) {
+    super(message);
+    this.name = "ModelBuildProviderError";
+  }
+}
+
+function normalizeTripoError(error: unknown, fallbackCode: string): ModelBuildProviderError {
+  if (!(error instanceof TripoError)) {
+    return new ModelBuildProviderError("Provider operation failed", fallbackCode, false);
+  }
+  if (error.submissionDisposition === "ambiguous_acceptance") {
+    return new ModelBuildProviderError(
+      "Provider submission outcome is unknown",
+      "PROVIDER_SUBMISSION_AMBIGUOUS",
+      false,
+      "ambiguous_acceptance",
+    );
+  }
+  if (error.status === 429 || error.code === 2000) {
+    return new ModelBuildProviderError(
+      "Provider operation was rate limited",
+      "PROVIDER_RATE_LIMITED",
+      true,
+      "safe_retry",
+    );
+  }
+  if (error.status === 401 || error.status === 403) {
+    return new ModelBuildProviderError("Provider authentication failed", "PROVIDER_AUTH_FAILED", false);
+  }
+  if (error.status === 404) {
+    return new ModelBuildProviderError("Provider task was not found", "PROVIDER_TASK_NOT_FOUND", false);
+  }
+  return new ModelBuildProviderError("Provider operation failed", fallbackCode, false);
 }
 
 export interface ModelBuildProvider {
@@ -128,7 +177,12 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
       geometry: input.geometry,
     };
 
-    const taskHandle = await startImageTo3D(tripoInput);
+    let taskHandle: string;
+    try {
+      taskHandle = await startImageTo3D(tripoInput);
+    } catch (error) {
+      throw normalizeTripoError(error, "PROVIDER_SUBMISSION_FAILED");
+    }
 
     return {
       providerTaskHandle: taskHandle,
@@ -141,11 +195,17 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
     if (!isTripoHandle(taskHandle)) {
       throw new Error(`Invalid Tripo handle: ${taskHandle?.slice(0, 20)}`);
     }
-    const result = await pollImageTo3D(taskHandle);
+    let result;
+    try {
+      result = await pollImageTo3D(taskHandle);
+    } catch (error) {
+      throw normalizeTripoError(error, "PROVIDER_POLL_FAILED");
+    }
     return {
       done: result.done,
       glbUrl: result.glbUrl,
       error: result.error,
+      failureCode: result.failureCode,
       progress: result.progress,
       capability: result.capability,
     };

@@ -29,9 +29,9 @@ RUN npm install
 # Copy the rest of the application code (includes bridge/)
 COPY . .
 
-# Expose the Express port and TCP bridge port
+# Publish only the authenticated Express relay. The raw Blender bridge executes
+# arbitrary Python and is intentionally loopback-only inside the container.
 EXPOSE 10000
-EXPOSE 9876
 
 # Start Express relay. server.js owns the Blender TCP bridge lifecycle and
 # autostarts Blender if the bridge is not already reachable.

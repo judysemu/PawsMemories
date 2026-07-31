@@ -446,6 +446,28 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   const [printBusy, setPrintBusy] = useState(false);
   const [printOrder, setPrintOrder] = useState<{ id: string; status: string } | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
+  const designSignature = useMemo(() => JSON.stringify([
+    category,
+    template?.layoutId || "",
+    variation,
+    title,
+    message,
+    photos.map((photo) => photo.id),
+  ]), [category, template?.layoutId, variation, title, message, photos]);
+  const liveDesignSignatureRef = useRef(designSignature);
+  const previousDesignSignatureRef = useRef(designSignature);
+  liveDesignSignatureRef.current = designSignature;
+
+  useEffect(() => {
+    if (previousDesignSignatureRef.current !== designSignature) {
+      // A saved creation is immutable. Any visual edit must detach actions
+      // from that older artifact so email/print can never submit stale art.
+      setResultUrl("");
+      setSavedCreationId(null);
+      setPrintOrder(null);
+    }
+    previousDesignSignatureRef.current = designSignature;
+  }, [designSignature]);
 
   useEffect(() => {
     fetch("/api/pawprints/templates").then((response) => response.json()).then((data) => {
@@ -514,6 +536,7 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
 
   const save = async () => {
     if (!template) return;
+    const submittedDesignSignature = designSignature;
     setBusy(true); setError(""); setResultUrl(""); setSavedCreationId(null);
     try {
       const renderedImage = await renderPawprint({ variation, photos, title: title.trim() || template.name, message: message.trim(), category });
@@ -531,6 +554,11 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "The Pawprint could not be saved.");
+      if (liveDesignSignatureRef.current !== submittedDesignSignature) {
+        await onCreationSaved?.();
+        if (data.user) onUserUpdate(data.user);
+        throw new Error("Your design changed while it was saving. Save the updated design before sending or printing it.");
+      }
       setResultUrl(data.url);
       setSavedCreationId(Number(data.creationId) || null);
       await onCreationSaved?.();

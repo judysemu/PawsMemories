@@ -39,3 +39,11 @@ test("Pawprints export fits the exact title and message inside every template te
 test("Pawprints remains separate from the Animator component tree", () => {
   assert.doesNotMatch(studio, /AnimatorScreen|SceneSequence|AnimationController|onGoToAnimator/);
 });
+
+test("Pawprints email and print actions are bound to the exact saved design revision", () => {
+  assert.match(studio, /const designSignature = useMemo/);
+  assert.match(studio, /previousDesignSignatureRef\.current !== designSignature/);
+  assert.match(studio, /setSavedCreationId\(null\)/);
+  assert.match(studio, /liveDesignSignatureRef\.current !== submittedDesignSignature/);
+  assert.match(studio, /Save the updated design before sending or printing it/);
+});

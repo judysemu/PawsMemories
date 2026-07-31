@@ -20,7 +20,7 @@ import {
 import { authedFetch, createVoiceCloneAsset, fetchAvatars, createTextureJob, rebakeTextureJob, getTextureJob, type TextureJobStatus } from "../api";
 import { AnimatorErrorBoundary } from "../animator/components/AnimatorErrorBoundary";
 import { CREDIT_PRICES } from "../pricing";
-import { WARDROBE_CATALOG, WAGS_EXCLUSIVE_CATALOG } from "../wardrobe/catalog";
+import { FULL_WARDROBE_CATALOG, WARDROBE_CATALOG, WAGS_EXCLUSIVE_CATALOG } from "../wardrobe/catalog";
 import { WardrobeLayer } from "../wardrobe/WardrobeLayer";
 
 /**
@@ -171,11 +171,15 @@ function FidosStylesModel({
     box.getSize(size);
     const center = new THREE.Vector3();
     box.getCenter(center);
-    cloned.position.x -= center.x;
-    cloned.position.z -= center.z;
-    cloned.position.y -= box.min.y;
     const targetHeight = size.y > 1.2 ? 1.55 : 0.85;
     cloned.scale.setScalar(targetHeight / (size.y || 1));
+    cloned.updateMatrixWorld(true);
+    const scaledBox = new THREE.Box3().setFromObject(cloned);
+    scaledBox.getCenter(center);
+    cloned.position.x -= center.x;
+    cloned.position.z -= center.z;
+    cloned.position.y -= scaledBox.min.y;
+    cloned.updateMatrixWorld(true);
     cloned.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -310,6 +314,7 @@ export default function FidosStylesScreen({
 
   // ── Project persistence ────────────────────────────────────────────────────
   const [projectId, setProjectId] = useState<number | null>(null);
+  const [projectLoadedAvatarId, setProjectLoadedAvatarId] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState("Autosaved");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -337,7 +342,7 @@ export default function FidosStylesScreen({
         const sel = Array.isArray(data?.selected) ? data.selected : [];
         setWardrobeIds(
           sel.filter((id: unknown): id is string =>
-            typeof id === "string" && WARDROBE_CATALOG.some((item) => item.id === id)
+            typeof id === "string" && FULL_WARDROBE_CATALOG.some((item) => item.id === id)
           ).slice(0, 15)
         );
       })
@@ -349,26 +354,51 @@ export default function FidosStylesScreen({
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!selectedId) return;
+    let cancelled = false;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setProjectId(null);
+    setProjectLoadedAvatarId(null);
+    setLightMode("warm");
+    setBackground("#f7f3eb");
+    setMicroMesh(false);
+    setSoften(false);
+    setTextureOverrides({});
+    setZoom(100);
+    setTurntable(true);
+    setTurntableSpeed(0.8);
+    setSaveStatus("Loading…");
     authedFetch(`/api/fidos/projects?avatar_id=${selectedId}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (!data) return;
-        setProjectId(data.id ?? null);
-        const s = data.settings_json ?? {};
-        if (s.lightMode) setLightMode(s.lightMode);
-        if (s.background) setBackground(s.background);
-        if (s.microMesh !== undefined) setMicroMesh(s.microMesh);
-        if (s.soften !== undefined) setSoften(s.soften);
-        if (s.textureOverrides) setTextureOverrides(s.textureOverrides);
+      .then(async (r) => {
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(data?.error || "Could not load project.");
+        return data;
       })
-      .catch(() => {/* first-time no project yet, that's fine */});
+      .then((data) => {
+        if (cancelled) return;
+        if (data) {
+          setProjectId(data.id ?? null);
+          const s = data.settings_json ?? {};
+          if (s.lightMode) setLightMode(s.lightMode);
+          if (s.background) setBackground(s.background);
+          if (s.microMesh !== undefined) setMicroMesh(s.microMesh);
+          if (s.soften !== undefined) setSoften(s.soften);
+          if (s.textureOverrides) setTextureOverrides(s.textureOverrides);
+          if (Number.isFinite(s.zoom)) setZoom(s.zoom);
+          if (s.turntable !== undefined) setTurntable(Boolean(s.turntable));
+          if (Number.isFinite(s.turntableSpeed)) setTurntableSpeed(s.turntableSpeed);
+        }
+        setProjectLoadedAvatarId(Number(selectedId));
+        setSaveStatus("Autosaved");
+      })
+      .catch(() => { if (!cancelled) setSaveStatus("Project load failed"); });
+    return () => { cancelled = true; };
   }, [selectedId]);
 
   // ---------------------------------------------------------------------------
   // Auto-save project settings
   // ---------------------------------------------------------------------------
   const scheduleProjectSave = useCallback(() => {
-    if (!selectedId) return;
+    if (!selectedId || projectLoadedAvatarId !== Number(selectedId)) return;
     setSaveStatus("Saving…");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
@@ -386,16 +416,17 @@ export default function FidosStylesScreen({
           projectId ? `/api/fidos/projects/${projectId}` : "/api/fidos/projects",
           { method: projectId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body }
         );
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.error || "Could not save project.");
         if (data?.id && !projectId) setProjectId(data.id);
         setSaveStatus("Autosaved");
       } catch {
         setSaveStatus("Save failed");
       }
     }, 1200);
-  }, [selectedId, lightMode, background, microMesh, soften, textureOverrides, zoom, turntable, turntableSpeed, projectId]);
+  }, [selectedId, projectLoadedAvatarId, lightMode, background, microMesh, soften, textureOverrides, zoom, turntable, turntableSpeed, projectId]);
 
-  useEffect(() => { scheduleProjectSave(); }, [lightMode, background, microMesh, soften, textureOverrides, zoom, turntable, turntableSpeed]);
+  useEffect(() => { scheduleProjectSave(); }, [scheduleProjectSave]);
 
   // ---------------------------------------------------------------------------
   // Derived
@@ -466,7 +497,7 @@ export default function FidosStylesScreen({
     }
   }, [selectedId, rebakeBusy]);
   const light = LIGHT_SETTINGS[lightMode];
-  const selectedWardrobeItems = WARDROBE_CATALOG.filter((item) => wardrobeIds.includes(item.id));
+  const selectedWardrobeItems = FULL_WARDROBE_CATALOG.filter((item) => wardrobeIds.includes(item.id));
   const textureTargetItem = selectedWardrobeItems.find((i) => i.id === textureTarget) ?? selectedWardrobeItems[0] ?? null;
 
   // ---------------------------------------------------------------------------

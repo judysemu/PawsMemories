@@ -26,18 +26,18 @@ export interface ObjectDef {
  * Object catalog. Set `glbUrl` -> public/objects/<kind>.glb and the model
  * renders in place of the procedural placeholder. Record source/author/license
  * for each real asset in public/objects/manifest.json (CC-BY needs visible
- * credit; avoid GPL). All glbUrls point at public/ paths by default; missing
- * files silently fall back to placeholders.
+ * credit; avoid GPL). Until then `glbUrl` stays absent so the browser never
+ * makes a deterministic request for a file that is not in the release.
  */
 export const OBJECT_CATALOG: Record<PetObjectKind, ObjectDef> = {
-  food_bowl: { kind: "food_bowl", label: "Food Bowl", emoji: "🍖", baseScale: 1, fitSize: 0.35, interaction: "eating", glbUrl: "/objects/food_bowl.glb" },
-  water_bowl: { kind: "water_bowl", label: "Water Bowl", emoji: "💧", baseScale: 1, fitSize: 0.35, interaction: "drinking", glbUrl: "/objects/water_bowl.glb" },
-  ball: { kind: "ball", label: "Ball", emoji: "🎾", baseScale: 1, fitSize: 0.25, interaction: "playing", glbUrl: "/objects/ball.glb" },
-  bone: { kind: "bone", label: "Bone", emoji: "🦴", baseScale: 1, fitSize: 0.28, interaction: "playing", glbUrl: "/objects/bone.glb" },
-  chew_toy: { kind: "chew_toy", label: "Chew Toy", emoji: "🧸", baseScale: 1, fitSize: 0.24, interaction: "playing", glbUrl: "/objects/chew_toy.glb" },
-  bed: { kind: "bed", label: "Bed", emoji: "🛏️", baseScale: 1, fitSize: 0.85, interaction: "sleeping", glbUrl: "/objects/bed.glb" },
-  dog_house: { kind: "dog_house", label: "Dog House", emoji: "🏠", baseScale: 1, fitSize: 1.0, interaction: "sleeping", glbUrl: "/objects/dog_house.glb" },
-  hydrant: { kind: "hydrant", label: "Hydrant", emoji: "🚒", baseScale: 1, fitSize: 0.5, interaction: "peeing", glbUrl: "/objects/hydrant.glb" },
+  food_bowl: { kind: "food_bowl", label: "Food Bowl", emoji: "🍖", baseScale: 1, fitSize: 0.35, interaction: "eating" },
+  water_bowl: { kind: "water_bowl", label: "Water Bowl", emoji: "💧", baseScale: 1, fitSize: 0.35, interaction: "drinking" },
+  ball: { kind: "ball", label: "Ball", emoji: "🎾", baseScale: 1, fitSize: 0.25, interaction: "playing" },
+  bone: { kind: "bone", label: "Bone", emoji: "🦴", baseScale: 1, fitSize: 0.28, interaction: "playing" },
+  chew_toy: { kind: "chew_toy", label: "Chew Toy", emoji: "🧸", baseScale: 1, fitSize: 0.24, interaction: "playing" },
+  bed: { kind: "bed", label: "Bed", emoji: "🛏️", baseScale: 1, fitSize: 0.85, interaction: "sleeping" },
+  dog_house: { kind: "dog_house", label: "Dog House", emoji: "🏠", baseScale: 1, fitSize: 1.0, interaction: "sleeping" },
+  hydrant: { kind: "hydrant", label: "Hydrant", emoji: "🚒", baseScale: 1, fitSize: 0.5, interaction: "peeing" },
 };
 
 export const ALL_OBJECT_KINDS: PetObjectKind[] = Object.keys(OBJECT_CATALOG) as PetObjectKind[];

@@ -85,6 +85,10 @@ export default function RequestMemory({ onNavigateBack, onUnlockAchievement }: R
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
 
+  useEffect(() => () => {
+    activeStream?.getTracks().forEach((track) => track.stop());
+  }, [activeStream]);
+
   const selectedTierObj = TIERS.find((t) => t.id === selectedTier)!;
 
   useEffect(() => {

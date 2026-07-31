@@ -41,10 +41,8 @@ for (const name of FIXTURES) {
 // Conventions document
 // ---------------------------------------------------------------------------
 test("CONVENTIONS.md defines canonical coordinate system", () => {
-  const convPath = fs.existsSync(path.join(FIXTURES_DIR, "CONVENTIONS.md")) 
-    ? path.join(FIXTURES_DIR, "CONVENTIONS.md") 
-    : path.join(process.cwd(), "NEED_REVIEW", "CONVENTIONS.md");
-  if (!fs.existsSync(convPath)) return;
+  const convPath = path.join(FIXTURES_DIR, "CONVENTIONS.md");
+  assert.ok(fs.existsSync(convPath), "fixtures/CONVENTIONS.md must exist");
   const text = fs.readFileSync(convPath, "utf-8");
   assert.ok(text.includes("Right-handed"), "Must declare handedness");
   assert.ok(text.includes("Y-up"), "Must declare up axis");
@@ -57,10 +55,8 @@ test("CONVENTIONS.md defines canonical coordinate system", () => {
 // Audit document
 // ---------------------------------------------------------------------------
 test("PHASE0_AUDIT.md documents all normalization paths", () => {
-  const auditPath = fs.existsSync(path.join(FIXTURES_DIR, "..", "PHASE0_AUDIT.md"))
-    ? path.join(FIXTURES_DIR, "..", "PHASE0_AUDIT.md")
-    : path.join(process.cwd(), "NEED_REVIEW", "PHASE0_AUDIT.md");
-  if (!fs.existsSync(auditPath)) return;
+  const auditPath = path.join(FIXTURES_DIR, "..", "PHASE0_AUDIT.md");
+  assert.ok(fs.existsSync(auditPath), "PHASE0_AUDIT.md must exist");
   const text = fs.readFileSync(auditPath, "utf-8");
   assert.ok(text.includes("AvatarModel.tsx"), "Must audit avatar normalization");
   assert.ok(text.includes("ObjectModel.tsx"), "Must audit object normalization");
@@ -245,9 +241,8 @@ describe("Current scale normalization behavior", () => {
 // ---------------------------------------------------------------------------
 // Baseline: verify the current test suite passes
 // ---------------------------------------------------------------------------
-test("Phase 0 baseline: current test count and linter known-good (manual verification required)", () => {
-  // This is a placeholder — the real verification is done by running
-  // `npm run lint` (tsc --noEmit) and `npm run test` before each commit.
-  // The external test at 2026-07-13 confirmed 260 tests passing and tsc clean.
-  assert.ok(true, "Baseline established: 260 tests passing, tsc --noEmit clean on 2026-07-13");
+test("Phase 0 baseline exposes executable lint and test gates", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(FIXTURES_DIR, "..", "package.json"), "utf8"));
+  assert.equal(pkg.scripts.lint, "tsc --noEmit");
+  assert.match(pkg.scripts.test, /tests\/\*\.test\.mjs/);
 });

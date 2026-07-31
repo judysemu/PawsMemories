@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type mysql from "mysql2/promise";
+import { applyWalletClaimInTransaction } from "./wallet";
 
 export const PIPELINE_PROVIDER_RECOVERY_MAX_AGE_MS = 45 * 60 * 1000;
 export const PIPELINE_RIG_RECOVERY_MAX_AGE_MS = 90 * 60 * 1000;
@@ -530,11 +531,15 @@ export class PipelineRigRecoveryStore {
       if (refundAmount > 0) {
         const boundedRefund = Math.min(Math.max(0, Math.trunc(refundAmount)), context.creditsReserved);
         if (boundedRefund > 0) {
-          const [refundResult] = await conn.query(
-            "UPDATE users SET credits = credits + ? WHERE phone = ? AND is_admin = 0",
-            [boundedRefund, context.userPhone],
-          ) as any;
-          refunded = refundResult.affectedRows === 1;
+          const refundKind = status === "failed" ? "generation" : "rig";
+          const reasonCode = status === "failed" ? "generation_job_refund" : "rig_addon_refund";
+          await applyWalletClaimInTransaction(conn, {
+            ownerId: context.userPhone,
+            correlationId: `generation-job:${context.jobId}:${refundKind}:refund`,
+            expected: { delta: boundedRefund, reason: reasonCode },
+            resolve: async () => ({ delta: boundedRefund, reason: reasonCode }),
+          });
+          refunded = true;
         }
       }
       await conn.query(

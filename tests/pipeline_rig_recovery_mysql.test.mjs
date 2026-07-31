@@ -49,6 +49,16 @@ before(async () => {
     credits INT NOT NULL,
     is_admin TINYINT(1) NOT NULL DEFAULT 0
   ) ENGINE=InnoDB`);
+  await pool.query(`CREATE TABLE credit_transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_phone VARCHAR(32) NOT NULL,
+    delta INT NOT NULL,
+    reason VARCHAR(80) NOT NULL,
+    balance_after INT NOT NULL,
+    idempotency_key VARCHAR(190) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_credit_transaction_idempotency (idempotency_key)
+  ) ENGINE=InnoDB`);
   await pool.query(`CREATE TABLE creations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_phone VARCHAR(32) NOT NULL,
@@ -142,6 +152,11 @@ test("provider and rig recovery claims are leased, bounded, and refunded once", 
   const [[finalJob]] = await pool.query("SELECT status, rig_attempt_count, rig_refunded_at, recovery_lease_owner FROM generation_jobs WHERE id = ?", [job.insertId]);
   const [[session]] = await pool.query("SELECT status FROM create_pipeline_sessions WHERE id = 'session-33'");
   assert.equal(user.credits, 155);
+  const [[refundLedger]] = await pool.query(
+    "SELECT COUNT(*) AS c FROM credit_transactions WHERE idempotency_key = ?",
+    [`generation-job:${job.insertId}:rig:refund`],
+  );
+  assert.equal(Number(refundLedger.c), 1);
   assert.equal(finalJob.status, "done_static_fallback");
   assert.equal(finalJob.rig_attempt_count, 2);
   assert.ok(finalJob.rig_refunded_at);
@@ -177,6 +192,11 @@ test("a stale provider job with no model refunds the complete reservation once",
     [job.insertId],
   );
   assert.equal(user.credits, 100);
+  const [[refundLedger]] = await pool.query(
+    "SELECT COUNT(*) AS c FROM credit_transactions WHERE idempotency_key = ?",
+    [`generation-job:${job.insertId}:generation:refund`],
+  );
+  assert.equal(Number(refundLedger.c), 1);
   assert.equal(finalJob.status, "failed");
   assert.ok(finalJob.generation_refunded_at);
   assert.equal(finalJob.rig_refunded_at, null);

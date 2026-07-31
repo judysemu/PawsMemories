@@ -1,13 +1,4 @@
 {
-  "_comment": "Record source + license for every real GLB you drop in this folder. CC-BY entries must be credited in-app; do not use GPL models. Leave an entry blank until you add that file.",
-  "assets": {
-    "food_bowl.glb": { "source_url": "", "author": "", "license": "" },
-    "water_bowl.glb": { "source_url": "", "author": "", "license": "" },
-    "ball.glb": { "source_url": "", "author": "", "license": "" },
-    "bone.glb": { "source_url": "", "author": "", "license": "" },
-    "chew_toy.glb": { "source_url": "", "author": "", "license": "" },
-    "bed.glb": { "source_url": "", "author": "", "license": "" },
-    "dog_house.glb": { "source_url": "", "author": "", "license": "" },
-    "hydrant.glb": { "source_url": "", "author": "", "license": "" }
-  }
+  "_comment": "Only list GLBs that exist in this folder and have reviewed source, author, and license fields. Procedural catalog fallbacks are not assets.",
+  "assets": {}
 }

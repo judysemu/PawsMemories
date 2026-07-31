@@ -94,6 +94,10 @@ export default function EditMemory({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
 
+  useEffect(() => () => {
+    activeStream?.getTracks().forEach((track) => track.stop());
+  }, [activeStream]);
+
   // Vocal dictation state
   const [isDictatingName, setIsDictatingName] = useState(false);
   const [isDictatingBreed, setIsDictatingBreed] = useState(false);
@@ -245,7 +249,7 @@ export default function EditMemory({
 
   const handleSaveToAlbum = async () => {
     if (!isAdmin && credits < CREDIT_PRICES.HD_IMAGE) {
-      setErrorMessage(`Insufficient credits (${CREDIT_PRICES.HD_IMAGE} cr required). Use the daily bonus or share memories to get more credits!`);
+      setErrorMessage(`Insufficient credits (${CREDIT_PRICES.HD_IMAGE} cr required). Use the daily bonus or open the PupCoin store.`);
       return;
     }
 

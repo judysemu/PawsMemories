@@ -115,13 +115,16 @@ export function runScript(script: any, currentTime: number): EvaluatedSequenceSt
 
   const events = Array.isArray(script?.events) ? script.events : [];
   for (const event of events) {
-    if (event.time <= currentTime) {
-      if (event.type === 'camera') latestCamera = event.value;
-      if (event.type === 'light') latestLight = event.value;
-      if (event.type === 'sound') latestSound = event.value;
-      if (event.type === 'weather') latestWeather = event.value;
+    const eventTime = typeof event.startTime === 'number' ? event.startTime : event.time;
+    if (eventTime <= currentTime) {
+      if (event.type === 'camera') latestCamera = event.value ?? { position: event.position, target: event.target, fov: event.fov };
+      if (event.type === 'light') latestLight = event.value ?? { preset: event.preset, intensity: event.intensity };
+      if (event.type === 'sound') latestSound = event.stopTime !== undefined && currentTime >= event.stopTime
+        ? null
+        : event.value ?? { assetId: event.assetId, gain: event.gain, loop: event.loop, stopTime: event.stopTime, fadeSeconds: event.fadeSeconds };
+      if (event.type === 'weather') latestWeather = event.value ?? event.weather;
       if (event.type === 'clip' && event.roleId) {
-        clipTargets[event.roleId] = { name: event.value, blend: event.blend || 0 };
+        clipTargets[event.roleId] = { name: event.value ?? event.clipId, blend: event.blend ?? event.blendSeconds ?? 0 };
       }
     }
   }

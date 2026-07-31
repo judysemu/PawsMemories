@@ -119,6 +119,8 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
 
   const [models, setModels] = useState<ModelLibraryItem[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelLibraryError, setModelLibraryError] = useState("");
+  const [modelLoadAttempt, setModelLoadAttempt] = useState(0);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [targetHeightMm, setTargetHeightMm] = useState(120);
 
@@ -158,6 +160,8 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
     // The model library is authenticated. A signed-out visitor still sees the
     // storefront and its pricing, just not their own printable models.
     if (userProfile.email) {
+      setModelsLoading(true);
+      setModelLibraryError("");
       fetchModelLibrary()
         .then((items) => {
           if (!active) return;
@@ -168,14 +172,18 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
             ? requestedId
             : current ?? printable[0]?.id ?? null);
         })
-        .catch(() => active && setModels([]))
+        .catch((cause: any) => {
+          if (!active) return;
+          setModels([]);
+          setModelLibraryError(cause?.message || "Your model library could not be loaded.");
+        })
         .finally(() => active && setModelsLoading(false));
     } else {
       setModelsLoading(false);
     }
 
     return () => { active = false; };
-  }, [userProfile.email]);
+  }, [userProfile.email, modelLoadAttempt]);
 
   const selectedModel = useMemo(
     () => models.find((item) => item.id === selectedModelId) || null,
@@ -344,6 +352,13 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
             <p className="flex items-center gap-2 text-sm text-on-surface-variant">
               <Loader2 size={16} className="animate-spin" /> Loading your models…
             </p>
+          ) : modelLibraryError ? (
+            <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-4 text-sm text-error">
+              <p className="font-bold">{modelLibraryError}</p>
+              <button type="button" onClick={() => setModelLoadAttempt((value) => value + 1)} className="mt-3 min-h-10 rounded-xl border border-error/40 px-4 text-xs font-black">
+                Retry model library
+              </button>
+            </div>
           ) : models.length === 0 ? (
             <p className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4 text-sm text-on-surface-variant">
               You don't have a finished 3D model yet. Create one and it will appear here ready to print.

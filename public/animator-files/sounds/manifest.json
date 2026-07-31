@@ -1,0 +1,61 @@
+{
+  "version": "1",
+  "assets": [
+    {
+      "id": "composer-chamber-motif",
+      "publicUrl": "/animator-files/sounds/composer-chamber-motif-v1.wav",
+      "mimeType": "audio/wav",
+      "durationSeconds": 4,
+      "sampleRate": 22050,
+      "channels": 1,
+      "sha256": "8c9718d50ee9d3cd57d0b14753e39b345009953485010ca925e9b90739abe29b",
+      "generationMethod": "Deterministic Node PCM synthesis: original short sine-tone chamber motif",
+      "rightsStatus": "owned-generated",
+      "loopSafe": true,
+      "category": "music",
+      "version": "1"
+    },
+    {
+      "id": "naturalist-woodland-ambience",
+      "publicUrl": "/animator-files/sounds/naturalist-woodland-ambience-v1.wav",
+      "mimeType": "audio/wav",
+      "durationSeconds": 4,
+      "sampleRate": 22050,
+      "channels": 1,
+      "sha256": "60335aad126aebbd22de6f4b5f7c9a6f5ff44572ddfbbb70e9f2d3bb2511f42c",
+      "generationMethod": "Deterministic Node PCM synthesis: seeded breeze noise and original bird-like tones",
+      "rightsStatus": "owned-generated",
+      "loopSafe": true,
+      "category": "ambience",
+      "version": "1"
+    },
+    {
+      "id": "novelist-page-pen",
+      "publicUrl": "/animator-files/sounds/novelist-page-pen-v1.wav",
+      "mimeType": "audio/wav",
+      "durationSeconds": 3,
+      "sampleRate": 22050,
+      "channels": 1,
+      "sha256": "bfc7f4370f4d97588efd12faf41f902e29e593c541d0d36d2813ff782f3fb6c8",
+      "generationMethod": "Deterministic Node PCM synthesis: seeded pen strokes and page turn",
+      "rightsStatus": "owned-generated",
+      "loopSafe": false,
+      "category": "foley",
+      "version": "1"
+    },
+    {
+      "id": "healer-lamp-bell",
+      "publicUrl": "/animator-files/sounds/healer-lamp-bell-v1.wav",
+      "mimeType": "audio/wav",
+      "durationSeconds": 3,
+      "sampleRate": 22050,
+      "channels": 1,
+      "sha256": "2e1190b15d44b2e06100b4a7f45466b964c56bd3ed0924efc0e194f30e811657",
+      "generationMethod": "Deterministic Node PCM synthesis: original decaying bell and low lamp hum",
+      "rightsStatus": "owned-generated",
+      "loopSafe": false,
+      "category": "foley",
+      "version": "1"
+    }
+  ]
+}

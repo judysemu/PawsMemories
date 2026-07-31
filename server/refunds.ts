@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
-import { getPool, isUserAdmin, refundCredits } from "../db";
+import { getPool, isUserAdmin } from "../db";
+import { applyWalletClaimInTransaction } from "./wallet";
 import type { AuthedRequest } from "../auth";
 import type { GenerateFn } from "./petClassify";
 import { CREDIT_PRICES } from "../src/pricing";
@@ -51,12 +52,222 @@ function fixedRecommendation(reason: z.infer<typeof ReasonSchema>, cost: number)
   return 0;
 }
 
-async function autoApprovalCount(phone: string) {
-  const [rows] = await getPool().query(
-    `SELECT COUNT(*) AS count FROM refund_reviews
-     WHERE user_phone = ? AND refunded > 0 AND approved_by = 'auto'
-       AND resolved_at >= (NOW() - INTERVAL 30 MINUTE)`, [phone]);
-  return Number((rows as any[])[0]?.count || 0);
+type RefundResolution = { status: "approved" | "pending" | "free_retry" | "manual_review" | "denied" };
+
+export async function resolveRefundReview(input: {
+  reviewId: number;
+  phone: string;
+  reason: z.infer<typeof ReasonSchema>;
+  feedbackText: string | null;
+}): Promise<RefundResolution | null> {
+  const connection = await getPool().getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [rows] = await connection.query(
+      `SELECT * FROM refund_reviews WHERE id = ? AND user_phone = ? LIMIT 1 FOR UPDATE`,
+      [input.reviewId, input.phone],
+    ) as any;
+    const review = Array.isArray(rows) ? rows[0] : null;
+    if (!review) {
+      await connection.rollback();
+      transactionStarted = false;
+      return null;
+    }
+    if (review.reason_code) {
+      await connection.commit();
+      transactionStarted = false;
+      return { status: review.outcome };
+    }
+
+    // Serialize all refund decisions for this owner before evaluating the
+    // rolling auto-approval cap. The grant helper reuses this row lock.
+    const [walletRows] = await connection.query(
+      `SELECT credits FROM users WHERE phone = ? LIMIT 1 FOR UPDATE`,
+      [input.phone],
+    ) as any;
+    if (!Array.isArray(walletRows) || walletRows.length !== 1) throw new Error("Refund owner not found");
+
+    const recommended = fixedRecommendation(input.reason, Number(review.cost_credits));
+    let outcome: RefundResolution["status"] = input.reason === "c_uncanny"
+      ? "free_retry"
+      : input.reason === "e_other" ? "manual_review" : "pending";
+    let refunded = 0;
+    let approvedBy: string | null = null;
+    if (AUTO_REASONS.has(input.reason) && Number(review.match_score) < REVIEW_THRESHOLD) {
+      const [countRows] = await connection.query(
+        `SELECT COUNT(*) AS count FROM refund_reviews
+          WHERE user_phone = ? AND refunded > 0 AND approved_by = 'auto'
+            AND resolved_at >= (NOW() - INTERVAL 30 MINUTE)`,
+        [input.phone],
+      ) as any;
+      if (Number(countRows?.[0]?.count || 0) < AUTO_REFUND_MAX) {
+        refunded = Math.min(recommended, Number(review.cost_credits));
+        if (refunded > 0) {
+          const grant = await applyWalletClaimInTransaction(connection, {
+            ownerId: input.phone,
+            correlationId: `refund-review:${input.reviewId}`,
+            expected: { delta: refunded, reason: "quality_refund" },
+            resolve: async () => ({ delta: refunded, reason: "quality_refund" }),
+          });
+          if (!grant.applied) throw new Error("Refund ledger is inconsistent with review state.");
+          outcome = "approved";
+          approvedBy = "auto";
+        }
+      }
+    }
+    const [updated] = await connection.query(
+      `UPDATE refund_reviews
+          SET reason_code=?, feedback_text=?, outcome=?, recommended_credits=?,
+              refunded=?, approved_by=?, resolved_at=NOW()
+        WHERE id=? AND user_phone=? AND reason_code IS NULL`,
+      [input.reason, input.feedbackText, outcome, recommended, refunded, approvedBy, input.reviewId, input.phone],
+    ) as any;
+    if (updated?.affectedRows !== 1) throw new Error("Refund disposition update failed.");
+    await connection.commit();
+    transactionStarted = false;
+    return { status: outcome };
+  } catch (error) {
+    if (transactionStarted) await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function approveRefundReview(reviewId: number, approvedBy: string): Promise<"approved" | "already_resolved" | "not_found"> {
+  const connection = await getPool().getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [rows] = await connection.query(
+      `SELECT * FROM refund_reviews WHERE id = ? LIMIT 1 FOR UPDATE`,
+      [reviewId],
+    ) as any;
+    const review = Array.isArray(rows) ? rows[0] : null;
+    if (!review) {
+      await connection.rollback();
+      transactionStarted = false;
+      return "not_found";
+    }
+    if (Number(review.refunded) > 0 || review.outcome === "approved" || review.outcome === "denied") {
+      await connection.commit();
+      transactionStarted = false;
+      return "already_resolved";
+    }
+    const amount = Math.min(Math.max(0, Number(review.recommended_credits)), Number(review.cost_credits));
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Refund review has no positive approved amount.");
+    const grant = await applyWalletClaimInTransaction(connection, {
+      ownerId: String(review.user_phone),
+      correlationId: `refund-review:${reviewId}`,
+      expected: { delta: amount, reason: "quality_refund" },
+      resolve: async () => ({ delta: amount, reason: "quality_refund" }),
+    });
+    if (!grant.applied) throw new Error("Refund ledger is inconsistent with review state.");
+    const [updated] = await connection.query(
+      `UPDATE refund_reviews
+          SET refunded=?, outcome='approved', approved_by=?, resolved_at=NOW()
+        WHERE id=? AND refunded=0 AND outcome <> 'denied'`,
+      [amount, approvedBy, reviewId],
+    ) as any;
+    if (updated?.affectedRows !== 1) throw new Error("Refund approval update failed.");
+    await connection.commit();
+    transactionStarted = false;
+    return "approved";
+  } catch (error) {
+    if (transactionStarted) await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function denyRefundReview(
+  reviewId: number,
+  deniedBy: string,
+): Promise<"denied" | "already_resolved" | "not_found"> {
+  const connection = await getPool().getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [rows] = await connection.query(
+      `SELECT outcome, refunded FROM refund_reviews WHERE id = ? LIMIT 1 FOR UPDATE`,
+      [reviewId],
+    ) as any;
+    const review = Array.isArray(rows) ? rows[0] : null;
+    if (!review) {
+      await connection.rollback();
+      transactionStarted = false;
+      return "not_found";
+    }
+    if (Number(review.refunded) > 0 || review.outcome === "approved" || review.outcome === "denied") {
+      await connection.commit();
+      transactionStarted = false;
+      return "already_resolved";
+    }
+    const [updated] = await connection.query(
+      `UPDATE refund_reviews
+          SET outcome='denied', approved_by=?, resolved_at=NOW()
+        WHERE id=? AND refunded=0 AND outcome <> 'approved'`,
+      [deniedBy, reviewId],
+    ) as any;
+    if (updated?.affectedRows !== 1) throw new Error("Refund denial update failed.");
+    await connection.commit();
+    transactionStarted = false;
+    return "denied";
+  } catch (error) {
+    if (transactionStarted) await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function markRefundForManualReview(
+  reviewId: number,
+  phone: string,
+  message: string,
+): Promise<"manual_review" | "already_resolved" | "not_found"> {
+  const connection = await getPool().getConnection();
+  let transactionStarted = false;
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [rows] = await connection.query(
+      `SELECT outcome, refunded, reason_code
+         FROM refund_reviews WHERE id = ? AND user_phone = ? LIMIT 1 FOR UPDATE`,
+      [reviewId, phone],
+    ) as any;
+    const review = Array.isArray(rows) ? rows[0] : null;
+    if (!review) {
+      await connection.rollback();
+      transactionStarted = false;
+      return "not_found";
+    }
+    if (Number(review.refunded) > 0 || review.outcome === "approved" || review.outcome === "denied" || review.reason_code) {
+      await connection.commit();
+      transactionStarted = false;
+      return "already_resolved";
+    }
+    const [updated] = await connection.query(
+      `UPDATE refund_reviews
+          SET reason_code='e_other', feedback_text=?, outcome='manual_review', resolved_at=NOW()
+        WHERE id=? AND user_phone=? AND reason_code IS NULL AND refunded=0`,
+      [message.slice(0, 5000), reviewId, phone],
+    ) as any;
+    if (updated?.affectedRows !== 1) throw new Error("Manual review update failed.");
+    await connection.commit();
+    transactionStarted = false;
+    return "manual_review";
+  } catch (error) {
+    if (transactionStarted) await connection.rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 /** Aggregate-only feedback path. It cannot import or call any credit mutation. */
@@ -163,28 +374,21 @@ refundRouter.post("/refunds/resolve", async (req: AuthedRequest, res) => {
   const reviewId = Number(req.body.reviewId);
   const parsed = ReasonSchema.safeParse(req.body.reasonCode);
   if (!Number.isInteger(reviewId) || !parsed.success) return res.status(400).json({ error: "Invalid review or reason" });
-  const reason = parsed.data;
-  const [rows] = await getPool().query(`SELECT * FROM refund_reviews WHERE id = ? AND user_phone = ? LIMIT 1`, [reviewId, phone]);
-  const review = (rows as any[])[0];
-  if (!review) return res.status(404).json({ error: "Review not found" });
-  if (review.reason_code) return res.json({ status: review.outcome === "approved" ? "approved" : "pending" });
-  const recommended = fixedRecommendation(reason, Number(review.cost_credits));
-  let outcome = reason === "c_uncanny" ? "free_retry" : reason === "e_other" ? "manual_review" : "pending";
-  let refunded = 0;
-  let approvedBy: string | null = null;
-  if (AUTO_REASONS.has(reason) && Number(review.match_score) < REVIEW_THRESHOLD && await autoApprovalCount(phone) < AUTO_REFUND_MAX) {
-    refunded = Math.min(recommended, Number(review.cost_credits));
-    await refundCredits(phone, refunded);
-    outcome = "approved";
-    approvedBy = "auto";
-  }
-  await getPool().query(`UPDATE refund_reviews SET reason_code=?, feedback_text=?, outcome=?, recommended_credits=?, refunded=?, approved_by=?, resolved_at=NOW() WHERE id=? AND user_phone=? AND reason_code IS NULL`, [reason, typeof req.body.feedbackText === "string" ? req.body.feedbackText.slice(0, 5000) : null, outcome, recommended, refunded, approvedBy, reviewId, phone]);
-  return res.json({ status: outcome === "approved" ? "approved" : "pending" });
+  const resolution = await resolveRefundReview({
+    reviewId,
+    phone,
+    reason: parsed.data,
+    feedbackText: typeof req.body.feedbackText === "string" ? req.body.feedbackText.slice(0, 5000) : null,
+  });
+  if (!resolution) return res.status(404).json({ error: "Review not found" });
+  return res.json(resolution);
 });
 
 refundRouter.post("/refunds/contact", async (req: AuthedRequest, res) => {
   const message = typeof req.body.message === "string" ? req.body.message.slice(0, 5000) : "";
-  await getPool().query(`UPDATE refund_reviews SET reason_code='e_other', feedback_text=?, outcome='manual_review', resolved_at=NOW() WHERE id=? AND user_phone=?`, [message, Number(req.body.reviewId), req.user!.phone]);
+  const result = await markRefundForManualReview(Number(req.body.reviewId), req.user!.phone, message);
+  if (result === "not_found") return res.status(404).json({ error: "Review not found" });
+  if (result === "already_resolved") return res.status(409).json({ error: "Already resolved" });
   return res.json({ status: "manual_review" });
 });
 
@@ -196,17 +400,16 @@ refundRouter.get("/admin/refunds", async (req: AuthedRequest, res) => {
 
 refundRouter.post("/admin/refunds/:id/approve", async (req: AuthedRequest, res) => {
   if (!(await isUserAdmin(req.user!.phone))) return res.status(403).json({ error: "Admin only" });
-  const [rows] = await getPool().query(`SELECT * FROM refund_reviews WHERE id=? LIMIT 1`, [Number(req.params.id)]);
-  const review = (rows as any[])[0];
-  if (!review || review.refunded > 0) return res.status(409).json({ error: "Already resolved" });
-  const amount = Math.min(Math.max(0, Number(review.recommended_credits)), Number(review.cost_credits));
-  await refundCredits(review.user_phone, amount);
-  await getPool().query(`UPDATE refund_reviews SET refunded=?, outcome='approved', approved_by=?, resolved_at=NOW() WHERE id=? AND refunded=0`, [amount, req.user!.phone, review.id]);
+  const result = await approveRefundReview(Number(req.params.id), req.user!.phone);
+  if (result === "not_found") return res.status(404).json({ error: "Review not found" });
+  if (result === "already_resolved") return res.status(409).json({ error: "Already resolved" });
   return res.json({ status: "approved" });
 });
 
 refundRouter.post("/admin/refunds/:id/deny", async (req: AuthedRequest, res) => {
   if (!(await isUserAdmin(req.user!.phone))) return res.status(403).json({ error: "Admin only" });
-  await getPool().query(`UPDATE refund_reviews SET outcome='denied', approved_by=?, resolved_at=NOW() WHERE id=? AND refunded=0`, [req.user!.phone, Number(req.params.id)]);
+  const result = await denyRefundReview(Number(req.params.id), req.user!.phone);
+  if (result === "not_found") return res.status(404).json({ error: "Review not found" });
+  if (result === "already_resolved") return res.status(409).json({ error: "Already resolved" });
   return res.json({ status: "denied" });
 });

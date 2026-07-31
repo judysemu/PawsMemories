@@ -146,9 +146,10 @@ async function main() {
     platformId = idOf(p);
     console.log(`   ✔ Created. publicId: ${platformId}`);
     if (p?.webhookSecret) {
-      // Printed once by the API. We have no webhook handler yet, but losing
-      // this means refreshing the secret later, so surface it.
-      console.log(`   ℹ webhookSecret (store securely, shown once): ${p.webhookSecret}`);
+      // Never emit provider secrets to terminals, CI logs, or agent traces.
+      // There is no Slant webhook handler yet, so operators should rotate and
+      // store a secret through the provider dashboard when that route exists.
+      console.log("   ℹ A webhook secret was issued but intentionally not displayed. Rotate it when webhook support is enabled.");
     }
   } else {
     console.log(`\n   ⚠ No platform named "${PLATFORM.name}".`);

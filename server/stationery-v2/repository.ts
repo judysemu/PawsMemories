@@ -262,6 +262,46 @@ export class MySqlStationeryV2Repository implements StationeryApiRepositoryPort 
         await connection.commit();
         return { order: existing, created: false };
       }
+      const [paymentRows]: any = await connection.query(
+        `SELECT payment_uuid, owner_id, state, fulfillment_provider, provider_sku,
+                unit_amount_minor, quantity, amount_minor, currency, confirmed_at,
+                evidence_hash, consumed_local_order_uuid
+           FROM stationery_payment_evidence
+          WHERE payment_uuid = ? AND owner_id = ?
+          LIMIT 1 FOR UPDATE`,
+        [input.paymentEvidence.paymentUuid, input.ownerId],
+      );
+      const paymentRow = paymentRows[0];
+      if (!paymentRow || paymentRow.state !== "paid" || !paymentRow.confirmed_at) {
+        throw new Error("PAYMENT_REQUIRED");
+      }
+      if (paymentRow.consumed_local_order_uuid) {
+        throw new Error("PAYMENT_ALREADY_CONSUMED");
+      }
+      const lockedPayment = PaymentEvidenceSchema.parse({
+        paymentUuid: String(paymentRow.payment_uuid),
+        ownerId: String(paymentRow.owner_id),
+        state: paymentRow.state,
+        fulfillmentProvider: paymentRow.fulfillment_provider,
+        providerSku: String(paymentRow.provider_sku),
+        unitAmountMinor: Number(paymentRow.unit_amount_minor),
+        quantity: Number(paymentRow.quantity),
+        amountMinor: Number(paymentRow.amount_minor),
+        currency: String(paymentRow.currency),
+        confirmedAt: toIso(paymentRow.confirmed_at),
+        evidenceHash: String(paymentRow.evidence_hash),
+      });
+      if (lockedPayment.paymentUuid !== input.paymentEvidence.paymentUuid
+        || lockedPayment.ownerId !== input.ownerId
+        || lockedPayment.fulfillmentProvider !== input.manifest.provider
+        || lockedPayment.providerSku !== input.manifest.providerSku
+        || lockedPayment.quantity !== input.manifest.quantity
+        || lockedPayment.amountMinor !== lockedPayment.unitAmountMinor * lockedPayment.quantity
+        || lockedPayment.evidenceHash !== input.paymentEvidence.evidenceHash
+        || lockedPayment.amountMinor !== input.paymentEvidence.amountMinor
+        || lockedPayment.currency !== input.paymentEvidence.currency) {
+        throw new Error("PAYMENT_BINDING_MISMATCH");
+      }
       const [jobRows]: any = await connection.query(
         "SELECT id FROM stationery_render_jobs WHERE job_uuid = ? AND owner_id = ? AND state = 'ready' LIMIT 1 FOR SHARE",
         [input.renderJobUuid, input.ownerId],
@@ -280,7 +320,7 @@ export class MySqlStationeryV2Repository implements StationeryApiRepositoryPort 
           input.requestHash,
           JSON.stringify(input.manifest),
           input.manifest.manifestHash,
-          JSON.stringify(input.paymentEvidence),
+          JSON.stringify(lockedPayment),
           toSqlDate(input.createdAt),
         ],
       );
@@ -310,6 +350,13 @@ export class MySqlStationeryV2Repository implements StationeryApiRepositoryPort 
           toSqlDate(snapshot.updatedAt),
         ],
       );
+      const [consumeResult]: any = await connection.query(
+        `UPDATE stationery_payment_evidence
+            SET consumed_local_order_uuid = ?, updated_at = ?
+          WHERE payment_uuid = ? AND owner_id = ? AND consumed_local_order_uuid IS NULL`,
+        [input.localOrderUuid, toSqlDate(input.createdAt), lockedPayment.paymentUuid, input.ownerId],
+      );
+      if (Number(consumeResult.affectedRows) !== 1) throw new Error("PAYMENT_ALREADY_CONSUMED");
       const created = await findPrintOrderByUuid(connection, input.localOrderUuid, input.ownerId);
       if (!created) throw new Error("PRINT_ORDER_INSERT_FAILED");
       await connection.commit();

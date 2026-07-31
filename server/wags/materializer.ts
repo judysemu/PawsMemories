@@ -27,12 +27,22 @@ import sharp from "sharp";
 
 /** Slots whose deliverable is a generated 2D image asset. */
 const GENERATIVE_2D_SLOTS = new Set([
-  "sticker_1", "sticker_2", "sticker_3", "sticker_4", "sticker_5",
-  "seasonal", "pawprint",
+  "sticker_1",
+  "sticker_2",
+  "sticker_3",
+  "sticker_4",
+  "sticker_5",
+  "seasonal",
+  "pawprint",
 ]);
 
 /** Slots reserved for the BO-5 spatial-generator executor (3D). Not 2D-generative. */
-const FUTURE_3D_SLOTS = new Set(["accessory", "accessory_2", "accessory_3", "minimodel"]);
+const FUTURE_3D_SLOTS = new Set([
+  "accessory",
+  "accessory_2",
+  "accessory_3",
+  "minimodel",
+]);
 
 export function isGenerativeSlot(slot: string): boolean {
   return GENERATIVE_2D_SLOTS.has(slot);
@@ -63,11 +73,16 @@ export interface PlanItemLike {
  * background (verified afterward — the prompt alone is not trusted);
  * seasonal and pawprint produce full-bleed art.
  */
-export function buildSlotPrompt(item: PlanItemLike, ctx: SlotPromptContext): string {
+export function buildSlotPrompt(
+  item: PlanItemLike,
+  ctx: SlotPromptContext,
+): string {
   const subject = ctx.petName
     ? `a ${ctx.breed || ctx.species} named ${ctx.petName}`
     : `a ${ctx.breed || ctx.species}`;
-  const palette = item.colors?.length ? ` Palette: ${item.colors.join(", ")}.` : "";
+  const palette = item.colors?.length
+    ? ` Palette: ${item.colors.join(", ")}.`
+    : "";
   const base = `${item.title}. ${item.description}`.slice(0, 600);
 
   if (item.slot.startsWith("sticker_")) {
@@ -104,13 +119,18 @@ export async function verifyStickerTransparency(
   try {
     const image = sharp(pngBuffer);
     const metadata = await image.metadata();
-    if (!metadata.hasAlpha) return { ok: false, reason: "STICKER_NO_ALPHA_CHANNEL" };
+    if (!metadata.hasAlpha)
+      return { ok: false, reason: "STICKER_NO_ALPHA_CHANNEL" };
     const stats = await image.stats();
     const alpha = stats.channels[stats.channels.length - 1];
-    if (!alpha || alpha.min >= 250) return { ok: false, reason: "STICKER_ALPHA_OPAQUE" };
+    if (!alpha || alpha.min >= 250)
+      return { ok: false, reason: "STICKER_ALPHA_OPAQUE" };
     return { ok: true };
   } catch (err: any) {
-    return { ok: false, reason: `STICKER_DECODE_FAILED: ${String(err?.message || err).slice(0, 120)}` };
+    return {
+      ok: false,
+      reason: `STICKER_DECODE_FAILED: ${String(err?.message || err).slice(0, 120)}`,
+    };
   }
 }
 
@@ -159,114 +179,162 @@ export async function materializeBoxAssets(
   deps: MaterializerDeps,
   boxId: number,
 ): Promise<MaterializeResult> {
-  const verify = deps.verifySticker ?? verifyStickerTransparency;
+  const connection = await pool.getConnection();
+  const lockName = `wags-materialize:${boxId}`;
+  let lockHeld = false;
+  try {
+    // A MySQL advisory lock spans the provider calls without holding a row
+    // transaction open. It is connection-scoped and automatically released if
+    // the process dies, preventing concurrent duplicate image generation.
+    const [lockRows] = (await connection.query(
+      `SELECT GET_LOCK(?, 0) AS acquired`,
+      [lockName],
+    )) as any;
+    lockHeld = Number(lockRows?.[0]?.acquired) === 1;
+    if (!lockHeld)
+      throw new Error(`Box ${boxId} is already being materialized.`);
 
-  const [boxRows] = await pool.query(
-    `SELECT b.id, b.status, b.plan_json, s.species, s.tier
+    const verify = deps.verifySticker ?? verifyStickerTransparency;
+
+    const [boxRows] = (await connection.query(
+      `SELECT b.id, b.status, b.plan_json, s.species, s.tier
      FROM wardrobe_wags_boxes b
      JOIN wardrobe_wags_subscriptions s ON s.id = b.subscription_id
      WHERE b.id = ? LIMIT 1`,
-    [boxId],
-  ) as any;
-  const box = boxRows?.[0];
-  if (!box) throw new Error(`Box ${boxId} not found.`);
-  if (!["approved", "delivered", "delivered_flagged"].includes(String(box.status))) {
-    throw new Error(`Box ${boxId} is not approved (status=${box.status}).`);
-  }
+      [boxId],
+    )) as any;
+    const box = boxRows?.[0];
+    if (!box) throw new Error(`Box ${boxId} not found.`);
+    if (
+      !["approved", "delivered", "delivered_flagged"].includes(
+        String(box.status),
+      )
+    ) {
+      throw new Error(`Box ${boxId} is not approved (status=${box.status}).`);
+    }
 
-  const plan = box.plan_json
-    ? (typeof box.plan_json === "string" ? JSON.parse(box.plan_json) : box.plan_json)
-    : null;
-  const planItems: PlanItemLike[] = Array.isArray(plan?.items) ? plan.items : [];
-  const ctx: SlotPromptContext = {
-    species: String(box.species || "dog"),
-    breed: plan?.pet_breed ?? null,
-    petName: plan?.pet_name ?? null,
-    season: String(plan?.season || "current season"),
-    theme: String(plan?.theme || "monthly surprise"),
-  };
+    const plan = box.plan_json
+      ? typeof box.plan_json === "string"
+        ? JSON.parse(box.plan_json)
+        : box.plan_json
+      : null;
+    const planItems: PlanItemLike[] = Array.isArray(plan?.items)
+      ? plan.items
+      : [];
+    const ctx: SlotPromptContext = {
+      species: String(box.species || "dog"),
+      breed: plan?.pet_breed ?? null,
+      petName: plan?.pet_name ?? null,
+      season: String(plan?.season || "current season"),
+      theme: String(plan?.theme || "monthly surprise"),
+    };
 
-  const [itemRows] = await pool.query(
-    `SELECT id, slot, title, description, asset_status
+    const [itemRows] = (await connection.query(
+      `SELECT id, slot, title, description, asset_status
      FROM wardrobe_wags_box_items WHERE box_id = ? ORDER BY id`,
-    [boxId],
-  ) as any;
-  const items: BoxItemRow[] = itemRows || [];
-  if (items.length === 0) throw new Error(`Box ${boxId} has no delivered items to materialize.`);
+      [boxId],
+    )) as any;
+    const items: BoxItemRow[] = itemRows || [];
+    if (items.length === 0)
+      throw new Error(`Box ${boxId} has no delivered items to materialize.`);
 
-  const unfinishedGenerativeItems = items.filter(
-    (item) => isGenerativeSlot(item.slot) && item.asset_status !== "generated",
-  );
-  if (String(box.tier) === "plus" && unfinishedGenerativeItems.length > 0) {
-    throw new Error(
-      "WAGS_PLUS_IMAGE_BUDGET_ATOMICITY_REQUIRED: Plus asset generation remains disabled until all seven image calls can be reserved atomically.",
+    const unfinishedGenerativeItems = items.filter(
+      (item) =>
+        isGenerativeSlot(item.slot) && item.asset_status !== "generated",
     );
-  }
+    if (String(box.tier) === "plus" && unfinishedGenerativeItems.length > 0) {
+      throw new Error(
+        "WAGS_PLUS_IMAGE_BUDGET_ATOMICITY_REQUIRED: Plus asset generation remains disabled until all seven image calls can be reserved atomically.",
+      );
+    }
 
-  let generated = 0;
-  let failed = 0;
-  let skipped = 0;
+    let generated = 0;
+    let failed = 0;
+    let skipped = 0;
 
-  for (const item of items) {
-    if (!isGenerativeSlot(item.slot)) { skipped += 1; continue; }
-    if (item.asset_status === "generated") { skipped += 1; continue; }
-
-    await pool.query(
-      `UPDATE wardrobe_wags_box_items SET asset_status = 'pending', asset_error = NULL WHERE id = ?`,
-      [item.id],
-    );
-
-    try {
-      const planItem = planItems.find((p) => p.slot === item.slot)
-        ?? { slot: item.slot, title: item.title, description: item.description };
-      const prompt = buildSlotPrompt(planItem, ctx);
-      const dataUrl = await deps.generateImage(prompt, `wags:${item.slot}`);
-      if (!dataUrl) throw new Error("IMAGE_GENERATION_EMPTY");
-
-      if (item.slot.startsWith("sticker_")) {
-        const buffer = dataUrlToPngBuffer(dataUrl);
-        if (!buffer) throw new Error("STICKER_NOT_DECODABLE");
-        const gate = await verify(buffer);
-        if (!gate.ok) throw new Error(gate.reason || "STICKER_ALPHA_GATE_FAILED");
+    for (const item of items) {
+      if (!isGenerativeSlot(item.slot)) {
+        skipped += 1;
+        continue;
+      }
+      if (item.asset_status === "generated") {
+        skipped += 1;
+        continue;
       }
 
-      const assetUrl = await deps.uploadImage(dataUrl);
-      await pool.query(
-        `UPDATE wardrobe_wags_box_items
+      await connection.query(
+        `UPDATE wardrobe_wags_box_items SET asset_status = 'pending', asset_error = NULL WHERE id = ?`,
+        [item.id],
+      );
+
+      try {
+        const planItem = planItems.find((p) => p.slot === item.slot) ?? {
+          slot: item.slot,
+          title: item.title,
+          description: item.description,
+        };
+        const prompt = buildSlotPrompt(planItem, ctx);
+        const dataUrl = await deps.generateImage(prompt, `wags:${item.slot}`);
+        if (!dataUrl) throw new Error("IMAGE_GENERATION_EMPTY");
+
+        if (item.slot.startsWith("sticker_")) {
+          const buffer = dataUrlToPngBuffer(dataUrl);
+          if (!buffer) throw new Error("STICKER_NOT_DECODABLE");
+          const gate = await verify(buffer);
+          if (!gate.ok)
+            throw new Error(gate.reason || "STICKER_ALPHA_GATE_FAILED");
+        }
+
+        const assetUrl = await deps.uploadImage(dataUrl);
+        await connection.query(
+          `UPDATE wardrobe_wags_box_items
          SET asset_status = 'generated', asset_url = ?, asset_error = NULL,
              asset_generated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [assetUrl, item.id],
-      );
-      generated += 1;
-    } catch (err: any) {
-      failed += 1;
-      await pool.query(
-        `UPDATE wardrobe_wags_box_items
+          [assetUrl, item.id],
+        );
+        generated += 1;
+      } catch (err: any) {
+        failed += 1;
+        await connection.query(
+          `UPDATE wardrobe_wags_box_items
          SET asset_status = 'failed', asset_error = ? WHERE id = ?`,
-        [String(err?.message || err).slice(0, 255), item.id],
-      );
+          [String(err?.message || err).slice(0, 255), item.id],
+        );
+      }
     }
-  }
 
-  // The box is deliverable only when zero generative slots remain unfinished.
-  const [pendingRows] = await pool.query(
-    `SELECT COUNT(*) AS n FROM wardrobe_wags_box_items
+    // The box is deliverable only when zero generative slots remain unfinished.
+    const [pendingRows] = (await connection.query(
+      `SELECT COUNT(*) AS n FROM wardrobe_wags_box_items
      WHERE box_id = ? AND asset_status IN ('pending','failed')`,
-    [boxId],
-  ) as any;
-  const unfinished = Number(pendingRows?.[0]?.n || 0);
+      [boxId],
+    )) as any;
+    const unfinished = Number(pendingRows?.[0]?.n || 0);
 
-  let delivered = false;
-  if (unfinished === 0 && String(box.status) === "approved") {
-    await pool.query(
-      `UPDATE wardrobe_wags_boxes
+    let delivered = false;
+    if (unfinished === 0 && String(box.status) === "approved") {
+      await connection.query(
+        `UPDATE wardrobe_wags_boxes
        SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status = 'approved'`,
-      [boxId],
-    );
-    delivered = true;
-  }
+        [boxId],
+      );
+      delivered = true;
+    }
 
-  return { boxId, generated, failed, skipped, delivered: delivered || unfinished === 0 };
+    return {
+      boxId,
+      generated,
+      failed,
+      skipped,
+      delivered: delivered || unfinished === 0,
+    };
+  } finally {
+    if (lockHeld)
+      await connection
+        .query(`SELECT RELEASE_LOCK(?)`, [lockName])
+        .catch(() => {});
+    connection.release();
+  }
 }

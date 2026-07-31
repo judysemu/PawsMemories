@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 39;
+export const CURRENT_SCHEMA_VERSION = 44;
 
 export interface Migration {
   version: number;
@@ -1967,6 +1967,266 @@ export const MIGRATIONS: Migration[] = [
 
       `SELECT COUNT(*) INTO @fk_exists FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pet_glb_orders' AND CONSTRAINT_NAME = 'fk_pet_glb_order_final_customer_version'`,
       `SET @stmt = IF(@fk_exists = 0, 'ALTER TABLE pet_glb_orders ADD CONSTRAINT fk_pet_glb_order_final_customer_version FOREIGN KEY (asset_id, final_customer_version_id) REFERENCES asset_versions(asset_id, id) ON DELETE RESTRICT', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 40,
+    name: "model_build_durability_recovery",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_jobs' AND COLUMN_NAME = 'refund_pending_at'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_jobs ADD COLUMN refund_pending_at TIMESTAMP NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_jobs' AND COLUMN_NAME = 'refund_attempts'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_jobs ADD COLUMN refund_attempts INT NOT NULL DEFAULT 0', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_jobs' AND COLUMN_NAME = 'last_refund_error_code'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_jobs ADD COLUMN last_refund_error_code VARCHAR(120) NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_attempts' AND COLUMN_NAME = 'submission_claimed_at'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_attempts ADD COLUMN submission_claimed_at TIMESTAMP NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_attempts' AND COLUMN_NAME = 'recovery_required_at'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_attempts ADD COLUMN recovery_required_at TIMESTAMP NULL', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_attempts' AND COLUMN_NAME = 'handle_persist_attempts'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE model_build_attempts ADD COLUMN handle_persist_attempts INT NOT NULL DEFAULT 0', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_jobs' AND INDEX_NAME = 'idx_model_build_refund_sweep'`,
+      `SET @stmt = IF(@idx_exists = 0, 'ALTER TABLE model_build_jobs ADD INDEX idx_model_build_refund_sweep (state, refund_correlation_id, refund_pending_at)', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_build_attempts' AND INDEX_NAME = 'idx_model_build_recovery_sweep'`,
+      `SET @stmt = IF(@idx_exists = 0, 'ALTER TABLE model_build_attempts ADD INDEX idx_model_build_recovery_sweep (state, provider_task_handle, recovery_required_at)', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 41,
+    name: "reference_source_attempt_allowance",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reference_sessions' AND COLUMN_NAME = 'source_attempt_count'`,
+      `SET @stmt = IF(@col_exists = 0, 'ALTER TABLE reference_sessions ADD COLUMN source_attempt_count INT NOT NULL DEFAULT 0 AFTER approved_attempt_id', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      // Existing sessions must keep their already-consumed allowance. Only an
+      // explicit, owner-authorized source replacement may reset this counter.
+      `UPDATE reference_sessions SET source_attempt_count = retry_count WHERE source_attempt_count = 0 AND retry_count > 0`,
+
+      `SELECT COUNT(*) INTO @check_exists FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reference_sessions' AND CONSTRAINT_NAME = 'chk_ref_source_attempt_count'`,
+      `SET @stmt = IF(@check_exists = 0, 'ALTER TABLE reference_sessions ADD CONSTRAINT chk_ref_source_attempt_count CHECK (source_attempt_count >= 0 AND source_attempt_count <= retry_count)', 'SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 42,
+    name: "snapgen_durable_purchase_orders",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS sg_tiers (
+        code VARCHAR(24) PRIMARY KEY,
+        name VARCHAR(64) NOT NULL,
+        price_cents INT NOT NULL,
+        face_limit INT NOT NULL DEFAULT 10000,
+        pbr TINYINT(1) NOT NULL DEFAULT 0,
+        rig TINYINT(1) NOT NULL DEFAULT 0,
+        texture_res VARCHAR(8) NOT NULL DEFAULT '1K',
+        sort_order INT NOT NULL DEFAULT 0,
+        active TINYINT(1) NOT NULL DEFAULT 1
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `INSERT INTO sg_tiers (code, name, price_cents, face_limit, pbr, rig, texture_res, sort_order) VALUES
+        ('basic','Basic',299,10000,0,0,'1K',1),
+        ('standard','Standard',699,30000,0,0,'2K',2),
+        ('detailed','Detailed',1499,80000,1,0,'4K',3),
+        ('pro','Pro',2999,120000,1,1,'4K',4)
+       ON DUPLICATE KEY UPDATE name=VALUES(name), price_cents=VALUES(price_cents), face_limit=VALUES(face_limit), pbr=VALUES(pbr), rig=VALUES(rig), texture_res=VALUES(texture_res), sort_order=VALUES(sort_order)`,
+      `CREATE TABLE IF NOT EXISTS sg_categories (
+        code VARCHAR(24) PRIMARY KEY,
+        name VARCHAR(64) NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        active TINYINT(1) NOT NULL DEFAULT 1
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `INSERT INTO sg_categories (code, name, sort_order) VALUES
+        ('people','People',1),('pets','Pets & Animals',2),('vehicles','Vehicles',3),
+        ('objects','Objects & Props',4),('landmarks','Landmarks & Scenes',5),('figurines','Toys & Figurines',6)
+       ON DUPLICATE KEY UPDATE name=VALUES(name), sort_order=VALUES(sort_order)`,
+      `CREATE TABLE IF NOT EXISTS sg_orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_key VARCHAR(32) NOT NULL,
+        tier_code VARCHAR(24) NOT NULL,
+        category_code VARCHAR(24) NOT NULL,
+        status ENUM('pending','submitting','processing','recovery_required','completed','failed') NOT NULL DEFAULT 'pending',
+        tripo_op VARCHAR(128) NULL,
+        source_image_url TEXT NULL,
+        options_json JSON NULL,
+        purchase_token VARCHAR(512) NULL,
+        purchase_token_sha256 CHAR(64) NULL,
+        request_hash CHAR(64) NOT NULL,
+        price_cents INT NOT NULL,
+        currency CHAR(3) NOT NULL DEFAULT 'USD',
+        is_remake TINYINT(1) NOT NULL DEFAULT 0,
+        original_order_id INT NULL,
+        model_url TEXT NULL,
+        progress INT NOT NULL DEFAULT 0,
+        error TEXT NULL,
+        error_code VARCHAR(64) NULL,
+        submission_attempted_at DATETIME(3) NULL,
+        provider_handle_persisted_at DATETIME(3) NULL,
+        provider_completed_at DATETIME(3) NULL,
+        storage_persisted_at DATETIME(3) NULL,
+        poll_lease_owner VARCHAR(64) NULL,
+        poll_lease_expires_at DATETIME(3) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_sg_order_purchase_hash (purchase_token_sha256),
+        INDEX idx_sg_orders_user (user_key),
+        INDEX idx_sg_orders_status (status, poll_lease_expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS sg_purchases (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_key VARCHAR(32) NOT NULL,
+        platform ENUM('play','appstore','dev') NOT NULL DEFAULT 'play',
+        product_id VARCHAR(128) NOT NULL,
+        purchase_token VARCHAR(512) NOT NULL,
+        purchase_token_sha256 CHAR(64) NULL,
+        price_cents INT NOT NULL DEFAULT 0,
+        currency CHAR(3) NULL,
+        consumed TINYINT(1) NOT NULL DEFAULT 0,
+        consumed_order_id INT NULL,
+        raw_json JSON NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_sg_purchase_token (purchase_token(191)),
+        UNIQUE KEY uniq_sg_purchase_hash (purchase_token_sha256),
+        INDEX idx_sg_purchases_user (user_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='purchase_token_sha256'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN purchase_token_sha256 CHAR(64) NULL AFTER purchase_token','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='request_hash'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN request_hash CHAR(64) NULL AFTER purchase_token_sha256','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='currency'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN currency CHAR(3) NOT NULL DEFAULT ''USD'' AFTER price_cents','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='error_code'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN error_code VARCHAR(64) NULL AFTER error','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      ...["submission_attempted_at", "provider_handle_persisted_at", "provider_completed_at", "storage_persisted_at"].flatMap((column) => [
+        `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='${column}'`,
+        `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN ${column} DATETIME(3) NULL','SELECT 1')`,
+        `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      ]),
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='poll_lease_owner'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN poll_lease_owner VARCHAR(64) NULL','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND COLUMN_NAME='poll_lease_expires_at'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_orders ADD COLUMN poll_lease_expires_at DATETIME(3) NULL','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `ALTER TABLE sg_orders MODIFY COLUMN status ENUM('pending','submitting','processing','recovery_required','completed','failed') NOT NULL DEFAULT 'pending'`,
+      `UPDATE sg_orders duplicate_order
+         JOIN (
+           SELECT purchase_token, MIN(id) AS canonical_id
+             FROM (SELECT id, purchase_token FROM sg_orders) legacy_order_snapshot
+            WHERE purchase_token IS NOT NULL
+            GROUP BY purchase_token
+           HAVING COUNT(*) > 1
+         ) duplicates
+           ON duplicate_order.purchase_token = duplicates.purchase_token
+          AND duplicate_order.id <> duplicates.canonical_id
+          SET duplicate_order.purchase_token = NULL,
+              duplicate_order.status = 'recovery_required',
+              duplicate_order.error_code = 'DUPLICATE_LEGACY_TOKEN',
+              duplicate_order.error = 'Legacy duplicate purchase token requires reconciliation.'`,
+      `UPDATE sg_orders SET purchase_token_sha256=SHA2(purchase_token,256) WHERE purchase_token IS NOT NULL AND purchase_token_sha256 IS NULL`,
+      `UPDATE sg_orders SET request_hash=SHA2(CONCAT('legacy:',id),256) WHERE request_hash IS NULL`,
+      `ALTER TABLE sg_orders MODIFY COLUMN request_hash CHAR(64) NOT NULL`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_orders' AND INDEX_NAME='uniq_sg_order_purchase_hash'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE sg_orders ADD UNIQUE KEY uniq_sg_order_purchase_hash (purchase_token_sha256)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_purchases' AND COLUMN_NAME='purchase_token_sha256'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_purchases ADD COLUMN purchase_token_sha256 CHAR(64) NULL AFTER purchase_token','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_purchases' AND COLUMN_NAME='currency'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_purchases ADD COLUMN currency CHAR(3) NULL AFTER price_cents','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_purchases' AND COLUMN_NAME='consumed_order_id'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE sg_purchases ADD COLUMN consumed_order_id INT NULL AFTER consumed','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `UPDATE sg_purchases SET purchase_token_sha256=SHA2(purchase_token,256) WHERE purchase_token_sha256 IS NULL`,
+      `UPDATE sg_purchases purchase
+         JOIN sg_orders purchase_order
+           ON purchase_order.purchase_token_sha256 = purchase.purchase_token_sha256
+          SET purchase.consumed_order_id = purchase_order.id
+        WHERE purchase.consumed = 1 AND purchase.consumed_order_id IS NULL`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sg_purchases' AND INDEX_NAME='uniq_sg_purchase_hash'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE sg_purchases ADD UNIQUE KEY uniq_sg_purchase_hash (purchase_token_sha256)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 43,
+    name: "generation_job_exact_once_refunds",
+    skipWhenTableMissing: "generation_jobs",
+    statements: [
+      `SELECT COUNT(*) INTO @generation_jobs_exists FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs'`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND COLUMN_NAME='generation_refund_pending_at'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @col_exists=0,'ALTER TABLE generation_jobs ADD COLUMN generation_refund_pending_at DATETIME(3) NULL AFTER generation_refunded_at','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND COLUMN_NAME='generation_refund_attempts'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @col_exists=0,'ALTER TABLE generation_jobs ADD COLUMN generation_refund_attempts INT NOT NULL DEFAULT 0 AFTER generation_refund_pending_at','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND COLUMN_NAME='generation_refund_error'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @col_exists=0,'ALTER TABLE generation_jobs ADD COLUMN generation_refund_error VARCHAR(255) NULL AFTER generation_refund_attempts','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND INDEX_NAME='idx_generation_refund_sweep'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @idx_exists=0,'ALTER TABLE generation_jobs ADD INDEX idx_generation_refund_sweep (status, generation_refund_pending_at, generation_refunded_at)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND COLUMN_NAME='credit_debit_correlation_id'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @col_exists=0,'ALTER TABLE generation_jobs ADD COLUMN credit_debit_correlation_id VARCHAR(190) NULL AFTER credits_reserved','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='generation_jobs' AND INDEX_NAME='uniq_generation_credit_debit'`,
+      `SET @stmt=IF(@generation_jobs_exists=1 AND @idx_exists=0,'ALTER TABLE generation_jobs ADD UNIQUE KEY uniq_generation_credit_debit (credit_debit_correlation_id)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+
+      `SELECT COUNT(*) INTO @pipeline_sessions_exists FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='create_pipeline_sessions'`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='create_pipeline_sessions' AND COLUMN_NAME='credits_reserved'`,
+      `SET @stmt=IF(@pipeline_sessions_exists=1 AND @col_exists=0,'ALTER TABLE create_pipeline_sessions ADD COLUMN credits_reserved INT NOT NULL DEFAULT 0 AFTER build_job_id','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='create_pipeline_sessions' AND COLUMN_NAME='credit_debit_correlation_id'`,
+      `SET @stmt=IF(@pipeline_sessions_exists=1 AND @col_exists=0,'ALTER TABLE create_pipeline_sessions ADD COLUMN credit_debit_correlation_id VARCHAR(190) NULL AFTER credits_reserved','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='create_pipeline_sessions' AND INDEX_NAME='uniq_pipeline_credit_debit'`,
+      `SET @stmt=IF(@pipeline_sessions_exists=1 AND @idx_exists=0,'ALTER TABLE create_pipeline_sessions ADD UNIQUE KEY uniq_pipeline_credit_debit (credit_debit_correlation_id)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 44,
+    name: "stationery_payment_order_binding",
+    skipWhenTableMissing: "stationery_payment_evidence",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND COLUMN_NAME='fulfillment_provider'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE stationery_payment_evidence ADD COLUMN fulfillment_provider ENUM(''printful'',''slant3d'') NULL AFTER state','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND COLUMN_NAME='provider_sku'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE stationery_payment_evidence ADD COLUMN provider_sku VARCHAR(160) NULL AFTER fulfillment_provider','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND COLUMN_NAME='unit_amount_minor'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE stationery_payment_evidence ADD COLUMN unit_amount_minor BIGINT UNSIGNED NULL AFTER provider_sku','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND COLUMN_NAME='quantity'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE stationery_payment_evidence ADD COLUMN quantity INT UNSIGNED NULL AFTER unit_amount_minor','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND COLUMN_NAME='consumed_local_order_uuid'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE stationery_payment_evidence ADD COLUMN consumed_local_order_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER evidence_hash','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stationery_payment_evidence' AND INDEX_NAME='uniq_stationery_payment_consumption'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE stationery_payment_evidence ADD UNIQUE KEY uniq_stationery_payment_consumption (consumed_local_order_uuid)','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },

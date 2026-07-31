@@ -1,6 +1,21 @@
 import { useState, useRef, useCallback } from "react";
 import { createViewportSource } from "./viewportSource.ts";
 import { ANIMATOR_DEFAULTS } from "../defaults.ts";
+import { getToken } from "../../api.ts";
+
+export interface SavedAnimatorRecording {
+  recordingId: string;
+  url: string;
+  mimeType: "video/webm" | "video/mp4";
+}
+
+export function parseSavedAnimatorRecording(value: unknown): SavedAnimatorRecording {
+  const record = value as Partial<SavedAnimatorRecording> | null;
+  if (!record || typeof record.recordingId !== "string" || !/^[0-9a-f-]{36}$/i.test(record.recordingId) || typeof record.url !== "string" || !record.url.startsWith("/") && !record.url.startsWith("https://") || !["video/webm", "video/mp4"].includes(String(record.mimeType))) {
+    throw new Error("Recording service returned an invalid response");
+  }
+  return record as SavedAnimatorRecording;
+}
 
 export function useCaptureSession(canvasRef: React.RefObject<HTMLCanvasElement>) {
   const [isRecording, setIsRecording] = useState(false);
@@ -77,11 +92,12 @@ export function useCaptureSession(canvasRef: React.RefObject<HTMLCanvasElement>)
     
     const res = await fetch("/api/animator/recordings", {
       method: "POST",
+      headers: { "Authorization": `Bearer ${getToken()}` },
       body: formData,
     });
     
     if (!res.ok) throw new Error("Failed to save recording");
-    return await res.json();
+    return parseSavedAnimatorRecording(await res.json());
   }, []);
 
   return {

@@ -57,11 +57,28 @@ export class ReferenceSessionError extends Error {
 }
 
 const REFERENCE_BUDGET_LOCK = "paws_reference_provider_budget_v1";
+const DAILY_ATTEMPT_CAP_MESSAGE = "Reference generation has reached its rolling 24-hour global safety limit.";
 
-function boundedReferenceCap(name: string, productionFallback: number, maximum: number): number {
-  const fallback = process.env.NODE_ENV === "production" ? productionFallback : maximum;
-  const parsed = Number.parseInt(process.env[name] || "", 10);
+function boundedReferenceCap(
+  environment: Readonly<Record<string, string | undefined>>,
+  name: string,
+  productionFallback: number,
+  maximum: number,
+): number {
+  const fallback = environment.NODE_ENV === "production" ? productionFallback : maximum;
+  const parsed = Number.parseInt(environment[name] || "", 10);
   return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : fallback;
+}
+
+export function resolveReferenceProviderBudget(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  return {
+    globalDailyCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 100, 200),
+    globalMinuteCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20),
+    globalConcurrentCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5),
+    dailyCapMessage: DAILY_ATTEMPT_CAP_MESSAGE,
+  };
 }
 
 async function assertReferenceProviderBudget(
@@ -69,9 +86,7 @@ async function assertReferenceProviderBudget(
 ): Promise<void> {
   // The product allowance is enforced per reference session (initial render +
   // up to two free retries), not across unrelated pets created the same day.
-  const globalDailyCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 20, 200);
-  const globalMinuteCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20);
-  const globalConcurrentCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5);
+  const { globalDailyCap, globalMinuteCap, globalConcurrentCap, dailyCapMessage } = resolveReferenceProviderBudget();
   const [rows]: any = await connection.query(
     `SELECT
        COUNT(*) AS global_day_count,
@@ -104,7 +119,7 @@ async function assertReferenceProviderBudget(
   }
   if (Number(counts.global_day_count || 0) >= globalDailyCap) {
     throw new ReferenceSessionError(
-      "Reference generation has reached today's global safety limit.",
+      dailyCapMessage,
       "DAILY_ATTEMPT_CAP",
     );
   }
@@ -332,9 +347,9 @@ export class ReferenceSessionService {
       const maxAttempts = Number.isSafeInteger(configuredMaxAttempts)
         ? Math.max(1, Math.min(3, configuredMaxAttempts))
         : 2;
-      if (session.retry_count >= maxAttempts) {
+      if (session.source_attempt_count >= maxAttempts) {
         throw new ReferenceSessionError(
-          `This reference session has reached its ${maxAttempts}-attempt safety limit. Create a new session to try again.`,
+          `This source photo has reached its ${maxAttempts}-attempt safety limit. Replace the source photo or create a new session to try again.`,
           "ATTEMPT_LIMIT_REACHED",
         );
       }
@@ -360,6 +375,7 @@ export class ReferenceSessionService {
       await updateSessionState(connection, session.id, "generating", {
         currentAttemptId: attempt.id,
         incrementRetry: true,
+        incrementSourceAttempt: true,
       });
 
       await connection.commit();

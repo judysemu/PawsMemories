@@ -5,6 +5,7 @@ export type BuildJobState =
   | "reserving"
   | "queued"
   | "submitted"
+  | "recovery_required"
   | "processing"
   | "downloading"
   | "validating"
@@ -32,6 +33,7 @@ export const REFUNDABLE_FAILURE_STATES: readonly BuildJobState[] = [
 export type BuildAttemptState =
   | "queued"
   | "submitted"
+  | "recovery_required"
   | "processing"
   | "downloading"
   | "validating"
@@ -68,6 +70,11 @@ export const DEFAULT_LEASE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 export const MAX_POLL_ATTEMPTS = 120;
 export const POLL_INTERVAL_MS = 5000;
 export const POLL_JITTER_MS = 1000;
+export const MAX_PROVIDER_RETRY_DELAY_MS = 30_000;
+export const MAX_PROVIDER_START_ATTEMPTS = 3;
+export const PROVIDER_START_RETRY_BASE_MS = 1000;
+export const MAX_HANDLE_PERSIST_ATTEMPTS = 3;
+export const HANDLE_PERSIST_RETRY_BASE_MS = 250;
 export const PROVIDER_CONNECT_TIMEOUT_MS = 30_000;
 export const PROVIDER_READ_TIMEOUT_MS = 120_000;
 export const GLB_MAGIC = 0x46546C67; // "glTF" little-endian
@@ -91,6 +98,9 @@ export interface BuildJobRecord {
   accepted_report_id: number | null;
   credit_correlation_id: string | null;
   refund_correlation_id: string | null;
+  refund_pending_at: Date | null;
+  refund_attempts: number;
+  last_refund_error_code: string | null;
   failure_code: string | null;
   created_at: Date;
   updated_at: Date;
@@ -104,6 +114,9 @@ export interface BuildAttemptRecord {
   provider: string;
   model: string;
   provider_task_handle: string | null;
+  submission_claimed_at: Date | null;
+  recovery_required_at: Date | null;
+  handle_persist_attempts: number;
   input_config_hash: string;
   lease_owner: string | null;
   lease_expires_at: Date | null;
@@ -173,6 +186,7 @@ export interface BuildJobPublic {
   state: BuildJobState;
   currentAttemptNumber: number | null;
   failureCode: string | null;
+  diagnostic: "provider_submission_recovery_required" | "refund_pending" | null;
   billingDisposition: "charged" | "refunded" | "not_charged" | "refund_pending";
   createdAt: string;
   updatedAt: string;

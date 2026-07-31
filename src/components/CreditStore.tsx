@@ -108,7 +108,7 @@ export default function CreditStore({ onClose, currentCredits }: CreditStoreProp
                   {item.comingSoon && <span className="text-xs font-bold text-secondary">Coming soon</span>}
                 </div>
                 <span className="shrink-0 font-black text-primary">
-                  {item.credits === null ? "Free" : item.credits === 0 ? "Free" : `${item.credits} cr`}
+                  {item.credits === null ? "Unavailable" : item.credits === 0 ? "Included" : `${item.credits} cr`}
                 </span>
               </div>
             ))}

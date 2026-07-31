@@ -7,7 +7,7 @@ import StorageMeter from "./StorageMeter";
 interface ProfileScreenProps {
   userProfile: UserProfile;
   achievements: any[];
-  onClaimReward: (id: string, amount: number) => void;
+  onClaimReward: (id: string) => void;
   dailyStreak: number;
   dailyStreakClaimed: boolean;
   onClaimDailyStreak: () => void;
@@ -54,12 +54,7 @@ export default function ProfileScreen({
   const [editBio, setEditBio] = useState("");
   const [editZip, setEditZip] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Phone verify
-  const [phoneInput, setPhoneInput] = useState("");
-  const [verifyCode, setVerifyCode] = useState("");
-  const [verifySent, setVerifySent] = useState(false);
-  const [verifying, setVerifying] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     getCreditHistory().then(setHistory).catch(() => {});
@@ -142,55 +137,23 @@ export default function ProfileScreen({
 
   const saveProfile = async () => {
     setSaving(true);
+    setSaveMessage(null);
     try {
       const res = await authedFetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fullName: editFullName, bio: editBio, zip: editZip }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) onUserUpdate?.(data.user);
-        loadProfile();
-      }
-    } catch {}
-    setSaving(false);
-  };
-
-  const sendVerifyCode = async () => {
-    if (!phoneInput || phoneInput.length < 10) return;
-    setVerifying(true);
-    try {
-      const res = await authedFetch("/api/verify/phone/start", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneInput }),
-      });
-      const data = await res.json();
-      if (data.success) setVerifySent(true);
-      else alert(data.error || "Could not send code.");
-    } catch {}
-    setVerifying(false);
-  };
-
-  const checkVerifyCode = async () => {
-    if (!verifyCode) return;
-    setVerifying(true);
-    try {
-      const res = await authedFetch("/api/verify/phone/check", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneInput, code: verifyCode }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (data.user) onUserUpdate?.(data.user);
-        loadProfile();
-        if (data.bonusGranted) alert("🎉 Profile complete! You earned 100 PupCoins!");
-        setVerifySent(false);
-      } else {
-        alert(data.error || "Invalid code.");
-      }
-    } catch {}
-    setVerifying(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Your profile could not be saved.");
+      if (data.user) onUserUpdate?.(data.user);
+      await loadProfile();
+      setSaveMessage({ kind: "success", text: "Profile saved." });
+    } catch (error: any) {
+      setSaveMessage({ kind: "error", text: error?.message || "Your profile could not be saved." });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const requestDataExport = async () => {
@@ -283,6 +246,11 @@ export default function ProfileScreen({
               {saving ? <Loader2 size={12} className="animate-spin" /> : "Save"}
             </button>
           </div>
+          {saveMessage && (
+            <p role={saveMessage.kind === "error" ? "alert" : "status"} className={`text-xs font-bold ${saveMessage.kind === "error" ? "text-error" : "text-emerald-700"}`}>
+              {saveMessage.text}
+            </p>
+          )}
         </div>
 
         {/* Credits + streak */}
@@ -310,27 +278,6 @@ export default function ProfileScreen({
           </div>
         )}
 
-        {/* Phone verification */}
-        {!pData?.user?.phoneVerified && (
-          <div className="mt-3 p-3 bg-surface-container rounded-xl">
-            <p className="text-[10px] font-bold text-on-surface-variant mb-2">Verify your phone number:</p>
-            {!verifySent ? (
-              <div className="flex gap-2">
-                <input value={phoneInput} onChange={(e) => setPhoneInput(e.target.value)} placeholder="+1 (555) 123-4567" className="flex-1 p-2.5 rounded-xl border border-outline-variant/30 bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-primary/40" />
-                <button onClick={sendVerifyCode} disabled={verifying || phoneInput.length < 10} className="px-3 py-2 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-40 cursor-pointer">
-                  {verifying ? <Loader2 size={12} className="animate-spin" /> : "Send Code"}
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} placeholder="Enter code" className="flex-1 p-2.5 rounded-xl border border-outline-variant/30 bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-primary/40" />
-                <button onClick={checkVerifyCode} disabled={verifying || !verifyCode} className="px-3 py-2 bg-primary text-on-primary rounded-xl text-[10px] font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-40 cursor-pointer">
-                  {verifying ? <Loader2 size={12} className="animate-spin" /> : "Verify"}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </section>
 
       {/* Referral code */}
@@ -366,7 +313,7 @@ export default function ProfileScreen({
                 <div className="text-[10px] text-on-surface-variant leading-snug">{a.desc}</div>
               </div>
               {a.isUnlocked && !a.isClaimed ? (
-                <button onClick={() => onClaimReward(a.id, a.reward)} className="shrink-0 px-3 py-1.5 bg-primary text-on-primary rounded-lg text-[10px] font-black uppercase tracking-wide hover:opacity-90 active:scale-95 transition-all cursor-pointer">+{a.reward}cr</button>
+                <button onClick={() => onClaimReward(a.id)} className="shrink-0 px-3 py-1.5 bg-primary text-on-primary rounded-lg text-[10px] font-black uppercase tracking-wide hover:opacity-90 active:scale-95 transition-all cursor-pointer">Claim +{a.reward}cr</button>
               ) : (
                 <span className="shrink-0 text-[10px] font-black uppercase tracking-wide text-on-surface-variant">{a.isClaimed ? "Claimed" : `+${a.reward}cr`}</span>
               )}

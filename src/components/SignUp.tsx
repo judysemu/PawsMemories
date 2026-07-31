@@ -14,25 +14,36 @@ const LIBRARIES: "places"[] = ["places"];
 interface SignUpProps {
   /** Called once the user is logged in AND has a complete profile. */
   onAuthenticated: (user: PublicUser, isNew: boolean) => void;
+  /** A valid account whose required profile steps were not completed yet. */
+  resumeProfile?: PublicUser | null;
 }
 
 type Step = "login" | "signup" | "profile" | "pets" | "forgot";
 
-export default function SignUp({ onAuthenticated }: SignUpProps) {
-  const [step, setStep] = useState<Step>("signup");
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
+export default function SignUp({ onAuthenticated, resumeProfile = null }: SignUpProps) {
+  const [step, setStep] = useState<Step>(resumeProfile && !resumeProfile.profileComplete ? "profile" : "signup");
+  const [fullName, setFullName] = useState(resumeProfile?.fullName || "");
+  const [email, setEmail] = useState(resumeProfile?.email || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [birthdate, setBirthdate] = useState("");
-  const [city, setCity] = useState("");
+  const [birthdate, setBirthdate] = useState(resumeProfile?.birthdate || "");
+  const [city, setCity] = useState(resumeProfile?.city || "");
   const [petCount, setPetCount] = useState(1);
   const [pets, setPets] = useState<{name: string, kind: string}[]>([{name: "", kind: "dog"}]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [forgotMsg, setForgotMsg] = useState("");
+
+  useEffect(() => {
+    if (!resumeProfile || resumeProfile.profileComplete) return;
+    setEmail(resumeProfile.email || "");
+    setFullName(resumeProfile.fullName || "");
+    setBirthdate(resumeProfile.birthdate || "");
+    setCity(resumeProfile.city || "");
+    setStep("profile");
+  }, [resumeProfile]);
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();

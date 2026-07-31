@@ -20,8 +20,70 @@ export function normalizeLibraryFilters(filters: LibraryFilters): LibraryFilters
   };
 }
 
-export async function loadPrivateLibrary(api: FurBinV5Api, filters: LibraryFilters): Promise<LibraryPage> {
-  return api.searchItems(normalizeLibraryFilters(filters));
+export async function loadPrivateLibrary(
+  api: Pick<FurBinV5Api, "searchItems">,
+  filters: LibraryFilters,
+): Promise<LibraryPage> {
+  const normalized = normalizeLibraryFilters(filters);
+  const result = await api.searchItems(normalized);
+  return {
+    ...result,
+    page: Number.isSafeInteger(result.page) && result.page > 0 ? result.page : normalized.page!,
+    limit: Number.isSafeInteger(result.limit) && result.limit > 0 ? result.limit : normalized.limit!,
+  };
+}
+
+export interface LatestLibraryRequestGate {
+  begin(): number;
+  isCurrent(requestId: number): boolean;
+  invalidate(): void;
+}
+
+export interface LibraryLoadSink {
+  start(): void;
+  success(result: LibraryPage): void;
+  failure(error: Error): void;
+  finish(): void;
+}
+
+export function createLatestLibraryRequestGate(): LatestLibraryRequestGate {
+  let latestRequestId = 0;
+  return {
+    begin: () => ++latestRequestId,
+    isCurrent: (requestId) => requestId === latestRequestId,
+    invalidate: () => { latestRequestId += 1; },
+  };
+}
+
+export async function loadLatestLibraryPage(
+  api: Pick<FurBinV5Api, "searchItems">,
+  filters: LibraryFilters,
+  gate: LatestLibraryRequestGate,
+  sink: LibraryLoadSink,
+): Promise<void> {
+  const requestId = gate.begin();
+  sink.start();
+  try {
+    const result = await loadPrivateLibrary(api, filters);
+    if (gate.isCurrent(requestId)) sink.success(result);
+  } catch (cause) {
+    if (gate.isCurrent(requestId)) {
+      sink.failure(cause instanceof Error ? cause : new Error("Could not load your Fur Bin."));
+    }
+  } finally {
+    if (gate.isCurrent(requestId)) sink.finish();
+  }
+}
+
+export function libraryPageCount(total: number, limit: number): number {
+  const safeTotal = Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 1;
+  return Math.max(1, Math.ceil(safeTotal / safeLimit));
+}
+
+export function clampLibraryPage(total: number, page: number, limit: number): number {
+  const requested = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+  return Math.min(requested, libraryPageCount(total, limit));
 }
 
 export async function refreshSignedView(api: FurBinV5Api, itemUuid: string): Promise<FurBinItem> {

@@ -146,7 +146,7 @@ export default function CreateCheckoutScreen({ onNavigate, userProfile }: Create
           <div className="text-center">
             <FriendlyError message={`You need ${MODEL_COST - userProfile.credits} more PupCoins to create this pet.`} action="Add PupCoins, then come back when you’re ready." className="mb-4 text-left" />
             <button
-              onClick={() => { /* Should trigger credit store, handled globally typically but we'll just show message */ }}
+              onClick={() => onNavigate(Screen.STORE)}
               className="px-6 py-3 rounded-xl font-bold text-primary border-2 border-primary hover:bg-primary/5 transition-colors"
             >
               Get More PupCoins

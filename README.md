@@ -10,13 +10,13 @@ Live site: https://pawsome3d.com  (formerly mypets.cc)
 - **One-photo model entry** — the builder accepts one genuine PNG, JPEG, or WebP source at any practical aspect ratio; additional angles are optional. Image bytes must match the declared file type. The generator creates the five approval views, and the customer must approve them (or deliberately enable auto-approval) before the paid base mesh begins.
 - **Fur Bin showcase** — a default-off private model library and public-derivative showcase with immutable versions, measured capability badges, moderation, and rollback.
 - **Scaled building lab** — calibrated text/image proposals, low-cost visual Shell and higher-cost IFC/BIM choices, and verification before and after construction. The durable v2 release path remains disabled until live worker/UI acceptance.
-- **AR virtual pet (WebXR / ARCore)** — place your avatar on real surfaces on Android Chrome; plane + mesh detection, drift‑free `XRAnchor` placement, and footprint center‑of‑gravity grounding so the pet plants on its feet. iOS falls back to the 8th Wall engine. The AR view is driven by an autonomous **behavior brain** (drives, hormones, reinforcement) with voice‑command training, gesture reinforcement, semantic‑scan navigation, and disc/agility trials — see `AR_PET_SIM_SPEC.md`.
+- **AR virtual pet (WebXR / ARCore)** — place your avatar on real surfaces on Android Chrome; plane + mesh detection, drift‑free `XRAnchor` placement, and footprint center‑of‑gravity grounding so the pet plants on its feet. iOS falls back to the 8th Wall engine. The implementation lives under `src/three/ar/`, `src/brain/`, and the guarded pet-simulator routes.
 - **Store** — merch (3D prints, plush, accessories) with your Albums folded in as a tab.
 - **Community** — local info (nearby parks, weather, pet‑recall news), a live pet inspiration board (dog.ceo + dogapi.dog) with user‑uploaded memories, and a coming‑soon roadmap.
 - **Credits** — server‑backed ledger with earn/spend history, persisted daily bonus, per‑day‑capped share rewards, and Stripe credit‑pack purchases (webhook + redirect‑confirm double safety net).
 - **Profile** — avatar thumbnail uploader + a personal photo library; photos uploaded in the avatar builder persist here automatically.
 - **Animation Studio Tooling** — A separate multi-actor Three.js studio with layered animation, blend spaces, emote scheduling, Theatre camera control, project persistence, Director scripts, IK, recording, and live ElevenLabs/Rhubarb lip-sync preview.
-- **Randy AI** — Gemini‑powered pet guide (spec for a 3D talking head in `RANDY_AI_SPEC.md`).
+- **Randy AI** — Gemini-powered pet guide with a server-owned action registry and constrained navigation responses.
 
 ## Current model-generator release
 
@@ -40,8 +40,8 @@ body-rig profile only; it does not claim to embed AI behavior inside a GLB.
 - **Auth:** Email + password with JWT session tokens (passwords hashed with scrypt)
 - **Database:** MySQL (via `mysql2`) for the user store
 - **AI / 3D:** Google Gemini for chat, Imagen for stills, Veo for video. **Tripo3D** for Image-to-3D mesh generation (replaced Meshy for higher quality and reliability). Blender 3D via dedicated `bpy` microservice with EEVEE PBR rendering and 24-frame cycles.
-- **Payments:** Stripe Checkout (memory requests, physical album orders, credit packs) with webhook verification
-- **Notifications:** Twilio SMS for notifying users when their memory requests are fulfilled
+- **Payments:** Stripe Checkout for credit packs and configured physical fulfillment, with signed webhook verification
+- **Notifications:** Optional email/SMS notifications for supported generation and fulfillment events
 - **Hosting:** Hostinger for main app. Render.com for the Blender microservice.
 
 ## How it fits together
@@ -51,7 +51,7 @@ The Express server does double duty: it serves the built Vite frontend from `dis
 ### Auth & gating flow
 
 1. `POST /api/auth/signup` — creates an account from an **email + password**. Email must be unique. Returns a 30‑day JWT. New users start with a **profile‑incomplete** record (and 0 credits).
-2. `POST /api/auth/complete-profile` — required for every new user. Saves full name, birthdate, city, and pets to MySQL, and grants **50 free credits** the first time the profile is completed.
+2. `POST /api/auth/complete-profile` — required for every new user. Saves full name, a strictly validated birthdate, city, and pets to MySQL. It does not mint wallet credit.
 3. `POST /api/auth/login` — email + password login for returning users; returns a JWT.
 4. `GET /api/me` — restores the current user from a valid `Bearer` token.
 
@@ -133,8 +133,9 @@ The AR mode is a full behavior simulation, not a static model placement. When a 
 - **Interaction**: pointer strokes become gesture reinforcement; a semantic camera scan builds a navmesh with per‑zone movement cost + behaviors; voice commands train recall; disc and agility trials award care points → credits.
 - **Backend**: `POST /api/pets/classify` (Gemini vision), `GET/PATCH /api/pets/:id/state`, `POST /api/pets/:id/rig` (Tripo auto‑rig → Blender bake‑LOD → B2, behind `PETSIM_RIG_ENABLED`), `/commands`, `/buttons`, `/api/ar/semantic-scan`, `/api/trials/:type/result`.
 
-Full spec: `AR_PET_SIM_SPEC.md`. Build status + decisions: `AR_PET_SIM_HANDOFF.md`.
-Current hardening plan: `AR_PET_SIM_HARDENING_PLAN_V2.md`.
+Current release risks, decisions, and production acceptance evidence are tracked
+in `docs/current/FULL_CODEBASE_AUDIT_2026-07-31.md` and
+`docs/current/PRODUCTION_DEPLOYMENT_REVIEW_2026-07-31.md`.
 
 ## Project structure
 
@@ -143,11 +144,11 @@ server.ts          Express app: static hosting + /api routes + Stripe webhook
 auth.ts            Email/password helpers, JWT sign/verify, requireAuth middleware
 db.ts              MySQL pool, table init, user/account CRUD helpers
 src/               React frontend (App, components, api client, types)
-  components/      SignUp, Dashboard, EditMemory, RequestMemory, AdminRequestPanel, ...
+  components/      SignUp, Dashboard, Create, Pawprints, Animator, Fur Bin, ...
   brain/           Framework-agnostic pet behavior engine (drives, brain tick, reinforcement)
   three/ar/        AR stage + brain bridge (ARPetStage, IK, navmesh, voice, trials)
 blender-worker/    Standalone Express + Docker microservice for running Blender scripts (+ bake_lod.py)
-x-dm-service/      X DM conversation refinement service (Node 20 + Express + TypeScript) — see X_DM_REFINEMENT_SPEC.md
+x-dm-service/      X DM conversation refinement service (Node 20 + Express + TypeScript)
 scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip)
 dist/              Build output (vite assets + server.cjs)
 .env.example       Documented environment variables
@@ -177,7 +178,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `TRIPO_API_KEY` | Tripo3D API key for Image-to-3D mesh generation (Primary 3D engine) |
 | `GEMINI_REFERENCE_IMAGE_MODEL` | Dedicated five-view reference model; production default `gemini-3.1-flash-image` |
 | `REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP` / `REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP` | Durable reference-generator burst controls; production defaults `1` active attempt and `2` attempts/minute |
-| `REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP` / `REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP` | Rolling 24-hour reference-generator controls; production defaults `3` per user and `20` globally |
+| `REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP` | Global provider-spend guard for reference generation; production default `100` attempts per rolling 24 hours. Each reference session separately limits its initial render plus retries. |
 | `PETSIM_IMAGE_GENERATION_ENABLED` | Kill switch for shared Gemini/Imagen image-output calls; applies to admins too |
 | `PETSIM_IMAGE_GENERATION_DAILY_CAP` / `PETSIM_IMAGE_GENERATION_GLOBAL_DAILY_CAP` | Database-backed actual provider-call caps; defaults `5` per user and `50` globally per database UTC day |
 | `PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP` | Database-backed shared provider-call cap; default `10` calls per 60-second window, leaving headroom below the observed 20 RPM Nano Banana Pro quota. The Flash reference path has its own independent cap. |

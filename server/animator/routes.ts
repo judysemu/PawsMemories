@@ -14,9 +14,12 @@ import { loadScripts, getVoiceoverScripts, estimateSpeechSeconds } from "./scrip
 import { getDirectorScripts } from "./sceneScripts.ts";
 import { CC0_CLIPS } from "./clips.ts";
 import { uploadBase64Binary } from "../../storage.ts";
-import { getCreditBalance, deductCredits, createJob, isUserAdmin, getDailyVideoCount } from "../../db.ts";
+import { getCreditBalance, reserveCredits, refundReservedCredits, createJob, isUserAdmin, getDailyVideoCount } from "../../db.ts";
 import { startTalkingVideo } from "../../heygen.ts";
 import { CREDIT_PRICES } from "../../src/pricing.ts";
+import { saveRecording, getOwnedRecording } from "./recordings.ts";
+import { encodeAnimatorOperationMetadata, decodeAnimatorOperationMetadata } from "./operationMetadata.ts";
+import { getOwnedVoicedResult } from "./voicedResults.ts";
 
 export const animatorRouter = express.Router();
 
@@ -51,17 +54,15 @@ function handleError(res: express.Response, e: any) {
 animatorRouter.post("/animator/assets", async (req: any, res) => {
   try {
     const userPhone = req.user!.phone;
-    const { modelUrl, base64Bytes, originalFilename } = req.body;
-    
-    let sourceBuffer: Buffer | undefined;
-    if (base64Bytes) {
-      sourceBuffer = Buffer.from(base64Bytes, 'base64');
+    const { base64Bytes, originalFilename } = req.body;
+    if (typeof base64Bytes !== "string" || !base64Bytes || base64Bytes.length > 70_000_000) {
+      return res.status(400).json({ error: "Upload an owned GLB or glTF file up to 50 MB." });
     }
+    const sourceBuffer = Buffer.from(base64Bytes, "base64");
 
     const metadata = await importAsset({
       userPhone,
       sourceBuffer,
-      sourceUrl: modelUrl,
       originalFilename: originalFilename || "model.glb"
     });
     
@@ -300,33 +301,10 @@ animatorRouter.post("/animator/recordings", upload.single("video"), async (req: 
   try {
     const userPhone = req.user!.phone;
     if (!req.file) return res.status(400).json({ error: "No video file provided" });
-    
-    const outDir = resolveWithinWorkspace("recordings");
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-    
-    // Derive the container from the uploaded blob's mime so a WebCodecs MP4
-    // recording is stored as .mp4 and only the MediaRecorder fallback is .webm.
-    const mime = (req.file.mimetype && req.file.mimetype.startsWith("video/"))
-      ? req.file.mimetype
-      : "video/mp4";
-    const ext = mime.includes("webm") ? "webm" : "mp4";
-    const filename = `recording_${Date.now()}_${userPhone.replace(/[^a-zA-Z0-9]/g, "")}.${ext}`;
-    const absPath = path.join(outDir, filename);
-
-    fs.writeFileSync(absPath, req.file.buffer);
-
-    let url = `/animator-files/recordings/${filename}`;
-    try {
-      const base64Str = req.file.buffer.toString("base64");
-      const bucketUrl = await uploadBase64Binary(base64Str, mime);
-      if (bucketUrl) url = bucketUrl;
-    } catch (uploadErr) {
-      console.warn("Storage mirror failed, falling back to local URL", uploadErr);
-    }
-    
-    res.json({ url });
+    const recording = saveRecording({ ownerId: userPhone, buffer: req.file.buffer, claimedMime: req.file.mimetype });
+    res.status(201).json({ recordingId: recording.recordingId, url: recording.url, mimeType: recording.mimeType });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    res.status(400).json({ error: e.message });
   }
 });
 
@@ -390,8 +368,8 @@ animatorRouter.get("/scenes/director-scripts", (req: any, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const seed = typeof req.query.seed === "string" ? req.query.seed : `${req.user.phone}:${Date.now()}`;
-    const requestedLimit = Number.parseInt(String(req.query.limit || "108"), 10);
-    res.json(getDirectorScripts(seed, Number.isFinite(requestedLimit) ? requestedLimit : 108));
+    const requestedLimit = req.query.limit === undefined ? undefined : Number.parseInt(String(req.query.limit), 10);
+    res.json(getDirectorScripts(seed, requestedLimit === undefined || Number.isFinite(requestedLimit) ? requestedLimit : undefined));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -456,12 +434,14 @@ animatorRouter.get("/scenes/:id", (req: any, res) => {
 });
 
 animatorRouter.post("/scenes/voiceover", async (req: any, res) => {
+  let creditReservationId: string | null = null;
   try {
     const userPhone = req.user!.phone;
     if (!userPhone) return res.status(401).json({ error: "Unauthorized" });
     
     const { recordingId, scriptId, text, voiceId } = req.body;
     if (!recordingId) return res.status(400).json({ error: "recordingId is required" });
+    if (!getOwnedRecording(String(recordingId), userPhone)) return res.status(404).json({ error: "Recording not found" });
     
     let scriptText = text;
     if (scriptId) {
@@ -491,7 +471,10 @@ animatorRouter.post("/scenes/voiceover", async (req: any, res) => {
       if (balance < VOICEOVER_COST) {
         return res.status(402).json({ error: `Insufficient credits. Need ${VOICEOVER_COST}` });
       }
-      await deductCredits(userPhone, VOICEOVER_COST, "ai_voice_generation");
+      creditReservationId = await reserveCredits(userPhone, VOICEOVER_COST, "ai_voice_generation");
+      if (!creditReservationId) {
+        return res.status(402).json({ error: `Insufficient credits. Need ${VOICEOVER_COST}` });
+      }
     }
 
     // Dummy 1x1 image for HeyGen talking photo
@@ -506,28 +489,50 @@ animatorRouter.post("/scenes/voiceover", async (req: any, res) => {
         voiceId: voiceId || undefined,
       });
     } catch (genErr: any) {
-      if (!isAdmin) {
-        const { restoreReservedGenerationCredits } = await import("../../db.ts");
-        await restoreReservedGenerationCredits(userPhone, VOICEOVER_COST);
+      if (creditReservationId) {
+        await refundReservedCredits(creditReservationId);
+        creditReservationId = null;
       }
       return res.status(502).json({ error: genErr.message || "Failed to start Voiceover generation" });
     }
 
-    // Attach recordingId to handle so poller knows which file to mux
-    const operationName = `${handle}:animator:${recordingId}`;
+    const operationName = encodeAnimatorOperationMetadata({ providerOperationName: handle, recordingId: String(recordingId) });
 
-    const jobId = await createJob({
-      user_phone: userPhone,
-      creation_id: null,
-      kind: "video",
-      credits_reserved: VOICEOVER_COST,
-      operation_name: operationName,
-    });
+    let jobId: number;
+    try {
+      jobId = await createJob({
+        user_phone: userPhone,
+        creation_id: null,
+        kind: "video",
+        credits_reserved: isAdmin ? 0 : VOICEOVER_COST,
+        credit_debit_correlation_id: creditReservationId,
+        operation_name: operationName,
+      });
+      creditReservationId = null; // durable job now owns any refund decision
+    } catch (jobError) {
+      if (creditReservationId) {
+        await refundReservedCredits(creditReservationId);
+        creditReservationId = null;
+      }
+      throw jobError;
+    }
 
     res.status(202).json({ success: true, jobId, status: "queued" });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+animatorRouter.get("/animator/voiceover-jobs/:id", async (req: any, res) => {
+  const userPhone = req.user!.phone;
+  const jobId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(jobId) || jobId <= 0) return res.status(400).json({ error: "Invalid job ID" });
+  const { getJob } = await import("../../db.ts");
+  const job = await getJob(jobId, userPhone);
+  if (!job || !decodeAnimatorOperationMetadata(job.operation_name)) return res.status(404).json({ error: "Voiceover job not found" });
+  const result = getOwnedVoicedResult(jobId, userPhone);
+  const progress = job.status === "done" ? 100 : job.status === "failed" ? 100 : job.status === "running" ? 60 : 20;
+  res.json({ jobId, status: job.status, progress, error: job.error || null, resultUrl: result?.resultUrl || null, mimeType: result?.mimeType || null });
 });
 
 // ──────────────────────────────────────────────────────────────────
@@ -572,24 +577,22 @@ animatorRouter.post("/animator/speech-preview", async (req: any, res) => {
   if (!userPhone) return res.status(401).json({ error: "Unauthorized" });
   const cost = CREDIT_PRICES.AI_VOICE_30_SECONDS;
   let admin = false;
-  let charged = false;
+  let creditReservationId: string | null = null;
 
   try {
     admin = await isUserAdmin(userPhone);
     if (!admin) {
       const balance = await getCreditBalance(userPhone);
       if (balance < cost) return res.status(402).json({ error: `Insufficient credits. Need ${cost}` });
-      const deducted = await deductCredits(userPhone, cost, "ai_voice_generation");
-      if (!deducted) return res.status(402).json({ error: `Insufficient credits. Need ${cost}` });
-      charged = true;
+      creditReservationId = await reserveCredits(userPhone, cost, "ai_voice_generation");
+      if (!creditReservationId) return res.status(402).json({ error: `Insufficient credits. Need ${cost}` });
     }
 
     const preview = await createSpeechPreview(parsed.data);
     res.json({ ...preview, creditsCharged: admin ? 0 : cost });
   } catch (error: any) {
-    if (charged) {
-      const { restoreReservedGenerationCredits } = await import("../../db.ts");
-      await restoreReservedGenerationCredits(userPhone, cost);
+    if (creditReservationId) {
+      await refundReservedCredits(creditReservationId);
     }
     res.status(502).json({ error: error.message || "Voice preview generation failed" });
   }

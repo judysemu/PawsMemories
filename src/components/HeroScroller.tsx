@@ -1,5 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowRight, Gift, Film, Crown, Gamepad2 } from "lucide-react";
+import {
+  HISTORICAL_PET_CATALOG,
+  type HistoricalPetRecord,
+} from "../../shared/historicalPetCatalog.ts";
 
 /**
  * HeroScroller — the four "quick hit" hero cards.
@@ -37,17 +47,20 @@ interface Slide {
   callout: string;
   body: string;
   cta: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: React.ComponentType<{
+    size?: number;
+    strokeWidth?: number;
+    className?: string;
+  }>;
 }
 
 const SLIDES: Slide[] = [
   {
     id: "pawprint-offer",
     eyebrow: "Send a pawprint",
-    title: "45% off their 3D model",
-    callout: "45% OFF",
-    body:
-      "Send a licensed pawprint to someone you love. They get their own pet immortalised in 3D at nearly half price — and you get the credit for it.",
+    title: "A keepsake made from your photo",
+    callout: "MADE BY YOU",
+    body: "Design a personal Pawprint with your own photo and words, then download it or email the finished keepsake to someone you love.",
     cta: "Send a pawprint",
     icon: Gift,
   },
@@ -56,19 +69,17 @@ const SLIDES: Slide[] = [
     eyebrow: "Photo to motion",
     title: "Your pet, actually moving",
     callout: "HYPER-REAL",
-    body:
-      "One still photo becomes a hyper-realistic animated video. The ears lift, the head turns, the fur catches the light. It plays as you scroll.",
+    body: "One still photo becomes a hyper-realistic animated video. The ears lift, the head turns, the fur catches the light. It plays as you scroll.",
     cta: "Animate a photo",
     icon: Film,
   },
   {
     id: "collection",
-    eyebrow: "The collection",
-    title: "History's figures, as pets",
-    callout: "LIMITED",
-    body:
-      "Pre-1900 figures reimagined as collectible pet models, plus the merch that goes with them. Every piece clicks straight through to Pawprints.",
-    cta: "Browse the collection",
+    eyebrow: "Collection preview",
+    title: "Original historical roles, as pets",
+    callout: "PREVIEW",
+    body: "Four original, pre-1900-inspired pet portraits preview stories being developed for Animator. These are concept images, not finished 3D models or products.",
+    cta: "Create your own pet",
     icon: Crown,
   },
   {
@@ -76,26 +87,10 @@ const SLIDES: Slide[] = [
     eyebrow: "Try it now",
     title: "A playpen, right here",
     callout: "PLAYABLE",
-    body:
-      "No signup, no download. Poke the pet and watch it respond — a two-bit sketch of what your own model will do once it's yours.",
+    body: "No signup, no download. Poke the pet and watch it respond — a two-bit sketch of what your own model will do once it's yours.",
     cta: "Make mine real",
     icon: Gamepad2,
   },
-];
-
-/** Pre-1900, public domain. No living or recent figures — see the note in
- *  CollectionSlide for why this list is constrained the way it is. */
-const COLLECTION_FIGURES = [
-  { name: "The Composer", era: "b. 1770", glyph: "🎼", tint: "from-amber-500/20 to-amber-700/10" },
-  { name: "The Naturalist", era: "b. 1809", glyph: "🔬", tint: "from-emerald-500/20 to-emerald-700/10" },
-  { name: "The Novelist", era: "b. 1775", glyph: "🖋️", tint: "from-sky-500/20 to-sky-700/10" },
-  { name: "The Nightingale", era: "b. 1820", glyph: "🕯️", tint: "from-rose-500/20 to-rose-700/10" },
-];
-
-const MERCH = [
-  { label: "Enamel pin", price: "from $12" },
-  { label: "Heavyweight tee", price: "from $32" },
-  { label: "Riso art print", price: "from $24" },
 ];
 
 function usePrefersReducedMotion(): boolean {
@@ -127,7 +122,9 @@ function usePrefersReducedMotion(): boolean {
 function AppealReel({ reduced }: { reduced: boolean }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [failed, setFailed] = useState(false);
+  // The generated reel is not shipped in this release. Start on the owned still
+  // instead of deliberately requesting absent media and relying on onError.
+  const [failed, setFailed] = useState(true);
   const rafRef = useRef<number | null>(null);
 
   // React renders `muted` as a property, but autoplay gating in some engines
@@ -184,7 +181,10 @@ function AppealReel({ reduced }: { reduced: boolean }) {
 
   if (failed) {
     return (
-      <div ref={wrapRef} className="relative h-full w-full overflow-hidden rounded-2xl bg-surface-container-high">
+      <div
+        ref={wrapRef}
+        className="relative h-full w-full overflow-hidden rounded-2xl bg-surface-container-high"
+      >
         <img
           src="/featured-models/tuck.webp"
           alt="A labradoodle model rendered in 3D"
@@ -198,11 +198,14 @@ function AppealReel({ reduced }: { reduced: boolean }) {
   }
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-hidden rounded-2xl bg-black/80">
+    <div
+      ref={wrapRef}
+      className="relative h-full w-full overflow-hidden rounded-2xl bg-black/80"
+    >
       <video
         ref={videoRef}
-        src="/hero/appeal-reel.mp4"
-        poster="/hero/appeal-reel.jpg"
+        src="/featured-models/tuck.webp"
+        poster="/featured-models/tuck.webp"
         muted
         playsInline
         preload="metadata"
@@ -219,51 +222,74 @@ function AppealReel({ reduced }: { reduced: boolean }) {
   );
 }
 
-/* ─────────────────────── Slide 3: collection + merch ─────────────────── */
+/* ─────────────────────── Slide 3: collection preview ─────────────────── */
 
-/**
- * Figures are described by ROLE, not by name, and every one is pre-1900.
- *
- * This is deliberate and should stay that way. Selling collectible figurines
- * modelled on identifiable people runs into right-of-publicity claims, which in
- * many US states survive death by 50-100 years, and marketplace policies that
- * prohibit merchandise depicting real individuals without a licence. Pre-1900
- * public-domain figures sit outside that window. If you later swap in specific
- * names, that is a legal review, not a copy edit.
- */
-function CollectionSlide({ onOpenPawprints }: { onOpenPawprints: () => void }) {
+function HistoricalPreviewCard({
+  entry,
+  onOpenCreate,
+  reduced,
+}: {
+  entry: HistoricalPetRecord;
+  onOpenCreate: () => void;
+  reduced: boolean;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
   return (
-    <div className="grid h-full w-full grid-rows-[1fr_auto] gap-3">
-      <div className="grid grid-cols-2 gap-2.5">
-        {COLLECTION_FIGURES.map((f) => (
-          <button
-            key={f.name}
-            type="button"
-            onClick={onOpenPawprints}
-            className={`group relative flex flex-col items-center justify-center gap-1.5 overflow-hidden rounded-2xl bg-gradient-to-br ${f.tint} p-3 text-center ring-1 ring-inset ring-white/10 transition-transform hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
-          >
-            <span className="text-2xl" aria-hidden="true">{f.glyph}</span>
-            <span className="text-[11px] font-black leading-tight text-on-surface">{f.name}</span>
-            <span className="text-[9px] font-semibold uppercase tracking-wide text-on-surface-variant">{f.era}</span>
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-full bg-primary/90 py-1 text-[9px] font-black uppercase text-on-primary transition-transform group-hover:translate-y-0">
-              To Pawprints
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {MERCH.map((m) => (
-          <button
-            key={m.label}
-            type="button"
-            onClick={onOpenPawprints}
-            className="flex-1 rounded-xl bg-surface-container-high px-2 py-2 text-center ring-1 ring-inset ring-outline-variant/20 transition-colors hover:bg-surface-container-highest focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <span className="block text-[10px] font-black leading-tight text-on-surface">{m.label}</span>
-            <span className="block text-[9px] font-semibold text-on-surface-variant">{m.price}</span>
-          </button>
-        ))}
-      </div>
+    <button
+      type="button"
+      onClick={onOpenCreate}
+      aria-label={`${entry.displayName} concept preview. Open Create to make your own pet.`}
+      className={`group relative min-h-32 overflow-hidden rounded-2xl bg-surface-container-high text-left ring-1 ring-inset ring-outline-variant/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${reduced ? "" : "transition-transform hover:scale-[1.02]"}`}
+    >
+      {imageFailed ? (
+        <span
+          role="img"
+          aria-label={`${entry.displayName} preview unavailable`}
+          className="grid h-full min-h-32 place-items-center px-3 text-center text-xs font-bold text-on-surface-variant"
+        >
+          Preview unavailable
+        </span>
+      ) : (
+        <img
+          src={entry.previewAsset.publicPath}
+          alt={entry.altText}
+          width={entry.previewAsset.width}
+          height={entry.previewAsset.height}
+          loading="lazy"
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          className="h-full min-h-32 w-full object-cover"
+        />
+      )}
+      <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-3 pb-2 pt-8 text-white">
+        <span className="block text-[11px] font-black leading-tight">
+          {entry.displayName}
+        </span>
+        <span className="block text-[9px] font-semibold opacity-85">
+          Concept preview · {entry.stylePeriod}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function CollectionSlide({
+  onOpenCreate,
+  reduced,
+}: {
+  onOpenCreate: () => void;
+  reduced: boolean;
+}) {
+  return (
+    <div className="grid h-full w-full grid-cols-2 gap-2.5">
+      {HISTORICAL_PET_CATALOG.map((entry) => (
+        <HistoricalPreviewCard
+          key={entry.id}
+          entry={entry}
+          onOpenCreate={onOpenCreate}
+          reduced={reduced}
+        />
+      ))}
     </div>
   );
 }
@@ -282,21 +308,29 @@ type PetAction = "idle" | "sit" | "wave" | "spin" | "happy";
  * animations for static poses rather than disabling the controls, so the
  * interaction still works.
  */
-function Playpen({ reduced, onOpenCreate }: { reduced: boolean; onOpenCreate: () => void }) {
+function Playpen({
+  reduced,
+  onOpenCreate,
+}: {
+  reduced: boolean;
+  onOpenCreate: () => void;
+}) {
   const [kind, setKind] = useState<PetKind>("dog");
   const [action, setAction] = useState<PetAction>("idle");
   const timer = useRef<number | null>(null);
 
-  const trigger = useCallback(
-    (next: PetAction) => {
-      setAction(next);
+  const trigger = useCallback((next: PetAction) => {
+    setAction(next);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setAction("idle"), 1400);
+  }, []);
+
+  useEffect(
+    () => () => {
       if (timer.current) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setAction("idle"), 1400);
     },
     [],
   );
-
-  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
 
   const animClass = reduced
     ? ""
@@ -332,8 +366,20 @@ function Playpen({ reduced, onOpenCreate }: { reduced: boolean; onOpenCreate: ()
               <circle cx="60" cy="42" r="18" />
               <path d="M46 30 L40 14 L54 24" />
               <path d="M74 30 L80 14 L66 24" />
-              <circle cx="53" cy="41" r="2.2" fill="currentColor" stroke="none" />
-              <circle cx="67" cy="41" r="2.2" fill="currentColor" stroke="none" />
+              <circle
+                cx="53"
+                cy="41"
+                r="2.2"
+                fill="currentColor"
+                stroke="none"
+              />
+              <circle
+                cx="67"
+                cy="41"
+                r="2.2"
+                fill="currentColor"
+                stroke="none"
+              />
               <path d="M60 48 L60 52" />
               <path d="M54 52 Q60 57 66 52" />
               <path d="M86 66 Q100 58 96 44" />
@@ -361,10 +407,15 @@ function Playpen({ reduced, onOpenCreate }: { reduced: boolean; onOpenCreate: ()
             <button
               key={k}
               type="button"
-              onClick={() => { setKind(k); trigger("happy"); }}
+              onClick={() => {
+                setKind(k);
+                trigger("happy");
+              }}
               aria-pressed={kind === k}
               className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase transition-colors ${
-                kind === k ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-primary"
+                kind === k
+                  ? "bg-primary text-on-primary"
+                  : "text-on-surface-variant hover:text-primary"
               }`}
             >
               {k}
@@ -374,12 +425,14 @@ function Playpen({ reduced, onOpenCreate }: { reduced: boolean; onOpenCreate: ()
       </div>
 
       <div className="grid grid-cols-4 gap-1.5">
-        {([
-          { id: "sit", label: "Sit" },
-          { id: "wave", label: "Wave" },
-          { id: "spin", label: "Spin" },
-          { id: "happy", label: "Treat" },
-        ] as { id: PetAction; label: string }[]).map((c) => (
+        {(
+          [
+            { id: "sit", label: "Sit" },
+            { id: "wave", label: "Wave" },
+            { id: "spin", label: "Spin" },
+            { id: "happy", label: "Treat" },
+          ] as { id: PetAction; label: string }[]
+        ).map((c) => (
           <button
             key={c.id}
             type="button"
@@ -422,10 +475,10 @@ export default function HeroScroller({
     () => ({
       "pawprint-offer": onOpenPawprints,
       "appeal-reel": onOpenCreate,
-      collection: onOpenShop,
+      collection: onOpenCreate,
       playpen: onOpenCreate,
     }),
-    [onOpenCreate, onOpenPawprints, onOpenShop],
+    [onOpenCreate, onOpenPawprints],
   );
 
   useEffect(() => {
@@ -439,7 +492,8 @@ export default function HeroScroller({
         for (const e of entries) {
           const idx = cards.indexOf(e.target as HTMLElement);
           if (idx < 0) continue;
-          if (!best || e.intersectionRatio > best.ratio) best = { idx, ratio: e.intersectionRatio };
+          if (!best || e.intersectionRatio > best.ratio)
+            best = { idx, ratio: e.intersectionRatio };
         }
         if (best && best.ratio > 0.35) setActive(best.idx);
       },
@@ -490,7 +544,9 @@ export default function HeroScroller({
           return (
             <article
               key={slide.id}
-              ref={(el) => { cardRefs.current[i] = el; }}
+              ref={(el) => {
+                cardRefs.current[i] = el;
+              }}
               aria-roledescription="slide"
               aria-label={`${i + 1} of ${SLIDES.length}: ${slide.title}`}
               className="relative flex w-[86vw] shrink-0 snap-center flex-col gap-4 overflow-hidden rounded-[1.75rem] border border-outline-variant/20 bg-surface-container/70 p-5 shadow-lg backdrop-blur-sm sm:w-[68vw] md:w-[46vw] md:flex-row md:p-6 lg:w-[40rem]"
@@ -509,7 +565,9 @@ export default function HeroScroller({
                   <h3 className="text-xl font-black leading-tight tracking-tight text-on-surface md:text-2xl">
                     {slide.title}
                   </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{slide.body}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+                    {slide.body}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -523,20 +581,30 @@ export default function HeroScroller({
 
               <div className="h-56 w-full shrink-0 md:h-auto md:w-[46%]">
                 {slide.id === "appeal-reel" && <AppealReel reduced={reduced} />}
-                {slide.id === "collection" && <CollectionSlide onOpenPawprints={onOpenPawprints} />}
-                {slide.id === "playpen" && <Playpen reduced={reduced} onOpenCreate={onOpenCreate} />}
+                {slide.id === "collection" && (
+                  <CollectionSlide
+                    onOpenCreate={onOpenCreate}
+                    reduced={reduced}
+                  />
+                )}
+                {slide.id === "playpen" && (
+                  <Playpen reduced={reduced} onOpenCreate={onOpenCreate} />
+                )}
                 {slide.id === "pawprint-offer" && (
                   <button
                     type="button"
                     onClick={onOpenPawprints}
                     className="group relative flex h-full w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-primary/20 to-secondary/10 ring-1 ring-inset ring-primary/20 transition-transform hover:scale-[1.02]"
                   >
-                    <span className="text-5xl font-black tracking-tighter text-primary">45%</span>
+                    <span className="text-4xl font-black tracking-tighter text-primary">
+                      PAWPRINT
+                    </span>
                     <span className="text-[11px] font-black uppercase tracking-[.2em] text-on-surface-variant">
-                      off, gifted
+                      made by you
                     </span>
                     <span className="mt-1 flex items-center gap-1 text-[10px] font-bold text-on-surface-variant">
-                      <Gift size={12} strokeWidth={2} aria-hidden="true" /> Licensed pawprint
+                      <Gift size={12} strokeWidth={2} aria-hidden="true" />{" "}
+                      Download or email
                     </span>
                   </button>
                 )}
@@ -547,7 +615,11 @@ export default function HeroScroller({
       </div>
 
       {/* Dot rail */}
-      <div className="mt-1 flex items-center justify-center gap-2" role="tablist" aria-label="Choose a slide">
+      <div
+        className="mt-1 flex items-center justify-center gap-2"
+        role="tablist"
+        aria-label="Choose a slide"
+      >
         {SLIDES.map((s, i) => (
           <button
             key={s.id}
@@ -558,7 +630,9 @@ export default function HeroScroller({
             aria-label={s.title}
             onClick={() => scrollTo(i)}
             className={`h-2 rounded-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-              active === i ? "w-7 bg-primary" : "w-2 bg-on-surface/20 hover:bg-on-surface/40"
+              active === i
+                ? "w-7 bg-primary"
+                : "w-2 bg-on-surface/20 hover:bg-on-surface/40"
             }`}
           />
         ))}

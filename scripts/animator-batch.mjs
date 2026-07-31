@@ -57,4 +57,5 @@ for (const [index, entry] of manifest.entries.entries()) {
 }
 
 if (process.argv.includes("--dry-run")) process.exit(0);
-console.log("[animator-batch] dispatch not implemented yet (Phase 8) — treating as --dry-run");
+console.error("[animator-batch] dispatch is not implemented; rerun with --dry-run to validate only");
+process.exit(2);

@@ -99,7 +99,6 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   process.env.MEDIA_BUCKET_URL = "http://localhost:9000";
   process.env.MEDIA_BUCKET_KEY = "testkey";
   process.env.MEDIA_BUCKET_SECRET = "testsecret";
-  process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "100";
   process.env.REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP = "100";
   process.env.REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP = "20";
   process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "5";
@@ -123,7 +122,6 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
 
   t.after(async () => {
     delete process.env.MULTIVIEW_APPROVAL_ENABLED;
-    delete process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP;
     delete process.env.REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP;
     delete process.env.REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP;
     delete process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP;
@@ -203,28 +201,24 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     const ownerId = "+15551115555";
     const provider = new FakeReferenceImageProvider();
     const cappedService = new ReferenceSessionService(provider, () => pool);
-    try {
-      const first = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A terrier" });
-      await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
-      assert.equal(provider.calls, 1);
-      const replay = await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
-      assert.equal(replay.attempt.attempt_number, 1);
-      assert.equal(provider.calls, 1);
-      const [ownerAttemptRows] = await pool.query(
-        `SELECT COUNT(*) AS count
-         FROM reference_attempts a
-         INNER JOIN reference_sessions s ON s.id = a.session_id
-         WHERE s.owner_id = ? AND a.started_at >= NOW() - INTERVAL 24 HOUR`,
-        [ownerId],
-      );
-      assert.equal(Number(ownerAttemptRows[0].count), 1);
+    const first = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A terrier" });
+    await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
+    assert.equal(provider.calls, 1);
+    const replay = await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
+    assert.equal(replay.attempt.attempt_number, 1);
+    assert.equal(provider.calls, 1);
+    const [ownerAttemptRows] = await pool.query(
+      `SELECT COUNT(*) AS count
+       FROM reference_attempts a
+       INNER JOIN reference_sessions s ON s.id = a.session_id
+       WHERE s.owner_id = ? AND a.started_at >= NOW() - INTERVAL 24 HOUR`,
+      [ownerId],
+    );
+    assert.equal(Number(ownerAttemptRows[0].count), 1);
 
-      const second = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A spaniel" });
-      await cappedService.startOrRetryAttempt(ownerId, second.session_uuid, "daily-cap-second");
-      assert.equal(provider.calls, 2);
-    } finally {
-      delete process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP;
-    }
+    const second = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A spaniel" });
+    await cappedService.startOrRetryAttempt(ownerId, second.session_uuid, "daily-cap-second");
+    assert.equal(provider.calls, 2);
   });
 
   await t.test("3d. Durable concurrency cap blocks a second provider invocation", async () => {

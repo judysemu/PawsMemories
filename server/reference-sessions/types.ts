@@ -45,6 +45,9 @@ export interface ReferenceSessionRecord {
   state: SessionState;
   current_attempt_id: number | null;
   approved_attempt_id: number | null;
+  /** Attempts consumed for the currently uploaded source; replacement resets it. */
+  source_attempt_count: number;
+  /** Monotonic lifetime attempt count; also supplies the next attempt number. */
   retry_count: number;
   created_at: Date;
   updated_at: Date;

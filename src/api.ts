@@ -202,17 +202,14 @@ export async function resetPassword(token: string, newPassword: string): Promise
 /** Restore the session on app load. Returns null if there is no valid session. */
 export async function fetchMe(): Promise<PublicUser | null> {
   if (!getToken()) return null;
-  try {
-    const res = await authedFetch("/api/me");
-    if (!res.ok) {
-      clearToken();
-      return null;
-    }
-    const data = await res.json();
-    return data.user as PublicUser;
-} catch {
+  const res = await authedFetch("/api/me");
+  if (res.status === 401 || res.status === 403) {
+    clearToken();
     return null;
   }
+  if (!res.ok) throw new Error(await parseError(res, "Could not restore your session."));
+  const data = await res.json();
+  return data.user as PublicUser;
 }
 
 export async function claimDailyStreak(): Promise<PublicUser> {
@@ -231,17 +228,6 @@ export async function claimAchievement(id: string): Promise<PublicUser> {
   if (!res.ok) throw new Error(await parseError(res, "Failed to claim achievement."));
   const data = await res.json();
   return data.user as PublicUser;
-}
-
-export async function claimShareReward(platform: string): Promise<{ reward: number; user: PublicUser }> {
-  const res = await authedFetch("/api/credits/reward", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ platform }),
-  });
-  if (!res.ok) throw new Error(await parseError(res, "Failed to claim reward."));
-  const data = await res.json();
-  return { reward: data.reward as number, user: data.user as PublicUser };
 }
 
 export interface CreditTxn {

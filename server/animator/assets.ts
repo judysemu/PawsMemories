@@ -8,8 +8,7 @@ import { uploadBase64Binary } from "../../storage.ts"; // Might need to check ex
 
 export async function importAsset(args: {
   userPhone: string;
-  sourceBuffer?: Buffer;
-  sourceUrl?: string;
+  sourceBuffer: Buffer;
   originalFilename: string;
 }): Promise<AssetMetadata> {
   const assetId = uuidv4();
@@ -22,18 +21,9 @@ export async function importAsset(args: {
   
   const absPath = resolveWithinWorkspace(`originals/${assetId}/${safeFilename}`);
   
-  let buffer: Buffer;
-  if (args.sourceBuffer) {
-    buffer = args.sourceBuffer;
-  } else if (args.sourceUrl) {
-    const resp = await fetch(args.sourceUrl);
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch sourceUrl: ${resp.statusText}`);
-    }
-    const arrayBuffer = await resp.arrayBuffer();
-    buffer = Buffer.from(arrayBuffer);
-  } else {
-    throw new Error("Must provide sourceBuffer or sourceUrl");
+  const buffer = args.sourceBuffer;
+  if (!buffer.length || buffer.length > 50 * 1024 * 1024) {
+    throw new Error("Animator model files must be between 1 byte and 50 MB.");
   }
 
   // Magic bytes check for basic validation

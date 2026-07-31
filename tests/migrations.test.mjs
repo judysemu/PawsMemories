@@ -43,6 +43,16 @@ test("published migrations remain immutable", () => {
   }
 });
 
+test("model-build durability migration adds recovery and refund sweep evidence", () => {
+  const migration = MIGRATIONS.find((entry) => entry.version === 40);
+  assert.equal(migration?.name, "model_build_durability_recovery");
+  const sql = migration.statements.join("\n");
+  assert.match(sql, /submission_claimed_at/);
+  assert.match(sql, /recovery_required_at/);
+  assert.match(sql, /refund_pending_at/);
+  assert.match(sql, /refund_attempts/);
+});
+
 test("runMigrations acquires dedicated connection, performs migration, and releases lock & connection in finally", async () => {
   const connectionQueries = [];
   const storedRows = [];

@@ -8,6 +8,19 @@ import type {
   PaidUsageReservation,
 } from "./server/paidApiGuards";
 import { runMigrations } from "./server/migrations/runner";
+import {
+  applyWalletDebitInTransaction,
+  applyWalletDebitOnce,
+  applyWalletClaimOnce,
+  MAX_CREDIT_BALANCE,
+  refundWalletDebitInTransaction,
+  refundWalletDebitOnce,
+} from "./server/wallet";
+import {
+  RewardClaimError,
+  claimAchievementReward,
+  claimDailyStreakReward,
+} from "./server/rewards";
 
 /** Internal row key for the seeded admin account (not a phone number). */
 const ADMIN_KEY = process.env.ADMIN_KEY || process.env.ADMIN_PHONE || "";
@@ -19,6 +32,12 @@ const ADMIN_KEY = process.env.ADMIN_KEY || process.env.ADMIN_PHONE || "";
  */
 
 let pool: mysql.Pool | null = null;
+
+export { MAX_CREDIT_BALANCE };
+
+function isValidCreditAmount(amount: number): boolean {
+  return Number.isSafeInteger(amount) && amount > 0 && amount <= MAX_CREDIT_BALANCE;
+}
 
 function boundedEnvInt(
   value: string | undefined,
@@ -234,6 +253,7 @@ export async function initDb(): Promise<void> {
         treats INT NOT NULL DEFAULT 0,
         profile_complete TINYINT(1) NOT NULL DEFAULT 0,
         is_admin TINYINT(1) NOT NULL DEFAULT 0,
+        is_operator TINYINT(1) NOT NULL DEFAULT 0,
         daily_streak INT NOT NULL DEFAULT 0,
         last_streak_claim DATE NULL,
         free_avatar_available TINYINT(1) NOT NULL DEFAULT 1,
@@ -262,6 +282,7 @@ export async function initDb(): Promise<void> {
       { name: "treats",            ddl: "ADD COLUMN treats INT NOT NULL DEFAULT 0" },
       { name: "profile_complete",  ddl: "ADD COLUMN profile_complete TINYINT(1) NOT NULL DEFAULT 0" },
       { name: "is_admin",          ddl: "ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0" },
+      { name: "is_operator",       ddl: "ADD COLUMN is_operator TINYINT(1) NOT NULL DEFAULT 0" },
       { name: "is_tester",         ddl: "ADD COLUMN is_tester TINYINT(1) NOT NULL DEFAULT 0" },
       { name: "daily_streak",      ddl: "ADD COLUMN daily_streak INT NOT NULL DEFAULT 0" },
       { name: "last_streak_claim", ddl: "ADD COLUMN last_streak_claim DATE NULL" },
@@ -960,9 +981,12 @@ export async function initDb(): Promise<void> {
         delta         INT NOT NULL,
         reason        VARCHAR(80) NOT NULL,
         balance_after INT NOT NULL,
+        idempotency_key VARCHAR(190) NULL,
         created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX (user_phone),
-        INDEX (created_at)
+        INDEX idx_credit_transaction_user (user_phone),
+        INDEX idx_credit_transaction_created (created_at),
+        UNIQUE KEY uniq_credit_transaction_user_identity (id, user_phone),
+        UNIQUE KEY uniq_credit_transaction_idempotency (idempotency_key)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
@@ -1190,10 +1214,13 @@ export async function initDb(): Promise<void> {
         status ENUM('draft', 'reference_ready', 'approved', 'customizing', 'validation_failed', 'print_ready', 'building', 'complete', 'failed') NOT NULL DEFAULT 'draft',
         idempotency_key VARCHAR(120) NULL,
         build_job_id INT NULL,
+        credits_reserved INT NOT NULL DEFAULT 0,
+        credit_debit_correlation_id VARCHAR(190) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX (user_phone),
         INDEX (status),
+        UNIQUE KEY uniq_pipeline_credit_debit (credit_debit_correlation_id),
         FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
@@ -1293,6 +1320,15 @@ export async function initDb(): Promise<void> {
       const adminEmail = process.env.ADMIN_EMAIL;
       const adminPassword = process.env.ADMIN_PASSWORD;
 
+      const missingAdminConfig = [
+        ["ADMIN_KEY", adminKey],
+        ["ADMIN_EMAIL", adminEmail],
+        ["ADMIN_PASSWORD", adminPassword],
+      ].filter(([, value]) => !String(value || "").trim()).map(([name]) => name);
+      if (process.env.NODE_ENV === "production" && missingAdminConfig.length > 0) {
+        throw new Error(`Required admin configuration missing: ${missingAdminConfig.join(", ")}`);
+      }
+
       if (adminKey && adminEmail && adminPassword) {
         const { hashPassword } = await import("./auth");
         const email = String(adminEmail).trim().toLowerCase();
@@ -1304,21 +1340,30 @@ export async function initDb(): Promise<void> {
         );
         if (existingRows && existingRows.length) {
           await getPool().query(
-            "UPDATE users SET email = ?, password_hash = ?, is_admin = 1, profile_complete = 1 WHERE phone = ?",
+            "UPDATE users SET email = ?, password_hash = ?, is_admin = 1, is_operator = 1, profile_complete = 1 WHERE phone = ?",
             [email, passwordHash, existingRows[0].phone]
           );
-          console.log("✅ Admin account synced (existing row updated).");
+          console.log("✅ Admin/operator account synced (existing row updated).");
         } else {
           await getPool().query(
-            `INSERT INTO users (phone, email, password_hash, is_admin, profile_complete, credits, full_name)
-             VALUES (?, ?, ?, 1, 1, 9999, 'Admin')
-             ON DUPLICATE KEY UPDATE email = VALUES(email), password_hash = VALUES(password_hash), is_admin = 1, profile_complete = 1`,
+            `INSERT INTO users (phone, email, password_hash, is_admin, is_operator, profile_complete, credits, full_name)
+             VALUES (?, ?, ?, 1, 1, 1, 9999, 'Admin')
+             ON DUPLICATE KEY UPDATE email = VALUES(email), password_hash = VALUES(password_hash), is_admin = 1, is_operator = 1, profile_complete = 1`,
             [adminKey, email, passwordHash]
           );
-          console.log("✅ Admin account seeded (new row).");
+          console.log("✅ Admin/operator account seeded (new row).");
+        }
+
+        const [verifiedRows]: any = await getPool().query(
+          "SELECT is_admin, is_operator FROM users WHERE LOWER(email) = ? ORDER BY id LIMIT 1",
+          [email],
+        );
+        if (verifiedRows?.[0]?.is_admin !== 1 || verifiedRows?.[0]?.is_operator !== 1) {
+          throw new Error("Admin/operator role verification failed after credential sync");
         }
       }
     } catch (seedErr) {
+      if (process.env.NODE_ENV === "production") throw seedErr;
       console.warn("⚠️ Admin seed skipped:", seedErr);
     }
     // ── Fido's Styles: per-user, per-avatar project settings (Phase 6) ─────────
@@ -1745,26 +1790,87 @@ export async function releaseFreeAvatar(phone: string): Promise<void> {
  * Returns true if the deduction succeeded, false if insufficient balance.
  */
 export async function deductCredits(phone: string, amount: number, reason: string = "spend"): Promise<boolean> {
-  const [result] = await getPool().query(
-    `UPDATE users SET credits = credits - ? WHERE phone = ? AND credits >= ?`,
-    [amount, phone, amount]
-  ) as any;
-  if (result.affectedRows === 1) {
-    await recordCreditTxn(phone, -Math.abs(amount), reason);
-  }
-  return result.affectedRows === 1;
+  return (await reserveCredits(phone, amount, reason)) !== null;
+}
+
+/**
+ * Reserve/spend credits and return the server-created ledger correlation that
+ * is required for any later refund. The correlation, not a caller-supplied
+ * owner or amount, is the durable source of refund authority.
+ */
+export async function reserveCredits(
+  phone: string,
+  amount: number,
+  reason: string = "spend",
+  debitCorrelationId: string = `debit:${randomUUID()}`,
+): Promise<string | null> {
+  if (!isValidCreditAmount(amount)) return null;
+  const result = await applyWalletDebitOnce(getPool(), {
+    ownerId: phone,
+    correlationId: debitCorrelationId,
+    amount,
+    reason: reason.slice(0, 80),
+  });
+  return result.authorized ? debitCorrelationId : null;
+}
+
+/** Refund a prior debit exactly once from its immutable ledger evidence. */
+export async function refundReservedCredits(debitCorrelationId: string): Promise<boolean> {
+  const result = await refundWalletDebitOnce(getPool(), debitCorrelationId);
+  return result.applied;
 }
 
 /**
  * Add credits to a user's account (purchases, rewards, webhooks).
  * Safe to call from Stripe webhooks.
  */
-export async function addCredits(phone: string, amount: number, reason: string = "credit"): Promise<void> {
-  await getPool().query(
-    `UPDATE users SET credits = credits + ? WHERE phone = ?`,
-    [amount, phone]
-  );
-  await recordCreditTxn(phone, Math.abs(amount), reason);
+export async function addCredits(
+  phone: string,
+  amount: number,
+  reason: string = "credit",
+  idempotencyKey: string = `credit:${randomUUID()}`,
+): Promise<void> {
+  if (!isValidCreditAmount(amount)) {
+    throw new RangeError("Credit amount must be a positive safe integer within the signed wallet maximum.");
+  }
+  await applyWalletClaimOnce(getPool(), {
+    ownerId: phone,
+    correlationId: idempotencyKey,
+    expected: { delta: amount, reason: reason.slice(0, 80) },
+    resolve: async () => ({ delta: amount, reason: reason.slice(0, 80) }),
+  });
+}
+
+export interface PurchasedCreditGrantResult {
+  applied: boolean;
+  balance: number;
+}
+
+/**
+ * Atomically grant one paid Stripe Checkout session exactly once.
+ * The Stripe session ID is the durable identity; the display reason is not.
+ */
+export async function grantPurchasedCredits(
+  phone: string,
+  amount: number,
+  stripeSessionId: string,
+): Promise<PurchasedCreditGrantResult> {
+  if (!isValidCreditAmount(amount)) {
+    throw new RangeError("Purchased credit amount must be within the signed wallet maximum.");
+  }
+  if (typeof phone !== "string" || phone.length === 0 || phone.length > 32) {
+    throw new Error("Purchased credit owner is required.");
+  }
+  if (typeof stripeSessionId !== "string" || stripeSessionId.length === 0 || stripeSessionId.length > 190) {
+    throw new Error("A valid Stripe Checkout session ID is required.");
+  }
+  const result = await applyWalletClaimOnce(getPool(), {
+    ownerId: phone,
+    correlationId: stripeSessionId,
+    expected: { delta: amount, reason: "credit_purchase" },
+    resolve: async () => ({ delta: amount, reason: "credit_purchase" }),
+  });
+  return { applied: result.applied, balance: result.balance };
 }
 
 /** Convert the retired Pawprint-token balance once without double-granting on restart. */
@@ -1790,7 +1896,8 @@ async function retireLegacyPawprintTokens(): Promise<void> {
         await addCredits(
           row.phone,
           Number(row.pawprint_tokens) * CREDIT_PRICES.PAWPRINT,
-          "pawprint_token_conversion"
+          "pawprint_token_conversion",
+          `legacy-pawprint-conversion:${row.phone}`,
         );
       }
       await getPool().query(`UPDATE users SET pawprint_tokens = 0 WHERE phone = ?`, [row.phone]);
@@ -1798,22 +1905,6 @@ async function retireLegacyPawprintTokens(): Promise<void> {
   } finally {
     try { await lockConnection.query(`SELECT RELEASE_LOCK('retire_pawprint_tokens')`); } catch {}
     lockConnection.release();
-  }
-}
-
-/**
- * Append a row to the credit ledger. Best-effort: a logging failure must never
- * block or reverse the actual credit change, so errors are swallowed.
- */
-export async function recordCreditTxn(phone: string, delta: number, reason: string): Promise<void> {
-  try {
-    const balance = await getCreditBalance(phone);
-    await getPool().query(
-      `INSERT INTO credit_transactions (user_phone, delta, reason, balance_after) VALUES (?, ?, ?, ?)`,
-      [phone, delta, reason.slice(0, 80), balance]
-    );
-  } catch (err) {
-    console.warn("[credit ledger] failed to record transaction:", (err as any)?.message || err);
   }
 }
 
@@ -1836,14 +1927,12 @@ export async function getCreditHistory(phone: string, limit: number = 20): Promi
 }
 
 /**
- * Whether a Stripe checkout session has already granted credits. Used to keep
- * the webhook and the redirect-confirm path from double-crediting the same
- * purchase (both tag the ledger row with reason "purchase:<sessionId>").
+ * Whether a Stripe checkout session has already granted credits.
  */
 export async function wasSessionCredited(sessionId: string): Promise<boolean> {
   const [rows] = await getPool().query(
-    `SELECT 1 FROM credit_transactions WHERE reason = ? LIMIT 1`,
-    [`purchase:${sessionId}`]
+    `SELECT 1 FROM credit_transactions WHERE idempotency_key = ? LIMIT 1`,
+    [sessionId]
   ) as any;
   return Array.isArray(rows) && rows.length > 0;
 }
@@ -2099,6 +2188,7 @@ export interface JobRow {
   status: 'queued' | 'running' | 'rigging' | 'validating' | 'done' | 'done_static_fallback' | 'failed';
   operation_name: string | null;
   credits_reserved: number;
+  credit_debit_correlation_id: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -2153,13 +2243,26 @@ export async function createJob(data: {
   creation_id?: number | null;
   kind: JobKind;
   credits_reserved: number;
+  credit_debit_correlation_id?: string | null;
   operation_name?: string | null;
 }): Promise<number> {
   assertJobKind(data.kind);
+  if (!Number.isSafeInteger(data.credits_reserved) || data.credits_reserved < 0 || data.credits_reserved > MAX_CREDIT_BALANCE) {
+    throw new Error("Generation job has an invalid reserved-credit amount.");
+  }
+  const debitCorrelationId = data.credit_debit_correlation_id || null;
+  if ((data.credits_reserved > 0) !== Boolean(debitCorrelationId)) {
+    throw new Error("Paid generation jobs require matching debit evidence; zero-cost jobs must not carry it.");
+  }
+  if (debitCorrelationId && debitCorrelationId.length > 190) {
+    throw new Error("Generation job debit correlation is too long.");
+  }
   const [result] = await getPool().query(
-    `INSERT INTO generation_jobs (user_phone, creation_id, kind, credits_reserved, operation_name, status)
-     VALUES (?, ?, ?, ?, ?, 'queued')`,
-    [data.user_phone, data.creation_id || null, data.kind, data.credits_reserved, data.operation_name || null]
+    `INSERT INTO generation_jobs
+       (user_phone, creation_id, kind, credits_reserved, credit_debit_correlation_id, operation_name, status)
+     VALUES (?, ?, ?, ?, ?, ?, 'queued')`,
+    [data.user_phone, data.creation_id || null, data.kind, data.credits_reserved,
+      debitCorrelationId, data.operation_name || null]
   ) as any;
   return result.insertId;
 }
@@ -2175,8 +2278,13 @@ export async function updateJobStatus(
         SET status = ?, error = ?, operation_name = COALESCE(?, operation_name),
             recovery_lease_owner = CASE WHEN ? IN ('done','done_static_fallback','failed') THEN NULL ELSE recovery_lease_owner END,
             recovery_lease_expires_at = CASE WHEN ? IN ('done','done_static_fallback','failed') THEN NULL ELSE recovery_lease_expires_at END
-      WHERE id = ?`,
-    [status, error || null, operationName || null, status, status, jobId]
+      WHERE id = ?
+        AND (
+          ? NOT IN ('done','done_static_fallback','failed')
+          OR status NOT IN ('done','done_static_fallback','failed')
+          OR status = ?
+        )`,
+    [status, error || null, operationName || null, status, status, jobId, status, status]
   ) as any;
   return result.affectedRows === 1;
 }
@@ -2195,23 +2303,6 @@ export async function getRunningJobs(): Promise<JobRow[]> {
     `SELECT * FROM generation_jobs WHERE status IN ('queued', 'running') ORDER BY created_at ASC`
   );
   return rows as unknown as JobRow[];
-}
-
-/** Restore credits reserved by a failed generation. This is operational recovery,
- * separate from user refund reviews and never accepts user/AI-selected amounts. */
-export async function restoreReservedGenerationCredits(phone: string, amount: number): Promise<void> {
-  if (!Number.isInteger(amount) || amount < 0) throw new Error("Invalid reserved credit amount");
-  await getPool().query(
-    `UPDATE users SET credits = credits + ? WHERE phone = ?`,
-    [amount, phone]
-  );
-}
-
-/** Refund-review disbursement primitive. Callers must be the refund service's
- * deterministic auto-approve/admin paths; it is not a general route helper. */
-export async function refundCredits(phone: string, amount: number): Promise<void> {
-  if (!Number.isInteger(amount) || amount < 0) throw new Error("Invalid refund amount");
-  await getPool().query(`UPDATE users SET credits = credits + ? WHERE phone = ?`, [amount, phone]);
 }
 
 export async function setCreationVideoUrl(creationId: number, phone: string, videoUrl: string): Promise<boolean> {
@@ -2909,73 +3000,39 @@ export async function giveTreatToAvatar(id: number, phone: string): Promise<bool
   }
 }
 
-// Daily Streak with Treats
-export async function claimDailyStreak(phone: string): Promise<{success: boolean}> {
-  const user = await findUserByPhone(phone);
-  if (!user) return { success: false };
+export type AchievementClaimResult = {
+  success: boolean;
+  reason?: "unknown" | "ineligible" | "already_claimed";
+  reward?: number;
+};
 
-  const today = new Date().toISOString().split('T')[0];
-  // mysql2 may return DATE columns as strings or Date objects depending on
-  // connection configuration. Normalize before comparing calendar dates.
-  const rawClaimedDate: unknown = user.last_streak_claim;
-  const claimedDate = rawClaimedDate instanceof Date
-    ? rawClaimedDate.toISOString().split('T')[0]
-    : rawClaimedDate ? String(rawClaimedDate).slice(0, 10) : null;
-  if (claimedDate === today) {
-    return { success: false }; // Already claimed today
+/** Compatibility wrappers keep route imports stable while the reward module owns all wallet logic. */
+export async function claimDailyStreak(
+  phone: string,
+  serverDate: string = new Date().toISOString().slice(0, 10),
+): Promise<{ success: boolean; reward?: number }> {
+  try {
+    const result = await claimDailyStreakReward(getPool(), phone, serverDate);
+    return { success: result.applied, reward: result.applied ? result.delta : undefined };
+  } catch (error) {
+    if (error instanceof RewardClaimError && error.code === "ALREADY_CLAIMED") return { success: false };
+    throw error;
   }
-
-  // Determine if it's contiguous (yesterday)
-  let newStreak = 1;
-  if (claimedDate) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    if (claimedDate === yesterdayStr) {
-      newStreak = (user.daily_streak || 0) + 1;
-    }
-  }
-
-  // Reward: 5 PupCoins and 1 treat. Every third consecutive day adds a
-  // small 15-PupCoin bundle so the incentive is meaningful but bounded.
-  const streakBundle = newStreak > 0 && newStreak % 3 === 0 ? 15 : 0;
-  const reward = 5 + streakBundle;
-  await getPool().query(
-    `UPDATE users 
-     SET daily_streak = ?,
-         last_streak_claim = ?,
-         credits = credits + ?,
-         treats = treats + 1
-     WHERE phone = ?`,
-    [newStreak, today, reward, phone]
-  );
-  await recordCreditTxn(phone, reward, streakBundle ? "daily_bonus_streak_bundle" : "daily_bonus");
-  return { success: true };
 }
 
-export async function claimAchievement(phone: string, id: string): Promise<{success: boolean}> {
+export async function claimAchievement(phone: string, id: string): Promise<AchievementClaimResult> {
   try {
-    const user = await findUserByPhone(phone);
-    if (!user) throw new Error("User not found");
-    
-    let achievements: string[] = [];
-    if (user.achievements_json) {
-      try { achievements = JSON.parse(user.achievements_json); } catch(e) {}
+    const result = await claimAchievementReward(getPool(), phone, id);
+    return result.applied
+      ? { success: true, reward: result.delta }
+      : { success: false, reason: "already_claimed" };
+  } catch (error) {
+    if (error instanceof RewardClaimError) {
+      if (error.code === "UNKNOWN_ACHIEVEMENT") return { success: false, reason: "unknown" };
+      if (error.code === "NOT_ELIGIBLE") return { success: false, reason: "ineligible" };
+      if (error.code === "ALREADY_CLAIMED") return { success: false, reason: "already_claimed" };
     }
-    
-    if (achievements.includes(id)) {
-      return { success: false }; // Already claimed
-    }
-    
-    achievements.push(id);
-    await getPool().query(
-      `UPDATE users SET achievements_json = ?, credits = credits + 10 WHERE phone = ?`, 
-      [JSON.stringify(achievements), phone]
-    );
-    return { success: true };
-  } catch (err) {
-    console.error("Achievement claim error:", err);
-    throw err;
+    throw error;
   }
 }
 
@@ -3582,7 +3639,7 @@ export async function verifyUserPhone(phone: string): Promise<void> {
 // Phase 8: Referral
 // ============================================================================
 
-import { randomBytes } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 
 export async function generateReferralCode(phone: string): Promise<string> {
   const [rows] = await getPool().query(`SELECT referral_code FROM users WHERE phone = ?`, [phone]) as any;
@@ -3613,16 +3670,37 @@ export async function recordReferral(referrerCode: string, referredPhone: string
 
 export async function creditReferralIfComplete(referredPhone: string): Promise<void> {
   const [rows] = await getPool().query(
-    `SELECT r.id, r.referrer_phone, r.credited_at
+    `SELECT r.id, r.referrer_phone
        FROM referrals r JOIN users u ON u.phone = r.referred_phone
-      WHERE r.referred_phone = ? AND u.profile_complete = 1 AND r.credited_at IS NULL
+      WHERE r.referred_phone = ? AND u.profile_complete = 1
       LIMIT 1`,
-    [referredPhone]
+    [referredPhone],
   ) as any;
   const ref = rows?.[0];
   if (!ref) return;
-  await addCredits(ref.referrer_phone, 30, "referral_bonus");
-  await getPool().query(`UPDATE referrals SET credited_at = NOW() WHERE id = ?`, [ref.id]);
+  await applyWalletClaimOnce(getPool(), {
+    ownerId: String(ref.referrer_phone),
+    correlationId: `referral-bonus:${Number(ref.id)}`,
+    expected: { delta: 30, reason: "referral_bonus" },
+    resolve: async ({ connection }) => {
+      const [lockedRows] = await connection.query(
+        `SELECT credited_at FROM referrals WHERE id=? AND referred_phone=? LIMIT 1 FOR UPDATE`,
+        [Number(ref.id), referredPhone],
+      ) as any;
+      if (!Array.isArray(lockedRows) || lockedRows.length !== 1) throw new Error("Referral evidence was not found.");
+      return {
+        delta: 30,
+        reason: "referral_bonus",
+        mutate: async (domainConnection) => {
+          const [updated] = await domainConnection.query(
+            `UPDATE referrals SET credited_at=COALESCE(credited_at, NOW()) WHERE id=?`,
+            [Number(ref.id)],
+          ) as any;
+          if (updated?.affectedRows !== 1) throw new Error("Referral evidence update failed.");
+        },
+      };
+    },
+  });
 }
 
 // ============================================================================
@@ -3755,6 +3833,50 @@ export async function consumePasswordReset(tokenHash: string): Promise<string | 
 /** Set a user's password hash by their internal key (users.phone). */
 export async function setUserPassword(userPhone: string, passwordHash: string): Promise<void> {
   await getPool().query("UPDATE users SET password_hash = ? WHERE phone = ?", [passwordHash, userPhone]);
+}
+
+/** Atomically consume one reset token and replace the associated password. */
+export async function resetPasswordWithToken(
+  tokenHash: string,
+  passwordHash: string,
+  pool: Pick<mysql.Pool, "getConnection"> = getPool(),
+): Promise<boolean> {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      `SELECT id, user_phone
+         FROM password_resets
+        WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW()
+        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [tokenHash],
+    ) as any;
+    if (!rows?.length) {
+      await connection.rollback();
+      return false;
+    }
+    const row = rows[0];
+    const [consume] = await connection.query(
+      "UPDATE password_resets SET used_at = NOW() WHERE id = ? AND used_at IS NULL AND expires_at > NOW()",
+      [row.id],
+    ) as any;
+    if (consume.affectedRows !== 1) {
+      await connection.rollback();
+      return false;
+    }
+    const [updated] = await connection.query(
+      "UPDATE users SET password_hash = ? WHERE phone = ?",
+      [passwordHash, row.user_phone],
+    ) as any;
+    if (updated.affectedRows !== 1) throw new Error("Password reset user no longer exists");
+    await connection.commit();
+    return true;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3948,6 +4070,8 @@ export interface CreatePipelineSession {
   status: PipelineStatus;
   idempotency_key: string | null;
   build_job_id: number | null;
+  credits_reserved?: number;
+  credit_debit_correlation_id?: string | null;
   provider_handle?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -4017,6 +4141,17 @@ export async function updateCreatePipelineStatus(id: string, userPhone: string, 
 // Pipeline Transactions (Phase 2)
 // ---------------------------------------------------------------------------
 
+function pipelineDebitCorrelation(
+  sessionId: string,
+  userPhone: string,
+  idempotencyKey: string,
+): string {
+  const digest = createHash("sha256")
+    .update(`${sessionId}\u0000${userPhone}\u0000${idempotencyKey}`)
+    .digest("hex");
+  return `pipeline-build:${digest}:debit`;
+}
+
 export async function reservePipelineSessionForBuild(sessionId: string, userPhone: string, idempotencyKey: string, modelCost: number): Promise<{ success: boolean; error?: string; alreadyReservedOrBuilding?: boolean; sessionRow?: CreatePipelineSession }> {
   const connection = await getPool().getConnection();
   try {
@@ -4046,8 +4181,13 @@ export async function reservePipelineSessionForBuild(sessionId: string, userPhon
       return { success: false, error: "Session is in an invalid state for approval, or a conflicting approval is already processing." };
     }
 
-    // 2. Lock the user row and deduct PupCoins
-    const [userRows] = await connection.query("SELECT * FROM users WHERE phone = ? FOR UPDATE", [userPhone]) as any;
+    // 2. Lock the user row and record one wallet debit in the same transaction
+    // as the durable session reservation. A later refund derives its owner and
+    // amount from this immutable correlation, never from route parameters.
+    const [userRows] = await connection.query(
+      "SELECT credits, is_admin FROM users WHERE phone = ? LIMIT 1 FOR UPDATE",
+      [userPhone],
+    ) as any;
     if (!userRows || userRows.length === 0) {
       await connection.query('ROLLBACK');
       return { success: false, error: "User not found." };
@@ -4056,19 +4196,29 @@ export async function reservePipelineSessionForBuild(sessionId: string, userPhon
     
     // Admins don't need credits, but normal users do.
     const isAdmin = user.is_admin === 1;
-    if (!isAdmin && user.credits < modelCost) {
-      await connection.query('ROLLBACK');
-      return { success: false, error: "Insufficient PupCoins." };
-    }
-
-    if (!isAdmin) {
-      await connection.query("UPDATE users SET credits = credits - ? WHERE phone = ?", [modelCost, userPhone]);
+    const debitCorrelationId = isAdmin
+      ? null
+      : pipelineDebitCorrelation(sessionId, userPhone, idempotencyKey);
+    if (debitCorrelationId) {
+      const debit = await applyWalletDebitInTransaction(connection, {
+        ownerId: userPhone,
+        correlationId: debitCorrelationId,
+        amount: modelCost,
+        reason: "create_pipeline_model",
+      });
+      if (!debit.authorized) {
+        await connection.query('ROLLBACK');
+        return { success: false, error: "Insufficient PupCoins." };
+      }
     }
 
     // 3. Update status to 'build_starting' and set idempotency key
     await connection.query(
-      "UPDATE create_pipeline_sessions SET status = 'build_starting', idempotency_key = ? WHERE id = ?",
-      [idempotencyKey, sessionId]
+      `UPDATE create_pipeline_sessions
+          SET status = 'build_starting', idempotency_key = ?, credits_reserved = ?,
+              credit_debit_correlation_id = ?
+        WHERE id = ?`,
+      [idempotencyKey, isAdmin ? 0 : modelCost, debitCorrelationId, sessionId]
     );
 
     await connection.query('COMMIT');
@@ -4119,11 +4269,23 @@ export async function commitPipelineSessionBuild(sessionId: string, userPhone: s
     ) as any;
     const creationId = creationRes.insertId;
 
-    // 3. Insert into generation_jobs
+    const reservedCredits = Number(session.credits_reserved || 0);
+    const debitCorrelationId = session.credit_debit_correlation_id
+      ? String(session.credit_debit_correlation_id)
+      : null;
+    if (reservedCredits !== Number(jobData.credits_reserved)) {
+      throw new Error("Generation job credit reservation does not match the approved session.");
+    }
+    if ((reservedCredits > 0) !== Boolean(debitCorrelationId)) {
+      throw new Error("Generation job credit evidence is incomplete.");
+    }
+
+    // 3. Insert into generation_jobs with the exact session debit evidence.
     const [jobRes] = await connection.query(
-      `INSERT INTO generation_jobs (user_phone, creation_id, kind, credits_reserved, operation_name, status)
-       VALUES (?, ?, ?, ?, ?, 'queued')`,
-      [userPhone, creationId, jobData.kind, jobData.credits_reserved, jobData.operation_name || null]
+      `INSERT INTO generation_jobs
+        (user_phone, creation_id, kind, credits_reserved, credit_debit_correlation_id, operation_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'queued')`,
+      [userPhone, creationId, jobData.kind, reservedCredits, debitCorrelationId, jobData.operation_name || null]
     ) as any;
     const jobId = jobRes.insertId;
 
@@ -4211,10 +4373,23 @@ export async function recoverPipelineSession(sessionId: string, userPhone: strin
     ) as any;
     const creationId = creationRes.insertId;
 
+    const reservedCredits = Number(session.credits_reserved || 0);
+    const debitCorrelationId = session.credit_debit_correlation_id
+      ? String(session.credit_debit_correlation_id)
+      : null;
+    if (reservedCredits !== Number(jobData.credits_reserved)) {
+      throw new Error("Recovered job credit reservation does not match the approved session.");
+    }
+    if ((reservedCredits > 0) !== Boolean(debitCorrelationId)) {
+      throw new Error("Recovered job credit evidence is incomplete.");
+    }
+
     const [jobRes] = await connection.query(
-      `INSERT INTO generation_jobs (user_phone, creation_id, kind, credits_reserved, operation_name, status)
-       VALUES (?, ?, ?, ?, ?, 'queued')`,
-      [userPhone, creationId, jobData.kind, jobData.credits_reserved, session.provider_handle || jobData.operation_name || null]
+      `INSERT INTO generation_jobs
+        (user_phone, creation_id, kind, credits_reserved, credit_debit_correlation_id, operation_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'queued')`,
+      [userPhone, creationId, jobData.kind, reservedCredits, debitCorrelationId,
+        session.provider_handle || jobData.operation_name || null]
     ) as any;
     const jobId = jobRes.insertId;
 
@@ -4246,7 +4421,7 @@ export async function markPipelineSessionRecoveryRequired(sessionId: string, use
   }
 }
 
-export async function releasePipelineSessionReservation(sessionId: string, userPhone: string, modelCost: number): Promise<{ success: boolean; error?: string }> {
+export async function releasePipelineSessionReservation(sessionId: string, userPhone: string, _modelCost: number): Promise<{ success: boolean; error?: string }> {
   const connection = await getPool().getConnection();
   try {
     await connection.query('START TRANSACTION');
@@ -4265,18 +4440,26 @@ export async function releasePipelineSessionReservation(sessionId: string, userP
       throw new Error("Session is not in build_starting state.");
     }
 
-    // Refund PupCoins
-    const [userRows] = await connection.query("SELECT * FROM users WHERE phone = ? FOR UPDATE", [userPhone]) as any;
-    if (userRows && userRows.length > 0) {
-      const user = userRows[0];
-      if (user.is_admin === 0) {
-        await connection.query("UPDATE users SET credits = credits + ? WHERE phone = ?", [modelCost, userPhone]);
-      }
+    const reservedCredits = Number(session.credits_reserved || 0);
+    const debitCorrelationId = session.credit_debit_correlation_id
+      ? String(session.credit_debit_correlation_id)
+      : null;
+    if (reservedCredits > 0) {
+      if (!debitCorrelationId) throw new Error("Pipeline reservation is missing debit evidence.");
+      await refundWalletDebitInTransaction(connection, debitCorrelationId, {
+        ownerId: userPhone,
+        amount: reservedCredits,
+      });
+    } else if (debitCorrelationId) {
+      throw new Error("Zero-cost pipeline reservation has unexpected debit evidence.");
     }
 
     // Revert status to reference_ready
     await connection.query(
-      "UPDATE create_pipeline_sessions SET status = 'reference_ready', idempotency_key = NULL WHERE id = ?",
+      `UPDATE create_pipeline_sessions
+          SET status = 'reference_ready', idempotency_key = NULL,
+              credits_reserved = 0, credit_debit_correlation_id = NULL
+        WHERE id = ?`,
       [sessionId]
     );
 

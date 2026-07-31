@@ -120,11 +120,18 @@ export function createHttpFurBinV5Api(): FurBinV5Api {
     capabilities,
 
     async searchItems(filters): Promise<LibraryPage> {
-      const result = await parseResponse<{ items: ServerItemDto[]; total: number }>(
+      const requestedPage = Math.max(1, Math.trunc(filters.page || 1));
+      const requestedLimit = Math.min(100, Math.max(1, Math.trunc(filters.limit || 40)));
+      const result = await parseResponse<{ items: ServerItemDto[]; total: number; page?: number; limit?: number }>(
         await authedFetch(`/api/fur-bin/items?${searchQuery(filters)}`),
         "Could not load your Fur Bin.",
       );
-      return { items: result.items.map(mapItem), total: result.total };
+      return {
+        items: result.items.map(mapItem),
+        total: result.total,
+        page: Number.isSafeInteger(result.page) && Number(result.page) > 0 ? Number(result.page) : requestedPage,
+        limit: Number.isSafeInteger(result.limit) && Number(result.limit) > 0 ? Number(result.limit) : requestedLimit,
+      };
     },
 
     async getItem(itemUuid): Promise<FurBinItem> {

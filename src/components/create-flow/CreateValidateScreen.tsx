@@ -3,57 +3,34 @@ import { Screen } from "../../types";
 import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
 import { authedFetch } from "../../api";
+import {
+  buildPrebuildValidationFingerprint,
+  evaluatePrebuildValidation,
+  type PrebuildValidationResult,
+} from "./prebuildValidation";
 
 interface CreateValidateScreenProps {
   onNavigate: (screen: Screen) => void;
 }
 
-interface ValidationResult {
-  rule: string;
-  pass: boolean;
-  detail: string;
-}
-
 export default function CreateValidateScreen({ onNavigate }: CreateValidateScreenProps) {
   const { state, setState } = useCreateFlow();
   const [isValidating, setIsValidating] = useState(true);
-  const [results, setResults] = useState<ValidationResult[]>([]);
+  const [results, setResults] = useState<PrebuildValidationResult[]>([]);
   const [isPrintable, setIsPrintable] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const candidateImageUrl = state.candidateImageUrl;
+  const pose = state.customizationState?.pose;
+  const engraving = state.customizationState?.engraving;
+  const validationFingerprint = buildPrebuildValidationFingerprint({ candidateImageUrl, pose, engraving });
+
   useEffect(() => {
-    // Simulate validation engine
+    setIsValidating(true);
+    setResults([]);
     const runValidation = () => {
-      const checks: ValidationResult[] = [];
-      let passed = true;
-
-      // Rule 1: Must have a candidate image
-      if (state.candidateImageUrl) {
-        checks.push({ rule: "Reference Image", pass: true, detail: "Valid blueprint found." });
-      } else {
-        checks.push({ rule: "Reference Image", pass: false, detail: "Missing blueprint." });
-        passed = false;
-      }
-
-      // Rule 2: Printability rules based on pose and species heuristics
-      if (state.customizationState?.pose === "Standing") {
-        checks.push({ rule: "Structural Integrity", pass: true, detail: "Standing pose requires base (auto-added)." });
-      } else {
-        checks.push({ rule: "Structural Integrity", pass: true, detail: "Pose is stable for 3D printing." });
-      }
-
-      // Rule 3: Text validation
-      if (state.customizationState?.engraving) {
-        const text = state.customizationState.engraving;
-        // Example failure: too many characters
-        if (text.length > 24) {
-          checks.push({ rule: "Engraving Text", pass: false, detail: "Text is too long for the base." });
-          passed = false;
-        } else {
-          checks.push({ rule: "Engraving Text", pass: true, detail: "Text length and characters are valid." });
-        }
-      }
+      const { passed, checks } = evaluatePrebuildValidation({ candidateImageUrl, pose, engraving });
 
       setResults(checks);
       setIsPrintable(passed);
@@ -68,7 +45,7 @@ export default function CreateValidateScreen({ onNavigate }: CreateValidateScree
 
     const timer = setTimeout(runValidation, 1500);
     return () => clearTimeout(timer);
-  }, [state, setState]);
+  }, [validationFingerprint, setState]);
 
   const handleContinue = async () => {
     setIsSaving(true);
@@ -120,8 +97,8 @@ export default function CreateValidateScreen({ onNavigate }: CreateValidateScree
       </div>
 
       <div className="text-center mb-8">
-        <h1 className="text-3xl font-black text-on-surface mb-2">Printability Check</h1>
-        <p className="text-on-surface-variant text-lg">Ensuring your model is physically sound before we build it.</p>
+        <h1 className="text-3xl font-black text-on-surface mb-2">Pre-Build Check</h1>
+        <p className="text-on-surface-variant text-lg">Confirming your approved reference and customization choices before the model is built.</p>
       </div>
 
       <div className="glass-panel p-8 rounded-3xl max-w-2xl mx-auto min-h-[400px]">
@@ -129,7 +106,7 @@ export default function CreateValidateScreen({ onNavigate }: CreateValidateScree
           <div className="flex flex-col items-center justify-center py-12 text-center h-full">
             <RefreshCw className="animate-spin text-primary mb-6" size={48} />
             <h3 className="text-xl font-bold text-on-surface mb-2">Running Diagnostics...</h3>
-            <p className="text-on-surface-variant">Checking overhangs, wall thickness, and stability.</p>
+            <p className="text-on-surface-variant">Reviewing the reference, pose plan, and engraving limits.</p>
           </div>
         ) : (
           <div className="flex flex-col h-full">
@@ -138,23 +115,23 @@ export default function CreateValidateScreen({ onNavigate }: CreateValidateScree
                 <>
                   <CheckCircle2 size={48} className="text-emerald-500 shrink-0" />
                   <div>
-                    <h3 className="text-xl font-bold text-on-surface">Ready to Print!</h3>
-                    <p className="text-on-surface-variant">Your model passed all physical checks.</p>
+                    <h3 className="text-xl font-bold text-on-surface">Ready to Build</h3>
+                    <p className="text-on-surface-variant">Pre-build inputs are complete. Final mesh and print checks run after the model is built.</p>
                   </div>
                 </>
               ) : (
                 <>
                   <XCircle size={48} className="text-error shrink-0" />
                   <div>
-                    <h3 className="text-xl font-bold text-on-surface">Not Printable</h3>
-                    <p className="text-on-surface-variant">Please fix the issues below to continue.</p>
+                    <h3 className="text-xl font-bold text-on-surface">Input Needs Attention</h3>
+                    <p className="text-on-surface-variant">Please fix the pre-build issue below to continue.</p>
                   </div>
                 </>
               )}
             </div>
 
             <div className="space-y-4 mb-8 flex-1">
-              <h4 className="font-bold text-on-surface px-2 text-sm uppercase tracking-wider">Validation Rules</h4>
+              <h4 className="font-bold text-on-surface px-2 text-sm uppercase tracking-wider">Pre-Build Rules</h4>
               {results.map((res, i) => (
                 <div key={i} className="flex items-start gap-4 p-4 rounded-xl bg-surface border border-outline-variant">
                   {res.pass ? (

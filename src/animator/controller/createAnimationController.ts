@@ -153,6 +153,7 @@ export function createAnimationController(
   // Tracks for masking
   const boneMasks = new Map<string, string[] | null>(); // layer → mask or null
   const locomotionBlendActions = new Set<THREE.AnimationAction>();
+  let playbackSpeed = 1;
 
   // ── helpers ────────────────────────────────────────────────────────
 
@@ -199,6 +200,7 @@ export function createAnimationController(
       : mixer.clipAction(runtimeClip);
     action.clampWhenFinished = true;
     action.loop = sourceAction.loop;
+    action.timeScale = playbackSpeed;
     state.clipAdditive = Boolean(additive && layer !== "L0");
 
     // If there's an existing action on this layer, handle cross-fade
@@ -265,6 +267,7 @@ export function createAnimationController(
       const action = mixer.clipAction(clip);
       action.clampWhenFinished = true;
       action.loop = THREE.LoopRepeat;
+      action.timeScale = playbackSpeed;
       actions.set(clip.name, action);
     }
   }
@@ -344,6 +347,7 @@ export function createAnimationController(
   }
 
   function setSpeed(multiplier: number) {
+    playbackSpeed = multiplier;
     for (const state of Object.values(layerStates)) {
       if (state.action) {
         state.action.timeScale = multiplier;
@@ -502,6 +506,7 @@ export function createAnimationController(
       nextActions.add(action);
       action.enabled = true;
       action.paused = false;
+      action.timeScale = playbackSpeed;
       action.setEffectiveWeight(entry.weight);
       action.time = Math.max(0, Math.min(entry.timeSec, action.getClip().duration));
       action.play();

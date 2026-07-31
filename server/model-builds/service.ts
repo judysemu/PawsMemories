@@ -24,6 +24,7 @@ import {
   updateJobState,
   insertAttempt,
   findAttemptById,
+  findAttemptByIdForUpdate,
   findAttemptsByJobId,
   findAttemptByIdempotencyKey,
   updateAttemptState,
@@ -40,18 +41,34 @@ import {
   insertAcceptance,
   findAcceptanceByJobId,
   findExpiredLeases,
+  findAmbiguousSubmissions,
+  findRefundPendingJobs,
+  markRefundPending,
+  markRefundComplete,
+  markRefundFailure,
 } from "./repository";
 import { storeProviderGlb, storeValidatedGlb, storeReport as storeReportJson, storeRenderArtifact, cleanupPrivateObject } from "./storage";
 import { getPrivateObjectBuffer } from "../../storage.private";
 import { computeAdvisoryLikeness } from "./likeness";
 import { validateGlb, validatePngImage, createValidPngBuffer, VALIDATOR_VERSION } from "./validation";
-import type { ModelBuildProvider, ModelBuildProviderInput } from "./provider";
+import { ModelBuildProviderError, type ModelBuildProvider, type ModelBuildProviderInput } from "./provider";
+import {
+  canCancelBeforeSubmission,
+  DurableModelBuildError,
+  persistProviderHandleDurably,
+  persistRecoveryRequiredDurably,
+  pollProviderWithLease,
+  RecoveryPersistenceUnavailableError,
+  startProviderWithLease,
+  type DurabilityRuntime,
+} from "./durability";
 import { assertModelBuildV3Enabled } from "./featureFlag";
 import {
   TERMINAL_JOB_STATES,
   MAX_BUILD_CORRECTION_ATTEMPTS,
   DEFAULT_LEASE_DURATION_MS,
   type BuildJobRecord,
+  type BuildAttemptRecord,
   type BuildJobState,
   type BuildJobPublic,
   type BuildAttemptPublic,
@@ -76,6 +93,7 @@ export class ModelBuildService {
   constructor(
     private provider: ModelBuildProvider,
     private getPoolFn: () => mysql.Pool = getPool,
+    private durabilityRuntime: Partial<DurabilityRuntime> = {},
   ) {}
 
   // ── Preflight & Quote ───────────────────────────────────────────────────
@@ -252,7 +270,7 @@ export class ModelBuildService {
       const existingJob = await findJobBySessionAndOwner(connection, pf.sessionId, ownerId);
       if (existingJob && !TERMINAL_JOB_STATES.includes(existingJob.state as any)) {
         await connection.commit();
-        return this.formatJobPublic(existingJob);
+        return this.formatJobPublicHydrated(pool, existingJob);
       }
 
       // 4. Create job
@@ -305,12 +323,12 @@ export class ModelBuildService {
       });
 
       const updatedJob = await findJobByUuid(pool, jobUuid);
-      return this.formatJobPublic(updatedJob!);
+      return this.formatJobPublicHydrated(pool, updatedJob!);
     } catch (err: any) {
       await connection.rollback();
       if (err?.code === "ER_DUP_ENTRY" || err?.errno === 1062) {
         const existing = await findJobBySessionAndOwner(pool, pf.sessionId, ownerId);
-        if (existing) return this.formatJobPublic(existing);
+        if (existing) return this.formatJobPublicHydrated(pool, existing);
       }
       if (err instanceof ModelBuildServiceError) throw err;
       throw new ModelBuildServiceError(`Build start failed: ${err.message}`, "START_FAILED");
@@ -329,32 +347,61 @@ export class ModelBuildService {
     try {
       await connection.beginTransaction();
 
-      // Claim lease
-      const leaseExpiry = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
-      const claimed = await claimLease(connection, attemptId, leaseOwner, leaseExpiry);
-      if (!claimed) {
-        await connection.commit();
-        return; // Another worker holds this
-      }
-
       const job = await findJobByUuidForUpdate(connection, jobUuid);
-      if (!job || TERMINAL_JOB_STATES.includes(job.state as any)) {
+      if (!job || job.owner_id !== ownerId || TERMINAL_JOB_STATES.includes(job.state as any) || job.state === "recovery_required") {
         await connection.commit();
         return;
       }
 
-      const attempt = await findAttemptById(connection, attemptId);
-      if (!attempt || !["queued", "submitted", "processing", "downloading"].includes(attempt.state)) {
+      const attempt = await findAttemptByIdForUpdate(connection, attemptId);
+      if (!attempt || job.current_attempt_id !== attempt.id ||
+          !["queued", "submitted", "processing", "downloading", "validating"].includes(attempt.state)) {
+        await connection.commit();
+        return;
+      }
+
+      // Lock order is always job then attempt. Cancellation uses the same order,
+      // so exactly one side wins the queued -> submitted submission claim.
+      const leaseExpiry = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+      const claimed = await claimLease(connection, attemptId, leaseOwner, leaseExpiry);
+      if (!claimed) {
         await connection.commit();
         return;
       }
 
       const isNewSubmission = attempt.state === "queued";
+      const isValidationRecovery = attempt.state === "validating";
       if (isNewSubmission) {
         await updateJobState(connection, job.id, "submitted");
-        await updateAttemptState(connection, attemptId, "submitted");
+        await updateAttemptState(connection, attemptId, "submitted", {
+          submissionClaimedAt: new Date(),
+        });
+      } else if (!isValidationRecovery && !attempt.provider_task_handle) {
+        // A submitted attempt without a handle may have crossed the provider
+        // boundary before a crash. Never refund or submit it automatically.
+        await updateJobState(connection, job.id, "recovery_required", {
+          failureCode: "PROVIDER_HANDLE_RECOVERY_REQUIRED",
+        });
+        await updateAttemptState(connection, attemptId, "recovery_required", {
+          failureCode: "PROVIDER_HANDLE_RECOVERY_REQUIRED",
+          errorMessage: "Provider submission requires operator recovery",
+          recoveryRequiredAt: new Date(),
+        });
+        await connection.commit();
+        return;
       }
       await connection.commit();
+
+      if (isValidationRecovery) {
+        await this.failJob(
+          jobUuid,
+          attemptId,
+          "VALIDATION_RESTART_UNSAFE",
+          "Validation was interrupted and cannot be resumed safely",
+          leaseOwner,
+        );
+        return;
+      }
 
       let providerTaskHandle = attempt.provider_task_handle;
       let providerName = attempt.provider;
@@ -374,98 +421,223 @@ export class ModelBuildService {
           else if (view.view_kind === "front_three_quarter") viewUrls.threeQuarterUrl = url;
         }
         if (Object.values(viewUrls).some((url) => !url)) {
-          await this.failJob(jobUuid, attemptId, "REFERENCE_URL_FAILED", "All five approved reference URLs are required");
+          await this.failJob(jobUuid, attemptId, "REFERENCE_URL_FAILED", "All five approved reference URLs are required", leaseOwner);
           return;
         }
         try {
-          const providerResult = await this.provider.start(viewUrls, attempt.input_config_hash);
+          const providerResult = await startProviderWithLease(
+            this.provider,
+            viewUrls,
+            attempt.input_config_hash,
+            () => this.renewOwnedLease(
+              pool,
+              jobUuid,
+              attemptId,
+              leaseOwner,
+              ["submitted"],
+              ["submitted"],
+            ),
+            this.durabilityRuntime,
+          );
           providerTaskHandle = providerResult.providerTaskHandle;
           providerName = providerResult.provider;
-          const conn2 = await pool.getConnection();
-          try {
-            await conn2.beginTransaction();
-            await updateAttemptState(conn2, attemptId, "submitted", { providerTaskHandle });
-            await conn2.commit();
-          } finally {
-            conn2.release();
+          if (!providerTaskHandle) {
+            throw new ModelBuildProviderError(
+              "Provider submission outcome is unknown because no task handle was returned",
+              "PROVIDER_SUBMISSION_AMBIGUOUS",
+              false,
+              "ambiguous_acceptance",
+            );
           }
-        } catch (err: any) {
-          await this.failJob(jobUuid, attemptId, "PROVIDER_START_FAILED", err.message);
+
+          const persistenceResult = await persistProviderHandleDurably(
+            async (persistenceAttempt) => {
+              const conn2 = await pool.getConnection();
+              try {
+                await conn2.beginTransaction();
+                const current = await this.lockCurrentAttempt(
+                  conn2, jobUuid, attemptId, leaseOwner, true,
+                  ["submitted"], ["submitted"],
+                );
+                if (!current) {
+                  throw new DurableModelBuildError("Submission attempt is no longer current", "ATTEMPT_REPLACED");
+                }
+                await updateAttemptState(conn2, attemptId, "submitted", {
+                  providerTaskHandle,
+                  handlePersistAttempts: persistenceAttempt,
+                });
+                await conn2.commit();
+              } catch (error) {
+                await conn2.rollback().catch(() => {});
+                throw error;
+              } finally {
+                conn2.release();
+              }
+            },
+            async (persistenceAttempt) => {
+              const conn2 = await pool.getConnection();
+              try {
+                await conn2.beginTransaction();
+                const current = await this.lockCurrentAttempt(
+                  conn2, jobUuid, attemptId, leaseOwner, false,
+                  ["submitted", "recovery_required"], ["submitted", "recovery_required"],
+                );
+                if (!current) {
+                  throw new DurableModelBuildError("Submission attempt is no longer current", "ATTEMPT_REPLACED");
+                }
+                await updateJobState(conn2, current.job.id, "recovery_required", {
+                  failureCode: "PROVIDER_HANDLE_PERSISTENCE_AMBIGUOUS",
+                });
+                await updateAttemptState(conn2, attemptId, "recovery_required", {
+                  providerTaskHandle,
+                  failureCode: "PROVIDER_HANDLE_PERSISTENCE_AMBIGUOUS",
+                  errorMessage: "Provider accepted submission but its handle was not durably bound",
+                  recoveryRequiredAt: new Date(),
+                  handlePersistAttempts: persistenceAttempt + 3,
+                });
+                await conn2.commit();
+              } catch (error) {
+                await conn2.rollback().catch(() => {});
+                throw error;
+              } finally {
+                conn2.release();
+              }
+            },
+            this.durabilityRuntime,
+          );
+
+          if (persistenceResult === "recovery_required") return;
+        } catch (error: any) {
+          if (error instanceof RecoveryPersistenceUnavailableError) throw error;
+          if (error instanceof DurableModelBuildError && error.code === "LEASE_LOST") return;
+          if (error instanceof ModelBuildProviderError &&
+              error.submissionDisposition === "ambiguous_acceptance") {
+            await persistRecoveryRequiredDurably(
+              async (persistenceAttempt) => {
+                const recoveryConn = await pool.getConnection();
+                try {
+                  await recoveryConn.beginTransaction();
+                  const current = await this.lockCurrentAttempt(
+                    recoveryConn,
+                    jobUuid,
+                    attemptId,
+                    leaseOwner,
+                    false,
+                    ["submitted", "recovery_required"],
+                    ["submitted", "recovery_required"],
+                  );
+                  if (!current || current.attempt.provider_task_handle) {
+                    throw new DurableModelBuildError(
+                      "Submission attempt is no longer an ambiguous current attempt",
+                      "ATTEMPT_REPLACED",
+                    );
+                  }
+                  await updateJobState(recoveryConn, current.job.id, "recovery_required", {
+                    failureCode: "PROVIDER_SUBMISSION_AMBIGUOUS",
+                  });
+                  await updateAttemptState(recoveryConn, attemptId, "recovery_required", {
+                    failureCode: "PROVIDER_SUBMISSION_AMBIGUOUS",
+                    errorMessage: "Provider submission requires operator recovery",
+                    recoveryRequiredAt: new Date(),
+                    handlePersistAttempts: persistenceAttempt,
+                  });
+                  await recoveryConn.commit();
+                } catch (recoveryError) {
+                  await recoveryConn.rollback().catch(() => {});
+                  throw recoveryError;
+                } finally {
+                  recoveryConn.release();
+                }
+              },
+              this.durabilityRuntime,
+            );
+            return;
+          }
+          const code = error instanceof ModelBuildProviderError
+            ? error.code
+            : "PROVIDER_START_FAILED";
+          await this.failJob(jobUuid, attemptId, code, "Provider submission failed", leaseOwner);
           return;
         }
-      } else if (!providerTaskHandle) {
-        await this.failJob(jobUuid, attemptId, "PROVIDER_HANDLE_LOST", "Provider handle was not persisted before restart");
-        return;
       }
 
-      // Record task_created event
-      const eventHash = computeEventHash(
-        providerName, attemptId, "task_created",
-        providerTaskHandle!,
-      );
-      const conn3 = await pool.getConnection();
-      try {
-        await conn3.beginTransaction();
-        await insertProviderEvent(conn3, {
-          provider: providerName,
-          eventHash,
-          attemptId,
-          eventType: "task_created",
-        });
-        await updateJobState(conn3, job.id, "processing");
-        await updateAttemptState(conn3, attemptId, "processing");
-        await conn3.commit();
-      } finally {
-        conn3.release();
+      // A submitted attempt advances to processing once. Attempts recovered
+      // from processing/downloading keep their persisted handle and resume
+      // polling without calling provider.start again.
+      if (isNewSubmission || attempt.state === "submitted") {
+        const eventHash = computeEventHash(
+          providerName, attemptId, "task_created",
+          providerTaskHandle!,
+        );
+        const conn3 = await pool.getConnection();
+        try {
+          await conn3.beginTransaction();
+          const current = await this.lockCurrentAttempt(
+            conn3, jobUuid, attemptId, leaseOwner, true,
+            ["submitted"], ["submitted"],
+          );
+          if (!current) {
+            await conn3.commit();
+            return;
+          }
+          await insertProviderEvent(conn3, {
+            provider: providerName,
+            eventHash,
+            attemptId,
+            eventType: "task_created",
+          });
+          await updateJobState(conn3, current.job.id, "processing");
+          await updateAttemptState(conn3, attemptId, "processing");
+          await conn3.commit();
+        } catch (error) {
+          await conn3.rollback().catch(() => {});
+          throw error;
+        } finally {
+          conn3.release();
+        }
       }
 
       // Poll until done
       let pollResult;
-      const maxPolls = 120;
-      for (let i = 0; i < maxPolls; i++) {
-        await new Promise(r => setTimeout(r, 500));
-        const renewed = await renewLease(
-          pool,
-          attemptId,
-          leaseOwner,
-          new Date(Date.now() + DEFAULT_LEASE_DURATION_MS),
+      try {
+        pollResult = await pollProviderWithLease(
+          this.provider,
+          providerTaskHandle!,
+          () => this.renewOwnedLease(pool, jobUuid, attemptId, leaseOwner),
+          this.durabilityRuntime,
         );
-        if (!renewed) throw new Error("Build worker lease was lost");
-        try {
-          pollResult = await this.provider.poll(providerTaskHandle!);
-        } catch (err: any) {
-          console.error(`[model-build] Poll error:`, err.message);
-          continue;
-        }
-        if (pollResult.done) break;
-      }
-
-      if (!pollResult?.done) {
-        await this.failJob(jobUuid, attemptId, "PROVIDER_TIMEOUT", "Provider timed out");
+      } catch (error: any) {
+        if (error instanceof DurableModelBuildError && error.code === "LEASE_LOST") return;
+        const code = error instanceof DurableModelBuildError
+          ? error.code
+          : "PROVIDER_POLL_FAILED";
+        await this.failJob(jobUuid, attemptId, code, "Provider polling failed", leaseOwner);
         return;
       }
 
       if (pollResult.error || !pollResult.glbUrl) {
-        await this.failJob(jobUuid, attemptId, "PROVIDER_FAILED", pollResult.error || "No GLB URL");
+        await this.failJob(
+          jobUuid,
+          attemptId,
+          pollResult.failureCode || "PROVIDER_FAILED",
+          "Provider task ended without a usable model artifact",
+          leaseOwner,
+        );
         return;
       }
 
       // Download GLB
-      const conn4 = await pool.getConnection();
-      try {
-        await conn4.beginTransaction();
-        await updateJobState(conn4, job.id, "downloading");
-        await updateAttemptState(conn4, attemptId, "downloading");
-        await conn4.commit();
-      } finally {
-        conn4.release();
-      }
+      const transitionedToDownload = await this.transitionOwnedAttempt(
+        pool, jobUuid, attemptId, leaseOwner,
+        ["processing", "downloading"], ["processing", "downloading"], "downloading",
+      );
+      if (!transitionedToDownload) return;
 
       let glbBuffer: Buffer;
       try {
         glbBuffer = await this.provider.download(pollResult.glbUrl);
-      } catch (err: any) {
-        await this.failJob(jobUuid, attemptId, "DOWNLOAD_FAILED", err.message);
+      } catch {
+        await this.failJob(jobUuid, attemptId, "DOWNLOAD_FAILED", "Provider artifact download failed", leaseOwner);
         return;
       }
 
@@ -473,9 +645,9 @@ export class ModelBuildService {
       let providerGlbStored;
       try {
         providerGlbStored = await storeProviderGlb(ownerId, jobUuid, attempt.attempt_number, glbBuffer);
-      } catch (err: any) {
-        console.error(`[model-build] storeProviderGlb failed for ${jobUuid}:`, err);
-        await this.failJob(jobUuid, attemptId, "STORAGE_FAILED", err?.message || String(err));
+      } catch {
+        console.error(`[model-build] Provider GLB storage failed for job ${jobUuid}`);
+        await this.failJob(jobUuid, attemptId, "STORAGE_FAILED", "Provider GLB storage failed", leaseOwner);
         return;
       }
 
@@ -496,9 +668,9 @@ export class ModelBuildService {
           commercialUseEligible: false,
           metadata: { phase: 3, role: "provider_glb", jobUuid },
         }, { authorization: { internal: true }, pool });
-      } catch (err: any) {
+      } catch {
         await cleanupPrivateObject(providerGlbStored.objectKey);
-        await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", err.message);
+        await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", "Provider GLB asset registration failed", leaseOwner);
         return;
       }
 
@@ -516,26 +688,22 @@ export class ModelBuildService {
           mimeType: "model/gltf-binary",
         });
         await conn5.commit();
-      } catch (err) {
+      } catch {
         await conn5.rollback().catch(() => {});
         await cleanupPrivateObject(providerGlbStored.objectKey);
         await hardDeleteUnpublishedAsset(pool, providerGlbAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "ARTIFACT_PERSIST_FAILED", (err as Error).message);
+        await this.failJob(jobUuid, attemptId, "ARTIFACT_PERSIST_FAILED", "Provider GLB artifact persistence failed", leaseOwner);
         return;
       } finally {
         conn5.release();
       }
 
       // Validate GLB
-      const conn6 = await pool.getConnection();
-      try {
-        await conn6.beginTransaction();
-        await updateJobState(conn6, job.id, "validating");
-        await updateAttemptState(conn6, attemptId, "validating");
-        await conn6.commit();
-      } finally {
-        conn6.release();
-      }
+      const transitionedToValidation = await this.transitionOwnedAttempt(
+        pool, jobUuid, attemptId, leaseOwner,
+        ["downloading"], ["downloading"], "validating",
+      );
+      if (!transitionedToValidation) return;
 
       const validationResult = await validateGlb(glbBuffer);
 
@@ -583,7 +751,7 @@ export class ModelBuildService {
           }, { authorization: { internal: true }, pool });
         } catch (err: any) {
           if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey);
-          await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", err.message);
+          await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", err.message, leaseOwner);
           return;
         }
       }
@@ -611,7 +779,7 @@ export class ModelBuildService {
       } catch (err: any) {
         if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey);
         if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "LINEAGE_FAILED", err.message);
+        await this.failJob(jobUuid, attemptId, "LINEAGE_FAILED", err.message, leaseOwner);
         return;
       }
 
@@ -630,7 +798,7 @@ export class ModelBuildService {
         if (!renderedViews || Object.keys(renderedViews).length !== 5) {
           if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey);
           if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-          await this.failJob(jobUuid, attemptId, "RENDER_FAILED", "Standard review renders missing or incomplete (expected exactly 5 valid PNG views)");
+          await this.failJob(jobUuid, attemptId, "RENDER_FAILED", "Standard review renders missing or incomplete (expected exactly 5 valid PNG views)", leaseOwner);
           return;
         }
 
@@ -686,7 +854,7 @@ export class ModelBuildService {
           }
           if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey);
           if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-          await this.failJob(jobUuid, attemptId, "RENDER_PERSISTENCE_FAILED", err.message || String(err));
+          await this.failJob(jobUuid, attemptId, "RENDER_PERSISTENCE_FAILED", err.message || String(err), leaseOwner);
           return;
         }
       }
@@ -734,7 +902,7 @@ export class ModelBuildService {
         }
         if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey).catch(() => {});
         if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "STORAGE_FAILED", err.message);
+        await this.failJob(jobUuid, attemptId, "STORAGE_FAILED", err.message, leaseOwner);
         return;
       }
 
@@ -763,7 +931,7 @@ export class ModelBuildService {
         }
         if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey).catch(() => {});
         if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", err.message);
+        await this.failJob(jobUuid, attemptId, "ASSET_REGISTRATION_FAILED", err.message, leaseOwner);
         return;
       }
       try {
@@ -784,7 +952,7 @@ export class ModelBuildService {
         }
         if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey).catch(() => {});
         if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "LINEAGE_FAILED", err.message);
+        await this.failJob(jobUuid, attemptId, "LINEAGE_FAILED", err.message, leaseOwner);
         return;
       }
 
@@ -792,6 +960,14 @@ export class ModelBuildService {
       const conn7 = await pool.getConnection();
       try {
         await conn7.beginTransaction();
+        const current = await this.lockCurrentAttempt(
+          conn7, jobUuid, attemptId, leaseOwner, true,
+          ["validating"], ["validating"],
+        );
+        if (!current) {
+          await conn7.commit();
+          return;
+        }
 
         if (validatedGlbAsset && validatedGlbStored) await insertArtifact(conn7, {
           attemptId,
@@ -832,7 +1008,7 @@ export class ModelBuildService {
             errorMessage: (validationResult.metrics.errors || []).join("; ").slice(0, 500),
             completedAt: new Date(),
           });
-          await updateJobState(conn7, job.id, "failed_validation", {
+          await updateJobState(conn7, current.job.id, "failed_validation", {
             failureCode: "VALIDATION_FAILED",
           });
           await conn7.commit();
@@ -845,9 +1021,9 @@ export class ModelBuildService {
         await updateAttemptState(conn7, attemptId, "ready", {
           completedAt: new Date(),
         });
-        await updateJobState(conn7, job.id, "ready");
+        await updateJobState(conn7, current.job.id, "ready");
         await conn7.commit();
-      } catch (err) {
+      } catch {
         await conn7.rollback().catch(() => {});
         if (validatedGlbStored) await cleanupPrivateObject(validatedGlbStored.objectKey);
         if (validatedGlbAsset) await hardDeleteUnpublishedAsset(pool, validatedGlbAsset.asset.id).catch(() => {});
@@ -857,14 +1033,18 @@ export class ModelBuildService {
         }
         await cleanupPrivateObject(reportStored.objectKey);
         await hardDeleteUnpublishedAsset(pool, reportAsset.asset.id).catch(() => {});
-        await this.failJob(jobUuid, attemptId, "ARTIFACT_PERSIST_FAILED", (err as Error).message);
+        await this.failJob(jobUuid, attemptId, "ARTIFACT_PERSIST_FAILED", "Final artifact persistence failed", leaseOwner);
         return;
       } finally {
         conn7.release();
       }
-    } catch (err: any) {
-      console.error(`[model-build] Unhandled error in processAttempt for ${jobUuid}:`, err.message);
-      await this.failJob(jobUuid, attemptId, "INTERNAL_ERROR", err.message).catch(() => {});
+    } catch (error: any) {
+      if (error instanceof RecoveryPersistenceUnavailableError) {
+        console.error(`[model-build] Provider submission recovery persistence is unavailable for job ${jobUuid}`);
+      } else {
+        console.error(`[model-build] Unexpected processing failure for job ${jobUuid}`);
+        await this.failJob(jobUuid, attemptId, "INTERNAL_ERROR", "Unexpected model build processing failure", leaseOwner).catch(() => {});
+      }
     } finally {
       await releaseLease(pool, attemptId, leaseOwner).catch(() => {});
       connection.release();
@@ -878,13 +1058,21 @@ export class ModelBuildService {
     attemptId: number,
     failureCode: string,
     message: string,
+    leaseOwner?: string,
   ): Promise<void> {
     const pool = this.getPoolFn();
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       const job = await findJobByUuidForUpdate(conn, jobUuid);
-      if (!job || TERMINAL_JOB_STATES.includes(job.state as any)) {
+      if (!job || job.current_attempt_id !== attemptId ||
+          TERMINAL_JOB_STATES.includes(job.state as any) || job.state === "recovery_required") {
+        await conn.commit();
+        return;
+      }
+      const attempt = await findAttemptByIdForUpdate(conn, attemptId);
+      if (!attempt || attempt.job_id !== job.id ||
+          (leaseOwner && !this.hasLiveLease(attempt, leaseOwner))) {
         await conn.commit();
         return;
       }
@@ -894,7 +1082,7 @@ export class ModelBuildService {
 
       await updateAttemptState(conn, attemptId, "failed", {
         failureCode,
-        errorMessage: message.slice(0, 500),
+        errorMessage: this.sanitizeDiagnostic(message),
         completedAt: new Date(),
       });
       await updateJobState(conn, job.id, jobState, { failureCode });
@@ -906,7 +1094,7 @@ export class ModelBuildService {
       }
     } catch (err: any) {
       await conn.rollback();
-      console.error("[model-build] failJob error:", err.message);
+      console.error(`[model-build] Failed to persist terminal state for job ${jobUuid}`);
     } finally {
       conn.release();
     }
@@ -914,24 +1102,63 @@ export class ModelBuildService {
 
   // ── Refund ────────────────────────────────────────────────────────────
 
-  private async refundJob(jobUuid: string, attemptId: number): Promise<void> {
+  private async refundJob(jobUuid: string, attemptId: number): Promise<boolean> {
     const pool = this.getPoolFn();
+
+    // Persist refund_pending before touching the balance. This evidence remains
+    // sweepable if the credit transaction encounters a transient database error.
+    const pendingConn = await pool.getConnection();
+    try {
+      await pendingConn.beginTransaction();
+      const job = await findJobByUuidForUpdate(pendingConn, jobUuid);
+      if (!job || job.current_attempt_id !== attemptId || !job.credit_correlation_id) {
+        await pendingConn.commit();
+        return false;
+      }
+      if (job.refund_correlation_id) {
+        await pendingConn.commit();
+        return true;
+      }
+      await markRefundPending(pendingConn, job.id, null);
+      await pendingConn.commit();
+    } catch {
+      await pendingConn.rollback().catch(() => {});
+      console.error(`[model-build] Could not persist refund-pending evidence for job ${jobUuid}`);
+      return false;
+    } finally {
+      pendingConn.release();
+    }
+
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       const job = await findJobByUuidForUpdate(conn, jobUuid);
       if (!job || job.current_attempt_id !== attemptId || !job.credit_correlation_id) {
         await conn.commit();
-        return;
+        return false;
       }
-
+      if (job.refund_correlation_id) {
+        await conn.commit();
+        return true;
+      }
       const refundCorrelationId = `${job.credit_correlation_id}:refund`;
       await this.refundCredits(conn, job.id, attemptId, job.owner_id, job.quoted_credits, refundCorrelationId);
-      await updateJobState(conn, job.id, job.state, { refundCorrelationId });
+      await markRefundComplete(conn, job.id, refundCorrelationId);
       await conn.commit();
-    } catch (err: any) {
-      await conn.rollback();
-      console.error("[model-build] refundJob error:", err.message);
+      return true;
+    } catch {
+      await conn.rollback().catch(() => {});
+      const failureConn = await pool.getConnection();
+      try {
+        await markRefundFailure(failureConn, (await findJobByUuid(failureConn, jobUuid))?.id || 0);
+      } catch {
+        // The terminal job plus missing unique refund correlation still makes
+        // the refund discoverable on the next sweep.
+      } finally {
+        failureConn.release();
+      }
+      console.error(`[model-build] Refund remains pending for job ${jobUuid}`);
+      return false;
     } finally {
       conn.release();
     }
@@ -951,6 +1178,12 @@ export class ModelBuildService {
       if (job.owner_id !== ownerId) throw new ModelBuildServiceError("Not authorized", "FORBIDDEN");
       if (job.state !== "failed_validation" && job.state !== "failed_provider") {
         throw new ModelBuildServiceError(`Cannot retry job in state '${job.state}'`, "INVALID_STATE");
+      }
+      if (job.credit_correlation_id && !job.refund_correlation_id) {
+        throw new ModelBuildServiceError(
+          "Cannot retry while the prior attempt refund is pending",
+          "REFUND_PENDING",
+        );
       }
 
       // Check idempotency
@@ -1003,7 +1236,7 @@ export class ModelBuildService {
       });
 
       const updatedJob = await findJobByUuid(pool, jobUuid);
-      return this.formatJobPublic(updatedJob!);
+      return this.formatJobPublicHydrated(pool, updatedJob!);
     } catch (err: any) {
       await conn.rollback();
       if (err instanceof ModelBuildServiceError) throw err;
@@ -1026,8 +1259,17 @@ export class ModelBuildService {
       if (!job) throw new ModelBuildServiceError("Job not found", "NOT_FOUND");
       if (job.owner_id !== ownerId) throw new ModelBuildServiceError("Not authorized", "FORBIDDEN");
 
-      // Can only cancel before provider processing
-      if (!["draft", "preflight", "reserving", "queued", "submitted"].includes(job.state)) {
+      const currentAttempt = job.current_attempt_id
+        ? await findAttemptByIdForUpdate(conn, job.current_attempt_id)
+        : null;
+
+      // Cancellation and submission claim lock the same job/attempt rows. Once
+      // submitted is claimed, cancellation must reject and may not refund.
+      if (!canCancelBeforeSubmission(job.state, currentAttempt ? {
+        state: currentAttempt.state,
+        providerTaskHandle: currentAttempt.provider_task_handle,
+        submissionClaimedAt: currentAttempt.submission_claimed_at,
+      } : null)) {
         throw new ModelBuildServiceError(
           `Cannot cancel job in state '${job.state}'`,
           "INVALID_STATE",
@@ -1037,13 +1279,10 @@ export class ModelBuildService {
       await updateJobState(conn, job.id, "cancelled", { failureCode: "USER_CANCELLED" });
 
       // Cancel any pending attempts
-      const attempts = await findAttemptsByJobId(conn, job.id);
-      for (const attempt of attempts) {
-        if (!["failed", "ready", "cancelled"].includes(attempt.state)) {
-          await updateAttemptState(conn, attempt.id, "cancelled", {
-            completedAt: new Date(),
-          });
-        }
+      if (currentAttempt?.state === "queued") {
+        await updateAttemptState(conn, currentAttempt.id, "cancelled", {
+          completedAt: new Date(),
+        });
       }
 
       await conn.commit();
@@ -1054,7 +1293,7 @@ export class ModelBuildService {
       }
 
       const updatedJob = await findJobByUuid(pool, jobUuid);
-      return this.formatJobPublic(updatedJob!);
+      return this.formatJobPublicHydrated(pool, updatedJob!);
     } catch (err: any) {
       await conn.rollback();
       if (err instanceof ModelBuildServiceError) throw err;
@@ -1080,7 +1319,7 @@ export class ModelBuildService {
       if (job.state === "accepted") {
         // Idempotent: already accepted
         await conn.commit();
-        return this.formatJobPublic(job);
+        return this.formatJobPublicHydrated(pool, job);
       }
 
       if (job.state !== "ready") {
@@ -1124,7 +1363,7 @@ export class ModelBuildService {
       await conn.commit();
 
       const updatedJob = await findJobByUuid(pool, jobUuid);
-      return this.formatJobPublic(updatedJob!);
+      return this.formatJobPublicHydrated(pool, updatedJob!);
     } catch (err: any) {
       await conn.rollback();
       if (err instanceof ModelBuildServiceError) throw err;
@@ -1220,8 +1459,71 @@ export class ModelBuildService {
     return Promise.all(jobs.map(j => this.formatJobPublicHydrated(pool, j)));
   }
 
+  async recoverAmbiguousSubmissions(): Promise<{ recoveryRequired: number; recoveredJobs: string[] }> {
+    const pool = this.getPoolFn();
+    const ambiguous = await findAmbiguousSubmissions(pool);
+    await this.durabilityRuntime.afterAmbiguousSubmissionScan?.();
+    const recoveredJobs: string[] = [];
+
+    for (const candidate of ambiguous) {
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const [jobRows]: any = await conn.query(
+          "SELECT * FROM model_build_jobs WHERE id = ? FOR UPDATE",
+          [candidate.job_id],
+        );
+        const job = jobRows[0] as BuildJobRecord | undefined;
+        const attempt = await findAttemptByIdForUpdate(conn, candidate.id);
+        if (!job || !attempt || job.current_attempt_id !== attempt.id ||
+            TERMINAL_JOB_STATES.includes(job.state as any) ||
+            attempt.provider_task_handle !== null ||
+            (attempt.lease_owner !== null && attempt.lease_expires_at !== null &&
+             new Date(attempt.lease_expires_at).getTime() >= Date.now())) {
+          await conn.commit();
+          continue;
+        }
+
+        await updateJobState(conn, job.id, "recovery_required", {
+          failureCode: "PROVIDER_HANDLE_RECOVERY_REQUIRED",
+        });
+        await updateAttemptState(conn, attempt.id, "recovery_required", {
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          failureCode: "PROVIDER_HANDLE_RECOVERY_REQUIRED",
+          errorMessage: "Provider submission requires operator recovery",
+          recoveryRequiredAt: attempt.recovery_required_at || new Date(),
+        });
+        await conn.commit();
+        recoveredJobs.push(job.job_uuid);
+      } catch {
+        await conn.rollback().catch(() => {});
+      } finally {
+        conn.release();
+      }
+    }
+
+    return { recoveryRequired: recoveredJobs.length, recoveredJobs };
+  }
+
+  async recoverPendingRefunds(): Promise<{ pendingRefunds: number; refundedJobs: string[] }> {
+    const pool = this.getPoolFn();
+    const pending = await findRefundPendingJobs(pool);
+    const refundedJobs: string[] = [];
+
+    for (const job of pending) {
+      if (job.current_attempt_id && await this.refundJob(job.job_uuid, job.current_attempt_id)) {
+        refundedJobs.push(job.job_uuid);
+      }
+    }
+
+    return { pendingRefunds: pending.length, refundedJobs };
+  }
+
   async recoverStaleBuilds(): Promise<{ timestamp: string; expiredLeases: number; recoveredJobs: string[] }> {
     const pool = this.getPoolFn();
+    await this.recoverAmbiguousSubmissions();
+    await this.recoverPendingRefunds();
     const expired = await findExpiredLeases(pool);
     const recoveredJobs: string[] = [];
     for (const attempt of expired) {
@@ -1235,6 +1537,108 @@ export class ModelBuildService {
 
   // ── Helpers ───────────────────────────────────────────────────────────
 
+  private hasLiveLease(attempt: BuildAttemptRecord, leaseOwner: string): boolean {
+    return attempt.lease_owner === leaseOwner &&
+      !!attempt.lease_expires_at &&
+      new Date(attempt.lease_expires_at).getTime() >= Date.now();
+  }
+
+  private async lockCurrentAttempt(
+    conn: mysql.PoolConnection,
+    jobUuid: string,
+    attemptId: number,
+    leaseOwner: string,
+    requireLiveLease: boolean,
+    allowedJobStates: BuildJobState[],
+    allowedAttemptStates: BuildAttemptRecord["state"][],
+  ): Promise<{ job: BuildJobRecord; attempt: BuildAttemptRecord } | null> {
+    const job = await findJobByUuidForUpdate(conn, jobUuid);
+    if (!job || job.current_attempt_id !== attemptId ||
+        !allowedJobStates.includes(job.state) ||
+        TERMINAL_JOB_STATES.includes(job.state as any)) return null;
+
+    const attempt = await findAttemptByIdForUpdate(conn, attemptId);
+    if (!attempt || attempt.job_id !== job.id || !allowedAttemptStates.includes(attempt.state)) return null;
+    if (requireLiveLease && !this.hasLiveLease(attempt, leaseOwner)) return null;
+    return { job, attempt };
+  }
+
+  private async renewOwnedLease(
+    pool: mysql.Pool,
+    jobUuid: string,
+    attemptId: number,
+    leaseOwner: string,
+    allowedJobStates: BuildJobState[] = ["processing", "downloading"],
+    allowedAttemptStates: BuildAttemptRecord["state"][] = ["processing", "downloading"],
+  ): Promise<boolean> {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const current = await this.lockCurrentAttempt(
+        conn, jobUuid, attemptId, leaseOwner, true,
+        allowedJobStates, allowedAttemptStates,
+      );
+      if (!current) {
+        await conn.commit();
+        return false;
+      }
+      const renewed = await renewLease(
+        conn,
+        attemptId,
+        leaseOwner,
+        new Date(Date.now() + DEFAULT_LEASE_DURATION_MS),
+      );
+      await conn.commit();
+      return renewed;
+    } catch {
+      await conn.rollback().catch(() => {});
+      return false;
+    } finally {
+      conn.release();
+    }
+  }
+
+  private async transitionOwnedAttempt(
+    pool: mysql.Pool,
+    jobUuid: string,
+    attemptId: number,
+    leaseOwner: string,
+    allowedJobStates: BuildJobState[],
+    allowedAttemptStates: BuildAttemptRecord["state"][],
+    nextState: "processing" | "downloading" | "validating",
+  ): Promise<boolean> {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const current = await this.lockCurrentAttempt(
+        conn, jobUuid, attemptId, leaseOwner, true,
+        allowedJobStates, allowedAttemptStates,
+      );
+      if (!current) {
+        await conn.commit();
+        return false;
+      }
+      await updateJobState(conn, current.job.id, nextState);
+      await updateAttemptState(conn, attemptId, nextState, {
+        leaseExpiresAt: new Date(Date.now() + DEFAULT_LEASE_DURATION_MS),
+      });
+      await conn.commit();
+      return true;
+    } catch {
+      await conn.rollback().catch(() => {});
+      throw new DurableModelBuildError("Durable phase transition failed", "PHASE_TRANSITION_FAILED");
+    } finally {
+      conn.release();
+    }
+  }
+
+  private sanitizeDiagnostic(message: string): string {
+    return String(message || "Model build failed")
+      .replace(/https?:\/\/\S+/gi, "[redacted-url]")
+      .replace(/(?:api[_-]?key|authorization|bearer|signature|token)=?\s*[^\s,;]+/gi, "[redacted-credential]")
+      .slice(0, 500);
+  }
+
   private formatJobPublic(job: BuildJobRecord): BuildJobPublic {
     return {
       jobUuid: job.job_uuid,
@@ -1247,6 +1651,9 @@ export class ModelBuildService {
       state: job.state,
       currentAttemptNumber: null, // Filled by route layer
       failureCode: job.failure_code,
+      diagnostic: job.state === "recovery_required"
+        ? "provider_submission_recovery_required"
+        : null,
       billingDisposition: "not_charged",
       createdAt: job.created_at.toISOString(),
       updatedAt: job.updated_at.toISOString(),
@@ -1269,12 +1676,25 @@ export class ModelBuildService {
     }
 
     let billingDisposition: "charged" | "refunded" | "not_charged" | "refund_pending" = "not_charged";
-    const [creditEvents]: any = await db.query(
-      "SELECT event_type, delta FROM model_build_credit_events WHERE job_id = ?",
-      [job.id],
-    );
-    const hasCharge = creditEvents.some((e: any) => e.event_type === "charge" || Number(e.delta) < 0);
-    const hasRefund = creditEvents.some((e: any) => e.event_type === "refund" || Number(e.delta) > 0);
+    const currentChargeCorrelation = job.credit_correlation_id;
+    const matchingRefundCorrelation = currentChargeCorrelation
+      ? `${currentChargeCorrelation}:refund`
+      : null;
+    const [creditEvents]: any = currentChargeCorrelation && job.current_attempt_id
+      ? await db.query(
+        `SELECT event_type, delta, correlation_id
+         FROM model_build_credit_events
+         WHERE job_id = ? AND attempt_id = ?
+           AND correlation_id IN (?, ?)`,
+        [job.id, job.current_attempt_id, currentChargeCorrelation, matchingRefundCorrelation],
+      )
+      : [[]];
+    const hasCharge = creditEvents.some((e: any) =>
+      e.correlation_id === currentChargeCorrelation &&
+      (e.event_type === "charge" || Number(e.delta) < 0));
+    const hasRefund = creditEvents.some((e: any) =>
+      e.correlation_id === matchingRefundCorrelation &&
+      (e.event_type === "refund" || Number(e.delta) > 0));
 
     if (hasRefund) {
       billingDisposition = "refunded";
@@ -1293,6 +1713,9 @@ export class ModelBuildService {
       referenceSessionUuid: sessionRows[0]?.session_uuid || "",
       currentAttemptNumber,
       billingDisposition,
+      diagnostic: billingDisposition === "refund_pending"
+        ? "refund_pending"
+        : value.diagnostic,
     };
   }
 
