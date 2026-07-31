@@ -389,7 +389,8 @@ test("Phase 6 render creation is idempotent and dispatches after persistence", a
   const replay = await f.service.createRenderJob(OWNER, renderRequest());
   assert.equal(replay.jobUuid, first.jobUuid);
   assert.equal(f.dispatched.length, 1);
-  assert.equal("ownerId" in f.dispatched[0], false);
+  assert.equal(f.dispatched[0].ownerId, OWNER);
+  assert.equal(typeof f.dispatched[0].sourceUrls[BACKGROUND_UUID], "string");
 
   const conflict = renderRequest();
   conflict.slotInputs[0].content = "Different request";

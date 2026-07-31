@@ -14,6 +14,8 @@ import type {
 import { MySqlStationeryV2Repository } from "./repository.ts";
 import { StationeryV2Service } from "./service.ts";
 import { PrintfulStationeryProvider, Slant3dStationeryProvider } from "./providers.ts";
+import { registerAsset } from "../assets/service.ts";
+import { WorkerAssetRegistrationSchema } from "./apiContracts.ts";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -161,6 +163,17 @@ export function createStationeryV2Production(options: {
         printful: requiredSecret(env, "PRINTFUL_WEBHOOK_SECRET"),
         slant3d: requiredSecret(env, "SLANT3D_WEBHOOK_SECRET"),
       }),
+      workerAssetRegistrar: async (rawInput) => {
+        const input = WorkerAssetRegistrationSchema.parse(rawInput);
+        const registered = await registerAsset({
+          ...input,
+          visibility: "private",
+          sourceProvider: "stationery-worker",
+          license: "proprietary",
+          commercialUseEligible: true,
+        }, { authorization: { internal: true }, isNewObjectUpload: false, pool });
+        return { assetUuid: registered.asset.asset_uuid, versionNumber: registered.version.version_number, sha256: registered.version.sha256 };
+      },
     },
   };
 }

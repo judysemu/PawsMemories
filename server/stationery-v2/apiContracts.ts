@@ -116,6 +116,17 @@ export const ProviderWebhookRequestSchema = z.object({
   event: ProviderEventSchema,
 }).strict();
 
+export const WorkerAssetRegistrationSchema = z.object({
+  ownerId: z.string().trim().min(1).max(190),
+  assetType: z.literal("stationery_print_file"),
+  mimeType: z.string().trim().min(1).max(120),
+  sizeBytes: z.number().int().nonnegative(),
+  sha256: Sha256Schema,
+  bucket: z.literal("private"),
+  objectKey: z.string().trim().min(1).max(512),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+}).strict();
+
 export const ProviderSubmissionAcknowledgementSchema = z.object({
   providerOrderId: z.string().trim().min(1).max(200),
   state: z.enum(["submitted", "processing"]),
@@ -166,11 +177,13 @@ export const ReconciliationResultSchema = z.object({
 export const RenderDispatchSchema = z.object({
   contractVersion: z.literal(1),
   jobUuid: z.string().uuid(),
+  ownerId: z.string().trim().min(1).max(190),
   template: TemplateVersionSpecSchema,
   templateSpecHash: Sha256Schema,
   presetId: z.string().min(1).max(64),
   requestHash: Sha256Schema,
   slotInputs: z.array(SlotInputSchema).max(100),
+  sourceUrls: z.record(z.string().uuid(), z.string().url()),
 }).strict();
 
 export type CreateRenderJobRequest = z.infer<typeof CreateRenderJobRequestSchema>;

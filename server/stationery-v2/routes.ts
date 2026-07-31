@@ -1,4 +1,5 @@
 import { Router, json, type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
 import { requireAuth, type AuthedRequest } from "../../auth.ts";
 import {
   CompleteRenderJobRequestSchema,
@@ -15,6 +16,7 @@ import {
   SubmitPrintOrderRequestSchema,
   TemplateVersionParamSchema,
   TemplateVersionPublicSchema,
+  WorkerAssetRegistrationSchema,
 } from "./apiContracts.ts";
 import type { ProviderWebhookAuthenticatorPort, RenderCallbackAuthenticatorPort } from "./apiPorts.ts";
 import { StationeryFeatureDisabledError, assertStationeryV2Enabled } from "./featureFlag.ts";
@@ -27,6 +29,7 @@ interface RawBodyRequest extends Request {
 export interface StationeryV2RouterDependencies {
   providerWebhookAuthenticator: ProviderWebhookAuthenticatorPort;
   renderCallbackAuthenticator: RenderCallbackAuthenticatorPort;
+  workerAssetRegistrar?: (input: z.infer<typeof WorkerAssetRegistrationSchema>) => Promise<{ assetUuid: string; versionNumber: number; sha256: string }>;
 }
 
 export function createStationeryV2Router(
@@ -139,6 +142,17 @@ export function createStationeryV2Router(
       if (!authenticated) throw new StationeryApiError("Provider webhook authentication failed.", "WEBHOOK_UNAUTHORIZED", 401);
       const body = ProviderWebhookRequestSchema.parse(req.body);
       res.json(ProviderEventResultSchema.parse(await service.applyAuthenticatedProviderEvent(params.provider, body)));
+    } catch (error) {
+      handleStationeryError(res, error);
+    }
+  });
+
+  router.post("/worker-assets/register", async (req: RawBodyRequest, res: Response) => {
+    try {
+      if (!dependencies.workerAssetRegistrar) throw new StationeryApiError("Stationery worker asset registration is not configured.", "WORKER_UNAVAILABLE", 503);
+      await requireTrustedCallback(req, dependencies.renderCallbackAuthenticator);
+      const body = WorkerAssetRegistrationSchema.parse(req.body);
+      res.status(201).json(await dependencies.workerAssetRegistrar(body));
     } catch (error) {
       handleStationeryError(res, error);
     }

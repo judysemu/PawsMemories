@@ -1,0 +1,17 @@
+services:
+  stationery-worker:
+    build:
+      context: ..
+      dockerfile: stationery-worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      STATIONERY_WORKER_PORT: "8090"
+      STATIONERY_WORKER_VERSION: "1.0.0"
+      STATIONERY_RENDER_WORKER_SECRET: "${STATIONERY_RENDER_WORKER_SECRET}"
+      STATIONERY_CALLBACK_BASE_URL: "https://pawsome3d.com"
+      MEDIA_PRIVATE_BUCKET_NAME: "${MEDIA_PRIVATE_BUCKET_NAME}"
+      MEDIA_PRIVATE_BUCKET_KEY: "${MEDIA_PRIVATE_BUCKET_KEY}"
+      MEDIA_PRIVATE_BUCKET_SECRET: "${MEDIA_PRIVATE_BUCKET_SECRET}"
+      MEDIA_BUCKET_URL: "${MEDIA_BUCKET_URL}"
+    ports:
+      - "127.0.0.1:8090:8090"

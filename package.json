@@ -26,6 +26,7 @@
     "test:coverage": "node --import tsx --experimental-test-coverage --test tests/*.test.mjs tests/contracts/*.test.mjs tests/security/*.test.mjs",
     "animator:doctor": "node scripts/animator-doctor.mjs",
     "seed:wags": "node scripts/seed-wags-catalog.mjs"
+    ,"stationery:worker": "tsx stationery-worker/index.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",

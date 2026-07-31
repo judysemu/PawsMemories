@@ -136,11 +136,13 @@ export class StationeryV2Service {
     const dispatch = RenderDispatchSchema.parse({
       contractVersion: 1,
       jobUuid: result.job.jobUuid,
+      ownerId,
       template: template.spec,
       templateSpecHash: template.specHash,
       presetId: request.presetId,
       requestHash,
       slotInputs: request.slotInputs,
+      sourceUrls: await this.resolveRenderSourceUrls(ownerId, template.spec, request),
     });
     try {
       // This is intentionally outside createRenderJobIdempotent's transaction.
@@ -155,6 +157,24 @@ export class StationeryV2Service {
     await this.repository.recordRenderDispatched(result.job.jobUuid, this.now());
     const dispatched = await this.repository.getRenderJob(ownerId, result.job.jobUuid);
     return RenderJobPublicSchema.strip().parse(dispatched ?? result.job);
+  }
+
+  private async resolveRenderSourceUrls(ownerId: string, template: TemplateVersionSpec, request: CreateRenderJobRequest): Promise<Record<string, string>> {
+    const refs = new Map<string, { assetUuid: string; versionNumber: number; sha256: string }>();
+    refs.set(template.backgroundAsset.assetUuid, template.backgroundAsset);
+    for (const input of request.slotInputs) {
+      if (input.kind === "image") refs.set(input.source.assetUuid, input.source);
+    }
+    const urls: Record<string, string> = {};
+    for (const ref of refs.values()) {
+      urls[ref.assetUuid] = await this.frozenFileAccess.createProviderReadUrl({
+        ownerId,
+        assetUuid: ref.assetUuid,
+        versionNumber: ref.versionNumber,
+        expectedSha256: ref.sha256,
+      });
+    }
+    return urls;
   }
 
   async getRenderJob(ownerId: string, jobUuid: string): Promise<RenderJobPublic> {
