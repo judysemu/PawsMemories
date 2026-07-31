@@ -3,6 +3,7 @@ import { User, RefreshCw, Mail, ArrowLeft, Lock, Calendar, MapPin, LogIn, UserPl
 import { PublicUser } from "../types";
 import { signup, completeProfile, login, requestPasswordReset } from "../api";
 import { useJsApiLoader } from "@react-google-maps/api";
+import FriendlyError from "./FriendlyError";
 
 // IMPORTANT: keep this list identical to the one used in LocationPicker.tsx.
 // @react-google-maps/api shares a single loader, and passing a new array
@@ -221,7 +222,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
                 </div>
               </div>
 
-              {error && <p className="text-[10px] text-error font-medium px-1">{error}</p>}
+              {error && <FriendlyError message={error} action="Check the details and try again." className="text-xs" />}
 
               <button
                 type="submit" disabled={busy}
@@ -269,7 +270,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
                       />
                     </div>
                   </div>
-                  {error && <p className="text-[10px] text-error font-medium px-1">{error}</p>}
+                  {error && <FriendlyError message={error} action="Check the details and try again." className="text-xs" />}
                   <button
                     type="submit" disabled={busy}
                     className="tactile-button w-full bg-primary text-on-primary font-headline-lg-mobile text-body-md py-4 rounded-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 mt-2"
@@ -350,7 +351,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
                 </span>
               </label>
 
-              {error && <p className="text-[10px] text-error font-medium px-1">{error}</p>}
+              {error && <FriendlyError message={error} action="Check the details and try again." className="text-xs" />}
 
               <button
                 type="submit" disabled={busy}
@@ -405,7 +406,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
                 </div>
               </div>
 
-              {error && <p className="text-[10px] text-error font-medium px-1 pt-1">{error}</p>}
+              {error && <FriendlyError message={error} action="Check the details and try again." className="text-xs" />}
 
               <button
                 type="submit"
@@ -470,7 +471,7 @@ export default function SignUp({ onAuthenticated }: SignUpProps) {
                 </div>
               ))}
 
-              {error && <p className="text-[10px] text-error font-medium px-1 pt-1">{error}</p>}
+              {error && <FriendlyError message={error} action="Check the details and try again." className="text-xs" />}
 
               <button
                 type="submit" disabled={busy}

@@ -8,6 +8,7 @@ import {
   type CustomizableProduct,
 } from "../api";
 import CustomizeScreen from "./CustomizeScreen";
+import FriendlyError from "./FriendlyError";
 
 type MarketplaceCategory = "all" | "custom_gear" | "breed" | "memorial" | "accessories" | "seasonal";
 
@@ -327,7 +328,7 @@ export default function MarketplaceScreen({ onOpenCreate }: MarketplaceScreenPro
                         {checkoutBusy ? <Loader2 className="animate-spin mr-2" size={16} /> : <ShoppingBag className="mr-2" size={16} />}
                         {checkoutBusy ? "Opening checkout..." : "Buy now"}
                       </button>
-                      {checkoutError && <p className="text-xs font-bold text-error text-center">{checkoutError}</p>}
+                      {checkoutError && <FriendlyError message={checkoutError} action="Please try again in a moment." className="text-left" />}
                     </div>
                   )}
                 </div>

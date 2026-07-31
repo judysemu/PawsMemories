@@ -4,6 +4,7 @@ import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, CheckCircle2, AlertTriangle, RefreshCw, ZoomIn, Info, ShieldCheck, Download, Sparkles } from "lucide-react";
 import { getModelBuildDetail, acceptModelBuild } from "../../api";
 import Model3DViewer from "./Model3DViewer";
+import FriendlyError from "../FriendlyError";
 
 interface CreateBuildReviewScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -278,12 +279,7 @@ export default function CreateBuildReviewScreen({ onNavigate }: CreateBuildRevie
           </div>
         )}
 
-        {error && (
-          <div className="p-4 rounded-xl bg-error/10 border border-error/20 flex items-start gap-3">
-            <AlertTriangle className="text-error shrink-0 mt-0.5" size={18} />
-            <p className="text-error text-xs font-medium">{error}</p>
-          </div>
-        )}
+        {error && <FriendlyError message={error} action="Please try again, or come back in a moment." />}
 
         {/* Hash-Bound Acceptance Button */}
         <div className="flex flex-col gap-2 pt-4 border-t border-outline-variant/30">

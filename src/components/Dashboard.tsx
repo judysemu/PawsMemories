@@ -62,7 +62,7 @@ export default function Dashboard({ userProfile, streak, dailyStreakClaimed, onC
         <div className="absolute h-64 w-64 rounded-full bg-primary/20 blur-[90px]" />
         <div className="relative grid w-full max-w-5xl grid-cols-1 gap-4 md:grid-cols-2">
           {[
-            { label: "Furball3D", title: "Build a 3D model", detail: "Turn a photo or prompt into a model.", image: "/brand/furball3d.jpg", action: () => (onOpenFurball ? onOpenFurball() : onCreate()), tour: "dashboard-create" },
+            { label: "Furball3D", title: "Make your pet", detail: "Turn a photo or idea into a keepsake.", image: "/brand/furball3d.jpg", action: () => (onOpenFurball ? onOpenFurball() : onCreate()), tour: "dashboard-create" },
             { label: "Fido's Styles", title: "Create the look", detail: "Build wardrobe looks and style variations.", image: "/brand/fidostyles.jpg", action: () => onOpenFidos?.() },
             { label: "Pawprints", title: "Make a keepsake", detail: "Add photos and words for any occasion.", image: "/brand/pawprints.png", action: () => onOpenPawprints?.() },
           ].map((item) => (

@@ -3,6 +3,7 @@ import { Screen } from "../../types";
 import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, RefreshCw, AlertTriangle, XCircle, CheckCircle2, RotateCcw, ArrowRight } from "lucide-react";
 import { getModelBuildDetail, cancelModelBuild, retryModelBuild } from "../../api";
+import FriendlyError from "../FriendlyError";
 
 interface CreateBuildProgressScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -235,22 +236,19 @@ export default function CreateBuildProgressScreen({ onNavigate }: CreateBuildPro
         ) : (
           <div className="flex flex-col items-center text-center py-6">
             <CheckCircle2 className="text-emerald-500 mb-4" size={56} />
-            <h3 className="text-2xl font-black text-on-surface mb-2">Build Ready!</h3>
-            <p className="text-on-surface-variant mb-6">Your model passed all post-build validation metrics.</p>
+            <h3 className="text-2xl font-black text-on-surface mb-2">Your pet is ready!</h3>
+            <p className="text-on-surface-variant mb-6">Your creation is ready for a final look.</p>
             <button
               onClick={() => onNavigate(Screen.CREATE_BUILD_REVIEW)}
               className="px-8 py-4 rounded-2xl font-black text-on-primary bg-primary shadow-lg shadow-primary/25 hover:scale-105 transition-transform flex items-center gap-2"
             >
-              Review 3D Model & Renders <ArrowRight size={20} />
+              Review my pet <ArrowRight size={20} />
             </button>
           </div>
         )}
 
         {error && (
-          <div className="mt-4 p-4 rounded-xl bg-error/10 border border-error/20 flex items-start gap-3 w-full">
-            <AlertTriangle className="text-error shrink-0 mt-0.5" size={18} />
-            <p className="text-error text-xs font-medium">{error}</p>
-          </div>
+          <FriendlyError message={error} action="Try again when you’re ready. Your progress is safe." className="mt-4 w-full text-left" />
         )}
       </div>
     </div>

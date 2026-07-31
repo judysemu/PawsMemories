@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import FriendlyError from "./FriendlyError";
 
 interface Props {
   children: ReactNode;
@@ -28,11 +29,9 @@ class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex items-center justify-center min-h-screen bg-surface px-4 text-center">
           <div className="bg-surface-container p-8 rounded-3xl shadow-xl max-w-md w-full">
-            <span className="text-5xl mb-4 block text-error">🚨</span>
-            <h1 className="text-2xl font-bold mb-2 text-on-surface">Something went wrong</h1>
-            <p className="text-on-surface-variant mb-6">
-              The application encountered an unexpected error. Please refresh the page to try again.
-            </p>
+            <span className="text-5xl mb-4 block" aria-hidden="true">🐾</span>
+            <h1 className="text-2xl font-bold mb-2 text-on-surface">Let’s get your paws back on track</h1>
+            <FriendlyError message="This page hit a small hiccup. Refresh and we’ll try again." action="If it keeps happening, please come back in a few minutes." className="mb-6 text-left" />
             <button
               className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold shadow hover:bg-primary/90 transition-colors"
               onClick={() => window.location.reload()}

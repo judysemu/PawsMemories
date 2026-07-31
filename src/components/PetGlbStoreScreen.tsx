@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { authedFetch } from "../api";
+import FriendlyError from "./FriendlyError";
 
 type OrderState =
   | "draft" | "awaiting_payment" | "paid" | "awaiting_references" | "references_received"
@@ -33,10 +34,10 @@ const CUSTOMER_STAGE: Partial<Record<OrderState, string>> = {
   paid: "Payment received",
   awaiting_references: "Waiting for your photos",
   references_received: "Photos received",
-  queued: "Queued for modelling",
-  generating: "Building your model",
-  validating: "Running quality checks",
-  repair_required: "Corrections in progress",
+  queued: "Your pet is in line",
+  generating: "Creating your pet",
+  validating: "Giving your keepsake a careful check",
+  repair_required: "Adding a few finishing touches",
   awaiting_human_review: "In review by our team",
   approved: "Approved — preparing your download",
   delivering: "Preparing your download",
@@ -194,7 +195,7 @@ export default function PetGlbStoreScreen() {
                 disabled={busy || !allRefsPresent}
                 className="rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
               >
-                {busy ? "Submitting…" : "Submit photos and build my model"}
+                {busy ? "Sending photos…" : "Create my pet keepsake"}
               </button>
               {!allRefsPresent && (
                 <p className="text-xs opacity-60">All five views are required before we can start.</p>
@@ -220,7 +221,7 @@ export default function PetGlbStoreScreen() {
               {downloadUrl && (
                 <p className="text-sm">
                   <a href={downloadUrl} className="text-blue-600 underline" download>
-                    Download .glb
+                    Download my file (GLB)
                   </a>{" "}
                   <span className="opacity-60 text-xs">(link expires in 15 minutes)</span>
                 </p>
@@ -230,7 +231,7 @@ export default function PetGlbStoreScreen() {
         </section>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <FriendlyError message={error} action="Please check the details above and try again." />}
     </div>
   );
 }

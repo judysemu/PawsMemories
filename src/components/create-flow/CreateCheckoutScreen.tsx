@@ -4,6 +4,7 @@ import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, Check, RefreshCw, AlertTriangle, ShieldCheck } from "lucide-react";
 import { CREDIT_PRICES, createModelCost } from "../../pricing";
 import { authedFetch, getModelBuildQuote, startModelBuild } from "../../api";
+import FriendlyError from "../FriendlyError";
 
 interface CreateCheckoutScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -136,14 +137,14 @@ export default function CreateCheckoutScreen({ onNavigate, userProfile }: Create
             className={`w-full py-4 rounded-xl font-black text-lg text-on-primary bg-primary shadow-lg shadow-primary/25 hover:scale-[1.02] transition-transform flex justify-center items-center gap-2 ${isApproving ? 'opacity-80 pointer-events-none' : ''}`}
           >
             {isApproving ? (
-              <><RefreshCw size={20} className="animate-spin" /> Starting Build...</>
+              <><RefreshCw size={20} className="animate-spin" /> Preparing your pet...</>
             ) : (
-              <><Check size={20} /> Approve and Build</>
+              <><Check size={20} /> Create my pet</>
             )}
           </button>
         ) : (
           <div className="text-center">
-            <p className="text-error font-medium mb-4">You need {MODEL_COST - userProfile.credits} more PupCoins.</p>
+            <FriendlyError message={`You need ${MODEL_COST - userProfile.credits} more PupCoins to create this pet.`} action="Add PupCoins, then come back when you’re ready." className="mb-4 text-left" />
             <button
               onClick={() => { /* Should trigger credit store, handled globally typically but we'll just show message */ }}
               className="px-6 py-3 rounded-xl font-bold text-primary border-2 border-primary hover:bg-primary/5 transition-colors"
@@ -154,7 +155,7 @@ export default function CreateCheckoutScreen({ onNavigate, userProfile }: Create
         )}
         
         <p className="text-center text-xs text-on-surface-variant mt-4">
-          By approving, {MODEL_COST} PupCoins will be deducted from your account. The build takes a few minutes.
+          Creating this pet uses {MODEL_COST} PupCoins. It usually takes a few minutes.
         </p>
       </div>
     </div>

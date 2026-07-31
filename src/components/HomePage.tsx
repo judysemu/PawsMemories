@@ -91,10 +91,10 @@ export default function HomePage({
                 Pawsome3D
               </p>
               <h1 className="text-3xl font-black leading-tight tracking-tight text-on-surface sm:text-4xl lg:text-5xl">
-                Affordable 3D Pet Models in <span className="text-primary">GLB Format</span>
+                Turn your favorite pet photo into a <span className="text-primary">keepsake you can keep forever</span>
               </h1>
               <p className="mt-4 max-w-xl text-sm leading-relaxed text-on-surface-variant md:text-base">
-                Pawsome3D makes digital 3D pet models more affordable for pet owners and pet-industry professionals. Browse our GLB pet models, choose the option that fits your needs, and purchase your model online.
+                Pawsome3D turns a photo, memory, or idea into a personalized pet creation for your home, your phone, or a real-world keepsake. Technical downloads such as GLB are available when you need them.
               </p>
 
               {/* CTAs */}
@@ -106,7 +106,7 @@ export default function HomePage({
                   className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-8 py-4 text-sm font-black text-on-primary shadow-lg transition-all hover:brightness-105 hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/30 active:scale-95 disabled:opacity-50"
                 >
                   <Sparkles size={16} className="fill-on-primary" />
-                  Shop 3D Pet Models
+                  Make my pet
                   <ArrowRight size={16} />
                 </button>
                 <button
@@ -144,10 +144,10 @@ export default function HomePage({
         <div className="mx-auto max-w-6xl glass-card p-8 rounded-3xl text-center md:text-left flex flex-col md:flex-row items-center justify-between gap-6 border border-primary/20 bg-primary/5">
           <div className="flex-1">
             <h2 className="text-2xl font-black tracking-tight text-on-surface">
-              3D Pet Models Without the Premium Price
+              Your pet, made wonderfully real
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-on-surface-variant max-w-2xl">
-              Get a versatile GLB pet model at a price designed to be accessible. Pawsome3D serves individual pet owners, pet businesses, creators, and professionals throughout the United States, including Denver and Philadelphia.
+              Create a digital keepsake for yourself, your family, or someone who misses a beloved pet. Downloadable formats, including GLB, are available in the details when you need them.
             </p>
           </div>
           <button
@@ -155,7 +155,7 @@ export default function HomePage({
             onClick={onOpenCreate}
             className="shrink-0 flex items-center gap-2 rounded-2xl bg-primary px-7 py-3.5 text-sm font-black text-on-primary shadow-md hover:bg-primary/90 transition-all active:scale-95"
           >
-            Explore All Models
+            Start creating
             <ArrowRight size={16} />
           </button>
         </div>

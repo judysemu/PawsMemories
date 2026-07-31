@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import FriendlyError from "./FriendlyError";
 import {
   ArrowLeft,
   Upload,
@@ -178,12 +179,7 @@ export default function CustomizeScreen({ product: initialProduct, onBack, onSuc
         </div>
       </div>
 
-      {error && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs font-bold text-rose-600">
-          <AlertCircle size={16} />
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <FriendlyError message={error} action="Check the form and try again." className="mt-4" />}
 
       {loadingProducts ? (
         <div className="flex justify-center py-16">

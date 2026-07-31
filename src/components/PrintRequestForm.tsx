@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ArrowLeft, Upload, Link as LinkIcon, Send, Loader2, CheckCircle2 } from "lucide-react";
 import { getAppConfig, uploadPrintFile } from "../api";
+import FriendlyError from "./FriendlyError";
 
 interface PrintRequestFormProps {
   onBack: () => void;
@@ -138,9 +139,9 @@ export default function PrintRequestForm({ onBack }: PrintRequestFormProps) {
       <button onClick={onBack} className="flex items-center gap-1 text-sm text-on-surface-variant hover:text-primary mb-4">
         <ArrowLeft size={16} /> Back
       </button>
-      <h2 className="text-2xl font-extrabold text-on-surface mb-1">3D Print Your Avatar</h2>
+      <h2 className="text-2xl font-extrabold text-on-surface mb-1">Make a real keepsake of your pet</h2>
       <p className="text-sm text-on-surface-variant mb-6">
-        Turn your model into a real figurine. Give us your model and a few specs, and we'll email you a quote.
+        Turn your digital pet into a real figurine. Share the file and a few preferences, and we’ll email you a quote.
       </p>
 
       {/* Model source */}
@@ -164,7 +165,7 @@ export default function PrintRequestForm({ onBack }: PrintRequestFormProps) {
           type="url"
           value={modelUrl}
           onChange={(e) => setModelUrl(e.target.value)}
-          placeholder="Paste your model URL (e.g. the .glb link from the Animator)"
+          placeholder="Paste your pet file link (a GLB file works too)"
           className={`${inputClass} mb-5`}
         />
       ) : (
@@ -228,14 +229,14 @@ export default function PrintRequestForm({ onBack }: PrintRequestFormProps) {
         />
       </label>
 
-      {error && <p className="text-sm text-error mb-3">{error}</p>}
+      {error && <FriendlyError message={error} action="Check the details above and try again." className="mb-3" />}
 
       <button
         onClick={handleSubmit}
         disabled={submitting}
         className="w-full flex items-center justify-center gap-2 bg-primary text-on-primary font-bold py-3 rounded-full disabled:opacity-50 transition-all active:scale-[0.99]"
       >
-        {submitting ? <><Loader2 size={18} className="animate-spin" /> Preparing…</> : <><Send size={16} /> Send print request</>}
+        {submitting ? <><Loader2 size={18} className="animate-spin" /> Sending your request…</> : <><Send size={16} /> Get my print quote</>}
       </button>
     </div>
   );

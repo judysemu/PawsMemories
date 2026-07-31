@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RefreshCw, RotateCcw, AlertTriangle } from "lucide-react";
+import { RefreshCw, RotateCcw } from "lucide-react";
+import FriendlyError from "../FriendlyError";
 
 interface Model3DViewerProps {
   signedUrl: string;
@@ -179,14 +180,13 @@ export default function Model3DViewer({ signedUrl, className = "" }: Model3DView
       {loading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/60 backdrop-blur-sm">
           <RefreshCw className="animate-spin text-primary mb-2" size={32} />
-          <span className="text-xs font-bold text-on-surface">Loading 3D Model...</span>
+          <span className="text-xs font-bold text-on-surface">Getting your pet ready…</span>
         </div>
       )}
 
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-error/10 text-center">
-          <AlertTriangle className="text-error mb-2" size={32} />
-          <p className="text-xs font-bold text-error">{error}</p>
+          <FriendlyError message={error} action="Try opening the preview again." className="max-w-xs text-left" />
         </div>
       )}
 

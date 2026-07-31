@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { Screen } from "../types";
 import { Upload, Camera, ChevronRight, Wand2 } from "lucide-react";
 import { useCreateFlow } from "./create-flow/CreateFlowContext";
+import FriendlyError from "./FriendlyError";
 
 interface CreateScreenProps {
   onNavigate: (screen: Screen) => void;
@@ -16,12 +17,12 @@ interface CreateScreenProps {
  * classified "other", rigged as a quadruped, and fails the confidence gate.
  */
 const SUBJECT_OPTIONS: { value: string; label: string; hint: string }[] = [
-  { value: "dog", label: "Dog", hint: "Four-legged rig" },
-  { value: "cat", label: "Cat", hint: "Four-legged rig" },
-  { value: "human", label: "Person", hint: "Two-legged rig with arms and hands" },
-  { value: "bird", label: "Bird", hint: "Winged rig" },
+  { value: "dog", label: "Dog", hint: "A natural four-legged shape" },
+  { value: "cat", label: "Cat", hint: "A natural four-legged shape" },
+  { value: "human", label: "Person", hint: "A natural human shape" },
+  { value: "bird", label: "Bird", hint: "A natural winged shape" },
   { value: "small_animal", label: "Small pet", hint: "Rabbit, guinea pig, ferret" },
-  { value: "other", label: "Other", hint: "Generic four-legged rig" },
+  { value: "other", label: "Other", hint: "We’ll choose a fitting shape" },
 ];
 
 function downscaleReferenceImage(dataUrl: string, maxDimension = 2048): Promise<string> {
@@ -212,7 +213,7 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
             </div>
             )}
 
-            {error && <p className="text-error text-sm font-medium">{error}</p>}
+            {error && <FriendlyError message={error} action="Check the details above and try again." />}
           </div>
 
           {/* Configuration Section */}
@@ -258,8 +259,8 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
                   ))}
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-on-surface-variant">
-                  This picks the skeleton used for rigging — a person needs a
-                  two-legged rig, an animal a four-legged one.
+                  This helps us shape your subject naturally. We’ll choose the
+                  right style for a person, animal, or other subject.
                 </p>
               </div>
               
