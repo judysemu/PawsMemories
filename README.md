@@ -189,7 +189,11 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `WORKER_SHARED_SECRET` | Secret key for blender-worker auth |
 | `MODEL_BUILD_V3_ENABLED` / `RIG_PIPELINE_V4_ENABLED` | Default-off durable model and measured rig rollout flags |
 | `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Default-off Fur Bin API and build-time UI flags |
-| `STATIONERY_V2_ENABLED` | Keep `false`; provider shipping/sandbox gate is still open |
+| `STATIONERY_V2_ENABLED` | Enable only with the Stationery render worker, database, shipping-recipient UI, Printful/Slant3D credentials, variant map, and webhook secrets configured. The v2 path creates and submits provider orders, then reconciles signed callbacks. |
+| `STATIONERY_RENDER_WORKER_URL` / `STATIONERY_RENDER_WORKER_SECRET` | HTTPS render-worker endpoint and HMAC secret for dispatch and trusted completion callbacks |
+| `PRINTFUL_API_KEY` / `PRINTFUL_STORE_ID` / `PRINTFUL_STATIONERY_VARIANT_MAP` | Printful API credentials and JSON mapping from Stationery SKUs to numeric Printful variants |
+| `SLANT3D_API_KEY` / `SLANT3D_PLATFORM_ID` / `SLANT3D_DEFAULT_FILAMENT_ID` | Slant3D API credentials and print material used by the Stationery adapter |
+| `PRINTFUL_WEBHOOK_SECRET` / `SLANT3D_WEBHOOK_SECRET` | Provider callback HMAC secrets |
 | `WAGS_V2_ENABLED` / `WAGS_STRIPE_WEBHOOK_SECRET` | Keep `false` until the separate Wags Stripe webhook and sandbox gate pass and one Plus box can reserve its seven image assets atomically. Plus materialization currently fails closed before the first provider call. |
 | `BIM_V2_ENABLED` / `VITE_BIM_V2_ENABLED` | Keep both `false` until accepted-model, Shell-worker, Render IFC, and browser gates pass |
 | `INHOUSE_SPATIAL_GENERATOR_ENABLED` | Keep `false` until the Pixel/Hermes, Blender, attachment-source, and orchestrator readiness blockers are resolved. If enabled early, the release now fails closed before any spatial-job PupCoin reservation. Organic avatars still use Tripo. |
