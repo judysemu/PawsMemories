@@ -63,6 +63,7 @@ interface StageAttempt {
 }
 
 interface Order {
+  id?: number;
   orderUuid: string;
   state: string;
   meshProfile: MeshProfile;
@@ -845,7 +846,7 @@ export default function PetModelStudio() {
                       {item.order.referenceManifest?.frontUrl ? <img src={item.order.referenceManifest.frontUrl} alt="Successful model reference" className="h-12 w-12 rounded-lg object-cover" /> : <span className="grid h-12 w-12 place-items-center rounded-lg bg-cyan-300/15 text-xl">🐾</span>}
                       <span><strong className="block">{item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"} model</strong><span className="opacity-60">{item.order.subjectProfile}</span></span>
                     </button>
-                    <a href="/print-shop" className="block rounded-lg bg-cyan-400 px-2 py-1.5 text-center text-[11px] font-bold text-slate-950">Slant3D 3D-print checkout</a>
+                    <a href={item.order.id ? `/print-shop?model=${item.order.id}` : "/print-shop"} className="block rounded-lg bg-cyan-400 px-2 py-1.5 text-center text-[11px] font-bold text-slate-950">Slant3D 3D-print checkout</a>
                   </div>
                 ))}
               </div>

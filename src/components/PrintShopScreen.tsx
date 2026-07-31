@@ -163,7 +163,10 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
           if (!active) return;
           const printable = items.filter((item) => item.rigged_model_url || item.model_url);
           setModels(printable);
-          setSelectedModelId((current) => current ?? printable[0]?.id ?? null);
+          const requestedId = Number(new URLSearchParams(window.location.search).get("model"));
+          setSelectedModelId((current) => requestedId > 0 && printable.some((item) => item.id === requestedId)
+            ? requestedId
+            : current ?? printable[0]?.id ?? null);
         })
         .catch(() => active && setModels([]))
         .finally(() => active && setModelsLoading(false));
