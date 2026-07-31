@@ -32,6 +32,29 @@ test("aggregate budgets: conservative defaults keep rig closed", () => {
   assert.equal(globalDailyCapFor("rig", {}), 0);
   assert.equal(globalDailyCostMicroUsdFor("rig", {}), 0);
   assert.equal(estimatedCostMicroUsdFor("rig", {}), 1_000_000);
+  assert.deepEqual(paidUsageLimitsFor("image_generation", {}), {
+    userDailyCap: 5,
+    globalDailyCap: 50,
+    globalMinuteCallCap: 10,
+    estimatedCostMicroUsd: 1_000_000,
+    globalDailyCostMicroUsd: 50_000_000,
+  });
+});
+
+test("image generation has an env-backed provider-call minute cap without changing AR endpoint limits", () => {
+  assert.equal(
+    paidUsageLimitsFor("image_generation", {
+      PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP: "7",
+    }).globalMinuteCallCap,
+    7,
+  );
+  assert.equal(
+    paidUsageLimitsFor("image_generation", {
+      PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP: "invalid",
+    }).globalMinuteCallCap,
+    10,
+  );
+  assert.equal(paidUsageLimitsFor("classify", {}).globalMinuteCallCap, undefined);
 });
 
 test("aggregate budgets: zero caps are preserved and zero cost estimates fall back", () => {
@@ -65,6 +88,7 @@ test("dailyCapFor: defaults", () => {
   assert.equal(dailyCapFor("classify", {}), 25);
   assert.equal(dailyCapFor("rig", {}), 5);
   assert.equal(dailyCapFor("semantic_scan", {}), 50);
+  assert.equal(dailyCapFor("image_generation", {}), 5);
 });
 
 test("dailyCapFor: env override + invalid fallback", () => {
@@ -83,6 +107,8 @@ test("isEndpointEnabled: per-endpoint defaults (rig off, others on)", () => {
   assert.equal(isEndpointEnabled("semantic_scan", {}), true);
   assert.equal(isEndpointEnabled("rig", {}), false); // historical default
   assert.equal(isEndpointEnabled("rig", { PETSIM_RIG_ENABLED: "true" }), true);
+  assert.equal(isEndpointEnabled("image_generation", {}), true);
+  assert.equal(isEndpointEnabled("image_generation", { PETSIM_IMAGE_GENERATION_ENABLED: "false" }), false);
 });
 
 test("isEndpointEnabled: master kill-switch overrides everything", () => {

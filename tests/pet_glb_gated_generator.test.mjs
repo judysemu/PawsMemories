@@ -72,7 +72,7 @@ function modelGlb({ triangles = 12, texture = false, rig = false } = {}) {
   });
 }
 
-test("gated product contracts reject unsupported facial rigging and invalid stage combinations", () => {
+test("gated product contracts reject facial rigging but allow a body rig without texture", () => {
   assert.equal(CreatePetGlbOrderSchema.safeParse({
     meshProfile: "hd",
     subjectProfile: "pet",
@@ -89,7 +89,7 @@ test("gated product contracts reject unsupported facial rigging and invalid stag
     includeRig: true,
     textureQuality: "standard",
     facialRig: false,
-  }).success, false);
+  }).success, true);
 
   assert.equal(FACIAL_RIG_POLICY.available, false);
   assert.equal(FACIAL_RIG_POLICY.minimumSuccessRate, 0.75);
@@ -105,6 +105,11 @@ test("prices are separated by stage and total is deterministic", () => {
     petGlbTotalCost({ texture: true, rig: true }),
     PET_GLB_STAGE_PRICES.BASE + PET_GLB_STAGE_PRICES.TEXTURE + PET_GLB_STAGE_PRICES.RIG,
   );
+  assert.equal(
+    petGlbTotalCost({ texture: false, rig: true }),
+    PET_GLB_STAGE_PRICES.BASE + PET_GLB_STAGE_PRICES.RIG,
+  );
+  assert.equal(petGlbTotalCost({ texture: false, rig: true }), 80);
 });
 
 test("SmartMesh and HD produce different real provider geometry contracts", async () => {
@@ -133,6 +138,26 @@ test("SmartMesh and HD produce different real provider geometry contracts", asyn
   assert.equal(calls[1].geometry.modelVersion, "P1-20260311");
   assert.equal(calls[1].geometry.faceLimit, 8_000);
   assert.ok(calls[1].geometry.faceLimit < calls[0].geometry.faceLimit);
+});
+
+test("an untextured body rig is valid only when the order did not purchase texture", () => {
+  const untexturedRig = modelGlb({ texture: false, rig: true });
+
+  const noTextureOrder = validatePetGlbStage(untexturedRig, {
+    stage: "rig",
+    meshProfile: "hd",
+    requireTexture: false,
+  });
+  assert.equal(noTextureOrder.operatorReady, true);
+  assert.equal(noTextureOrder.reasonCodes.includes("TEXTURE_MISSING"), false);
+
+  const texturedOrder = validatePetGlbStage(untexturedRig, {
+    stage: "rig",
+    meshProfile: "hd",
+    requireTexture: true,
+  });
+  assert.equal(texturedOrder.operatorReady, false);
+  assert.equal(texturedOrder.reasonCodes.includes("TEXTURE_MISSING"), true);
 });
 
 test("stage-aware validation accepts a blank base and adds texture/rig requirements later", () => {

@@ -322,6 +322,8 @@ export function validatePetGlbStage(
     stage: PetGlbModelStageKind;
     meshProfile: MeshProfile;
     rigProfileJoints?: string[];
+    /** A rigged output only needs texture evidence when this order purchased Texture. */
+    requireTexture?: boolean;
   },
 ): ValidationReport {
   const checks: CheckResult[] = [];
@@ -397,7 +399,7 @@ export function validatePetGlbStage(
     });
     if (!buffersPass) reasonCodes.push("EXTERNAL_BUFFER");
 
-    if (opts.stage === "texture" || opts.stage === "rig") {
+    if (opts.stage === "texture" || (opts.stage === "rig" && opts.requireTexture === true)) {
       const texturePass = materials.length > 0 && (textures.length > 0 || images.length > 0);
       checks.push({
         id: "texture_present", channel: "M", critical: true, passed: texturePass,

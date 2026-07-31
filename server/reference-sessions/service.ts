@@ -55,6 +55,67 @@ export class ReferenceSessionError extends Error {
   }
 }
 
+const REFERENCE_BUDGET_LOCK = "paws_reference_provider_budget_v1";
+
+function boundedReferenceCap(name: string, productionFallback: number, maximum: number): number {
+  const fallback = process.env.NODE_ENV === "production" ? productionFallback : maximum;
+  const parsed = Number.parseInt(process.env[name] || "", 10);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : fallback;
+}
+
+async function assertReferenceProviderBudget(
+  connection: mysql.PoolConnection,
+  ownerId: string,
+): Promise<void> {
+  const perUserDailyCap = boundedReferenceCap("REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP", 3, 50);
+  const globalDailyCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 20, 200);
+  const globalMinuteCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20);
+  const globalConcurrentCap = boundedReferenceCap("REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5);
+  const [rows]: any = await connection.query(
+    `SELECT
+       COUNT(*) AS global_day_count,
+       SUM(CASE WHEN s.owner_id = ? THEN 1 ELSE 0 END) AS owner_day_count,
+       SUM(CASE WHEN a.started_at >= NOW() - INTERVAL 1 MINUTE THEN 1 ELSE 0 END) AS global_minute_count,
+       (
+         SELECT COUNT(*)
+         FROM reference_attempts active
+         INNER JOIN reference_sessions active_session
+           ON active_session.current_attempt_id = active.id
+         WHERE active_session.state = 'generating'
+           AND active.started_at >= NOW() - INTERVAL 15 MINUTE
+       ) AS global_active_count
+     FROM reference_attempts a
+     INNER JOIN reference_sessions s ON s.id = a.session_id
+     WHERE a.started_at >= NOW() - INTERVAL 24 HOUR`,
+    [ownerId],
+  );
+  const counts = rows?.[0] || {};
+  if (Number(counts.global_active_count || 0) >= globalConcurrentCap) {
+    throw new ReferenceSessionError(
+      "Another reference set is already generating. Try again after it finishes.",
+      "CONCURRENT_ATTEMPT_CAP",
+    );
+  }
+  if (Number(counts.global_minute_count || 0) >= globalMinuteCap) {
+    throw new ReferenceSessionError(
+      "Reference generation is at its global minute safety limit. Try again shortly.",
+      "MINUTE_ATTEMPT_CAP",
+    );
+  }
+  if (Number(counts.owner_day_count || 0) >= perUserDailyCap) {
+    throw new ReferenceSessionError(
+      `You have reached today's ${perUserDailyCap}-attempt reference-generation safety limit.`,
+      "DAILY_ATTEMPT_CAP",
+    );
+  }
+  if (Number(counts.global_day_count || 0) >= globalDailyCap) {
+    throw new ReferenceSessionError(
+      "Reference generation has reached today's global safety limit.",
+      "DAILY_ATTEMPT_CAP",
+    );
+  }
+}
+
 function decodeBase64Image(value: string): Buffer {
   const normalized = value.replace(/^data:image\/(?:png|jpeg|webp);base64,/i, "").replace(/\s/g, "");
   if (!normalized || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) {
@@ -199,6 +260,22 @@ export class ReferenceSessionService {
 
     const createdObjectKeys: string[] = [];
     const createdAssetIds: number[] = [];
+    let budgetLockHeld = false;
+    let connectionDestroyed = false;
+    const releaseBudgetLock = async () => {
+      if (!budgetLockHeld) return;
+      try {
+        await connection.query("SELECT RELEASE_LOCK(?)", [REFERENCE_BUDGET_LOCK]);
+      } catch {
+        // A pooled MySQL connection can retain a named lock. Destroy the
+        // connection if release is uncertain so that a leaked lock cannot
+        // permanently stop reference generation.
+        connection.destroy();
+        connectionDestroyed = true;
+      } finally {
+        budgetLockHeld = false;
+      }
+    };
 
     try {
       await connection.beginTransaction();
@@ -210,8 +287,22 @@ export class ReferenceSessionService {
         throw new ReferenceSessionError("Unauthorized access to session", "UNAUTHORIZED");
       }
 
+      const [lockRows]: any = await connection.query(
+        "SELECT GET_LOCK(?, 5) AS acquired",
+        [REFERENCE_BUDGET_LOCK],
+      );
+      if (Number(lockRows?.[0]?.acquired || 0) !== 1) {
+        throw new ReferenceSessionError(
+          "Reference generation is busy. Try again shortly.",
+          "MINUTE_ATTEMPT_CAP",
+        );
+      }
+      budgetLockHeld = true;
+
       // Check idempotency
-      const existingAttempt = await findAttemptByIdempotencyKey(connection, session.id, idempotencyKey);
+      // Use a current/locking read so this check cannot establish a stale
+      // REPEATABLE READ snapshot before the global budget query.
+      const existingAttempt = await findAttemptByIdempotencyKey(connection, session.id, idempotencyKey, true);
       if (existingAttempt) {
         await connection.rollback();
         return { session, attempt: existingAttempt };
@@ -233,6 +324,8 @@ export class ReferenceSessionService {
           "ATTEMPT_LIMIT_REACHED",
         );
       }
+
+      await assertReferenceProviderBudget(connection, ownerId);
 
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto
@@ -256,6 +349,7 @@ export class ReferenceSessionService {
       });
 
       await connection.commit();
+      await releaseBudgetLock();
 
       // Generate reference views via provider
       let photoBuffer: Buffer | null = null;
@@ -376,7 +470,8 @@ export class ReferenceSessionService {
 
       return { session: updatedSession, attempt: updatedAttempt };
     } catch (error: any) {
-      await connection.rollback().catch(() => {});
+      if (!connectionDestroyed) await connection.rollback().catch(() => {});
+      await releaseBudgetLock();
 
       // Compensating storage cleanup for failed attempts
       for (const key of createdObjectKeys) {
@@ -405,7 +500,8 @@ export class ReferenceSessionService {
         ? error
         : new ReferenceSessionError(`Attempt generation failed: ${error.message}`, "GENERATION_FAILED");
     } finally {
-      connection.release();
+      await releaseBudgetLock();
+      if (!connectionDestroyed) connection.release();
     }
   }
 

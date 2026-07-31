@@ -288,10 +288,11 @@ export async function findAttemptByIdempotencyKey(
   connection: mysql.PoolConnection | mysql.Pool,
   sessionId: number,
   idempotencyKey: string,
+  lockForUpdate = false,
 ): Promise<ReferenceAttemptRecord | null> {
   const [rows]: any = await connection.query(
     `SELECT id, session_id, attempt_number, idempotency_key, provider, model, prompt_config_hash, retry_notes, state, failure_code, error_message, started_at, completed_at
-     FROM reference_attempts WHERE session_id = ? AND idempotency_key = ? LIMIT 1`,
+     FROM reference_attempts WHERE session_id = ? AND idempotency_key = ? LIMIT 1${lockForUpdate ? " FOR UPDATE" : ""}`,
     [sessionId, idempotencyKey],
   );
   if (!rows || rows.length === 0) return null;

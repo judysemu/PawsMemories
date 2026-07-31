@@ -238,7 +238,8 @@ carries attempt UUID, artifact SHA-256, asset-version ID, and report SHA-256.
 
 ### Rig
 
-- every texture/base requirement;
+- every base requirement;
+- texture evidence only when the order purchased the Texture stage;
 - one or more skins;
 - joint nodes exist;
 - JOINTS_0 and WEIGHTS_0 match on skinned primitives;

@@ -107,8 +107,12 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
-      return res.status(statusCode).json({ success: false, error: error.message });
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
+        ? 403
+        : error instanceof ReferenceSessionError && ["CONCURRENT_ATTEMPT_CAP", "MINUTE_ATTEMPT_CAP", "DAILY_ATTEMPT_CAP"].includes(error.code)
+          ? 429
+          : 422;
+      return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });
 
@@ -134,7 +138,11 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
+        ? 403
+        : error instanceof ReferenceSessionError && ["CONCURRENT_ATTEMPT_CAP", "MINUTE_ATTEMPT_CAP", "DAILY_ATTEMPT_CAP"].includes(error.code)
+          ? 429
+          : 422;
       return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });

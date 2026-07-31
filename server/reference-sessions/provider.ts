@@ -84,15 +84,18 @@ export class GeminiReferenceImageProvider implements ReferenceImageProvider {
     apiKey = process.env.GEMINI_API_KEY || "",
     model = process.env.GEMINI_REFERENCE_IMAGE_MODEL || "gemini-3.1-flash-image",
   ) {
-    this.model = model.trim() || "gemini-3.1-flash-image";
+    const configuredModel = model.trim();
+    this.model = !configuredModel || /^gemini-2\./i.test(configuredModel)
+      ? "gemini-3.1-flash-image"
+      : configuredModel;
     this.ai = apiKey.trim() ? new GoogleGenAI({
       apiKey: apiKey.trim(),
       httpOptions: {
         headers: { "User-Agent": "pawsome3d-reference-builder" },
         timeout: REFERENCE_PROVIDER_TIMEOUT_MS,
-        // The SDK otherwise defaults to five attempts. This workflow already
-        // makes five angle calls, so hidden retries can multiply one click into
-        // 25 billable provider requests.
+        // Keep this explicit even though the installed SDK does not retry
+        // without retryOptions. A future SDK/config change must not multiply
+        // this workflow's five intentional angle calls.
         retryOptions: { attempts: 1 },
       },
     }) : null;

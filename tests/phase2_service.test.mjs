@@ -11,6 +11,71 @@ const mysqlPort = Number(process.env.MYSQL_TEST_PORT || 3306);
 const mysqlUser = process.env.MYSQL_TEST_USER || "root";
 const mysqlPassword = process.env.MYSQL_TEST_PASSWORD || "";
 
+class BlockingReferenceImageProvider {
+  name = "blocking_fake";
+  model = "blocking-reference-provider-v1";
+  calls = 0;
+  delegate = new FakeReferenceImageProvider();
+  started;
+  #markStarted;
+  #release;
+  #released;
+
+  constructor() {
+    this.started = new Promise((resolve) => {
+      this.#markStarted = resolve;
+    });
+    this.#released = new Promise((resolve) => {
+      this.#release = resolve;
+    });
+  }
+
+  release() {
+    this.#release();
+  }
+
+  async generateMultiview(input, inputMode) {
+    this.calls += 1;
+    this.#markStarted();
+    await this.#released;
+    return this.delegate.generateMultiview(input, inputMode);
+  }
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function poolWithConnectionQueryHook(pool, beforeQuery) {
+  return new Proxy(pool, {
+    get(target, property) {
+      if (property === "getConnection") {
+        return async () => {
+          const connection = await target.getConnection();
+          return new Proxy(connection, {
+            get(connectionTarget, connectionProperty) {
+              if (connectionProperty === "query") {
+                return async (sql, params) => {
+                  await beforeQuery(String(sql));
+                  return connectionTarget.query(sql, params);
+                };
+              }
+              const value = Reflect.get(connectionTarget, connectionProperty, connectionTarget);
+              return typeof value === "function" ? value.bind(connectionTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 test("Phase 2 Production Reference Session Service Suite", async (t) => {
   let conn;
   try {
@@ -34,6 +99,10 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   process.env.MEDIA_BUCKET_URL = "http://localhost:9000";
   process.env.MEDIA_BUCKET_KEY = "testkey";
   process.env.MEDIA_BUCKET_SECRET = "testsecret";
+  process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "100";
+  process.env.REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP = "100";
+  process.env.REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP = "20";
+  process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "5";
 
   const testDbName = `paws_test_refserv_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   const adminConn = await mysql.createConnection({ host: mysqlHost, port: mysqlPort, user: mysqlUser, password: mysqlPassword });
@@ -54,6 +123,10 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
 
   t.after(async () => {
     delete process.env.MULTIVIEW_APPROVAL_ENABLED;
+    delete process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP;
+    delete process.env.REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP;
+    delete process.env.REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP;
+    delete process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP;
     await pool.end();
     const cleanupConn = await mysql.createConnection({ host: mysqlHost, port: mysqlPort, user: mysqlUser, password: mysqlPassword });
     await cleanupConn.query(`DROP DATABASE IF EXISTS \`${testDbName}\``);
@@ -124,6 +197,109 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     ]);
     assert.equal(first.attempt.id, second.attempt.id);
     assert.equal(provider.calls, 1);
+  });
+
+  await t.test("3c. Durable daily cap stops new sessions before another provider call", async () => {
+    const ownerId = "+15551115555";
+    const provider = new FakeReferenceImageProvider();
+    const cappedService = new ReferenceSessionService(provider, () => pool);
+    process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "1";
+    try {
+      const first = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A terrier" });
+      await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
+      assert.equal(provider.calls, 1);
+      const replay = await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
+      assert.equal(replay.attempt.attempt_number, 1);
+      assert.equal(provider.calls, 1);
+      const [ownerAttemptRows] = await pool.query(
+        `SELECT COUNT(*) AS count
+         FROM reference_attempts a
+         INNER JOIN reference_sessions s ON s.id = a.session_id
+         WHERE s.owner_id = ? AND a.started_at >= NOW() - INTERVAL 24 HOUR`,
+        [ownerId],
+      );
+      assert.equal(Number(ownerAttemptRows[0].count), 1);
+
+      const second = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A spaniel" });
+      await assert.rejects(
+        cappedService.startOrRetryAttempt(ownerId, second.session_uuid, "daily-cap-second"),
+        (err) => err instanceof ReferenceSessionError && err.code === "DAILY_ATTEMPT_CAP",
+      );
+      assert.equal(provider.calls, 1);
+    } finally {
+      process.env.REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP = "100";
+    }
+  });
+
+  await t.test("3d. Durable concurrency cap blocks a second provider invocation", async () => {
+    const firstProvider = new BlockingReferenceImageProvider();
+    const secondProvider = new FakeReferenceImageProvider();
+    const firstService = new ReferenceSessionService(firstProvider, () => pool);
+    const secondService = new ReferenceSessionService(secondProvider, () => pool);
+    const first = await firstService.createSession("+15551116661", { inputMode: "text", prompt: "A poodle" });
+    const second = await secondService.createSession("+15551116662", { inputMode: "text", prompt: "A corgi" });
+    process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "1";
+    const firstRun = firstService.startOrRetryAttempt("+15551116661", first.session_uuid, "concurrent-cap-first");
+    await firstProvider.started;
+    try {
+      await assert.rejects(
+        secondService.startOrRetryAttempt("+15551116662", second.session_uuid, "concurrent-cap-second"),
+        (err) => err instanceof ReferenceSessionError && err.code === "CONCURRENT_ATTEMPT_CAP",
+      );
+      assert.equal(secondProvider.calls, 0);
+    } finally {
+      firstProvider.release();
+      process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "5";
+    }
+    await firstRun;
+  });
+
+  await t.test("3e. Concurrent admission sees an attempt committed after its transaction snapshot", async () => {
+    const firstProvider = new BlockingReferenceImageProvider();
+    const secondProvider = new FakeReferenceImageProvider();
+    const firstInsertReached = deferred();
+    const releaseFirstInsert = deferred();
+    const secondLockReached = deferred();
+    let firstInsertBlocked = false;
+    let secondLockObserved = false;
+
+    const firstPool = poolWithConnectionQueryHook(pool, async (sql) => {
+      if (!firstInsertBlocked && sql.includes("INSERT INTO reference_attempts")) {
+        firstInsertBlocked = true;
+        firstInsertReached.resolve();
+        await releaseFirstInsert.promise;
+      }
+    });
+    const secondPool = poolWithConnectionQueryHook(pool, async (sql) => {
+      if (!secondLockObserved && sql.includes("SELECT GET_LOCK")) {
+        secondLockObserved = true;
+        secondLockReached.resolve();
+      }
+    });
+    const firstService = new ReferenceSessionService(firstProvider, () => firstPool);
+    const secondService = new ReferenceSessionService(secondProvider, () => secondPool);
+    const first = await firstService.createSession("+15551117771", { inputMode: "text", prompt: "A dachshund" });
+    const second = await secondService.createSession("+15551117772", { inputMode: "text", prompt: "A schnauzer" });
+
+    process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "1";
+    const firstRun = firstService.startOrRetryAttempt("+15551117771", first.session_uuid, "snapshot-first");
+    await firstInsertReached.promise;
+    const secondRun = secondService.startOrRetryAttempt("+15551117772", second.session_uuid, "snapshot-second");
+    await secondLockReached.promise;
+    releaseFirstInsert.resolve();
+
+    try {
+      await assert.rejects(
+        secondRun,
+        (err) => err instanceof ReferenceSessionError && err.code === "CONCURRENT_ATTEMPT_CAP",
+      );
+      assert.equal(secondProvider.calls, 0);
+    } finally {
+      firstProvider.release();
+      process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "5";
+      await firstRun;
+      await secondRun.catch(() => {});
+    }
   });
 
   await t.test("4. approveManifest approves session with matching 5-view manifest hash and enters terminal state", async () => {

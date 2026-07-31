@@ -28,17 +28,7 @@ export const CreatePetGlbOrderSchema = z.object({
   textureQuality: TextureQualitySchema.default("standard"),
   styleDirection: z.string().trim().max(400).nullable().optional(),
   facialRig: z.literal(false).optional(),
-}).strict().superRefine((value, ctx) => {
-  if (value.includeRig && !value.includeTexture) {
-    // Rigging an untextured model is technically possible, but this product's
-    // explicit base → texture → rig sequence must remain unambiguous.
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["includeTexture"],
-      message: "Texture must be selected before rigging.",
-    });
-  }
-});
+}).strict();
 
 export const ReferenceManifestSchema = z.object({
   frontUrl: httpsUrl,

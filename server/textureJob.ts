@@ -44,11 +44,15 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "../db";
 import { uploadBase64Binary } from "../storage";
 import { GeminiHermesAdapter } from "./hermes/gemini_adapter";
+import { reserveImageGenerationCall } from "./imageGenerationBudget";
 // The adapter handles talking to Gemini.
 // We can use it directly or instantiate our own Gemini client.
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: { retryOptions: { attempts: 1 } },
+});
 
 // The models used by tiers
 const IMAGE_MODELS_BY_TIER: Record<string, string> = {
@@ -115,6 +119,7 @@ Maintain the exact silhouette and background masking.`;
       // Gemini 3.1 image models don't exist yet with image-to-image in exactly this form, 
       // but we use the adapter pattern or the genai sdk.
       // We will mock the AI call structure for image generation.
+      await reserveImageGenerationCall(phone);
       const response = await ai.models.generateImages({
         model: model,
         prompt: systemPrompt,

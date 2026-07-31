@@ -24,6 +24,26 @@ function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
 }
 
+type SpatialHealthSnapshot = {
+  ready?: unknown;
+  featureEnabled?: unknown;
+  layer8Configured?: unknown;
+  pixelWorkerOnline?: unknown;
+  blenderWorkerHealthy?: unknown;
+  orchestratorReady?: unknown;
+  blockers?: unknown;
+};
+
+function sanitizedPipelineBlockers(health: SpatialHealthSnapshot): string[] {
+  const blockers: string[] = [];
+  if (health.featureEnabled !== true) blockers.push("feature_flag");
+  if (health.layer8Configured !== true) blockers.push("layer8");
+  if (health.pixelWorkerOnline !== true) blockers.push("pixel_worker");
+  if (health.blenderWorkerHealthy !== true) blockers.push("blender_worker");
+  if (health.orchestratorReady !== true) blockers.push("orchestrator");
+  return blockers.length > 0 ? blockers : ["readiness_unconfirmed"];
+}
+
 export function createSpatialGeneratorRouter(
   options: {
     pool?: mysql.Pool;
@@ -39,6 +59,22 @@ export function createSpatialGeneratorRouter(
       service = new SpatialGeneratorService({ pool: options.pool || getPool() });
     }
     return service;
+  };
+  const getPipelineBlockers = async (): Promise<string[] | null> => {
+    try {
+      const health = await getService().getHealthStatus() as SpatialHealthSnapshot;
+      const ready = health.ready === true
+        && health.featureEnabled === true
+        && health.layer8Configured === true
+        && health.pixelWorkerOnline === true
+        && health.blenderWorkerHealthy === true
+        && health.orchestratorReady === true
+        && Array.isArray(health.blockers)
+        && health.blockers.length === 0;
+      return ready ? null : sanitizedPipelineBlockers(health);
+    } catch {
+      return ["readiness_check_failed"];
+    }
   };
 
   // Admin-only for initial release
@@ -63,8 +99,21 @@ export function createSpatialGeneratorRouter(
     }
   };
 
-  // Apply admin and feature guards to all routes
+  // Health remains admin-only but must be available before the feature is
+  // enabled so operators can verify the fail-closed release gate.
   router.use(adminGuard);
+
+  router.get("/health", async (_req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const health = await getService().getHealthStatus();
+      return res.json(health);
+    } catch {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // All job and product routes remain feature-gated.
   router.use(featureGuard);
 
   // ─── Rate Limiting ─────────────────────────────────────────────────────────
@@ -96,10 +145,24 @@ export function createSpatialGeneratorRouter(
       return res.status(400).json({ error: "Invalid collar measurements", details: parsed.error.flatten() });
     }
     try {
-      const job = await getService().startJob(userPhone, collarSpatialJob(parsed.data));
+      const spatialService = getService();
+      const blockers = await getPipelineBlockers();
+      if (blockers) {
+        return res.status(503).json({
+          error: "SPATIAL_PIPELINE_NOT_READY",
+          blockers,
+        });
+      }
+      const job = await spatialService.startJob(userPhone, collarSpatialJob(parsed.data));
       return res.status(202).json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
+        if (error.code === "SPATIAL_PIPELINE_NOT_READY") {
+          return res.status(503).json({
+            error: error.code,
+            blockers: ["readiness_stale"],
+          });
+        }
         return res.status(400).json({ error: error.code, message: error.message });
       }
       console.error("Collar job creation failed:", error);
@@ -118,10 +181,24 @@ export function createSpatialGeneratorRouter(
     }
 
     try {
-      const job = await getService().startJob(userPhone, parsed.data);
+      const spatialService = getService();
+      const blockers = await getPipelineBlockers();
+      if (blockers) {
+        return res.status(503).json({
+          error: "SPATIAL_PIPELINE_NOT_READY",
+          blockers,
+        });
+      }
+      const job = await spatialService.startJob(userPhone, parsed.data);
       return res.status(202).json(job);
     } catch (error) {
       if (error instanceof SpatialGeneratorServiceError) {
+        if (error.code === "SPATIAL_PIPELINE_NOT_READY") {
+          return res.status(503).json({
+            error: error.code,
+            blockers: ["readiness_stale"],
+          });
+        }
         return res.status(400).json({ error: error.code, message: error.message });
       }
       console.error("Spatial job creation failed:", error);
@@ -253,23 +330,6 @@ export function createSpatialGeneratorRouter(
         return res.status(400).json({ error: error.code, message: error.message });
       }
       console.error("Spatial job cancel failed:", error);
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // ─── GET /api/spatial-generator/health ─────────────────────────────────────
-  router.get("/health", async (_req: Request, res: Response) => {
-    const userPhone = getRequestUserPhone(_req);
-    if (!userPhone) return res.status(401).json({ error: "Unauthorized" });
-
-    const isAdmin = await checkAdmin(userPhone);
-    if (!isAdmin) return res.status(403).json({ error: "Admin only" });
-
-    try {
-      const health = await getService().getHealthStatus();
-      return res.json(health);
-    } catch (error) {
-      console.error("Spatial generator health check failed:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

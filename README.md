@@ -6,7 +6,8 @@ Live site: https://pawsome3d.com  (formerly mypets.cc)
 
 ## Features
 
-- **Customer-gated 3D models** — five approved reference views → an untextured base GLB → optional texture → optional body rig. Every artifact is mirrored into private storage, validated, and shown for approval before the next paid stage starts. Customers can choose HD or measured low-triangle SmartMesh output.
+- **Customer-gated 3D models** — five approved reference views → an untextured base GLB → optional texture → optional 35-PupCoin body/skeletal rig. Every artifact is mirrored into private storage, validated, and shown for approval before the next paid stage starts. Customers can choose HD or measured low-triangle SmartMesh output. Facial blendshapes are a separate, currently deferred capability and do not disable the body rig.
+- **One-photo model entry** — the builder accepts one genuine PNG, JPEG, or WebP source at any practical aspect ratio; additional angles are optional. Image bytes must match the declared file type. The generator creates the five approval views, and the customer must approve them (or deliberately enable auto-approval) before the paid base mesh begins.
 - **Fur Bin showcase** — a default-off private model library and public-derivative showcase with immutable versions, measured capability badges, moderation, and rollback.
 - **Scaled building lab** — calibrated text/image proposals, low-cost visual Shell and higher-cost IFC/BIM choices, and verification before and after construction. The durable v2 release path remains disabled until live worker/UI acceptance.
 - **AR virtual pet (WebXR / ARCore)** — place your avatar on real surfaces on Android Chrome; plane + mesh detection, drift‑free `XRAnchor` placement, and footprint center‑of‑gravity grounding so the pet plants on its feet. iOS falls back to the 8th Wall engine. The AR view is driven by an autonomous **behavior brain** (drives, hormones, reinforcement) with voice‑command training, gesture reinforcement, semantic‑scan navigation, and disc/agility trials — see `AR_PET_SIM_SPEC.md`.
@@ -174,6 +175,13 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `MEDIA_BUCKET_NAME` / `MEDIA_BUCKET_URL` / `MEDIA_BUCKET_KEY` / `MEDIA_BUCKET_SECRET` | Object storage for generated media |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Twilio SMS API for request fulfillment notifications |
 | `TRIPO_API_KEY` | Tripo3D API key for Image-to-3D mesh generation (Primary 3D engine) |
+| `GEMINI_REFERENCE_IMAGE_MODEL` | Dedicated five-view reference model; production default `gemini-3.1-flash-image` |
+| `REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP` / `REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP` | Durable reference-generator burst controls; production defaults `1` active attempt and `2` attempts/minute |
+| `REFERENCE_GENERATION_USER_DAILY_ATTEMPT_CAP` / `REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP` | Rolling 24-hour reference-generator controls; production defaults `3` per user and `20` globally |
+| `PETSIM_IMAGE_GENERATION_ENABLED` | Kill switch for shared Gemini/Imagen image-output calls; applies to admins too |
+| `PETSIM_IMAGE_GENERATION_DAILY_CAP` / `PETSIM_IMAGE_GENERATION_GLOBAL_DAILY_CAP` | Database-backed actual provider-call caps; defaults `5` per user and `50` globally per database UTC day |
+| `PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP` | Database-backed shared provider-call cap; default `10` calls per 60-second window, leaving headroom below the observed 20 RPM Nano Banana Pro quota. The Flash reference path has its own independent cap. |
+| `PETSIM_IMAGE_GENERATION_ESTIMATED_COST_MICRO_USD` / `PETSIM_IMAGE_GENERATION_GLOBAL_DAILY_COST_MICRO_USD` | Per-call cost reservation and aggregate daily stop for shared image output |
 | `HEYGEN_API_KEY` / `HEYGEN_DEFAULT_VOICE_ID` | HeyGen API for talking avatar video generation |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_MODEL_ID` / `ELEVENLABS_DEFAULT_VOICE_ID` | Animator live voice preview; defaults are documented in `.env.example` |
 | `RHUBARB_BIN` | Optional absolute path to the Rhubarb Linux executable; enables Tier B visemes and falls back to Tier A when absent |
@@ -182,9 +190,9 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `MODEL_BUILD_V3_ENABLED` / `RIG_PIPELINE_V4_ENABLED` | Default-off durable model and measured rig rollout flags |
 | `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Default-off Fur Bin API and build-time UI flags |
 | `STATIONERY_V2_ENABLED` | Keep `false`; provider shipping/sandbox gate is still open |
-| `WAGS_V2_ENABLED` / `WAGS_STRIPE_WEBHOOK_SECRET` | Keep `false` until the separate Wags Stripe webhook and sandbox gate pass |
+| `WAGS_V2_ENABLED` / `WAGS_STRIPE_WEBHOOK_SECRET` | Keep `false` until the separate Wags Stripe webhook and sandbox gate pass and one Plus box can reserve its seven image assets atomically. Plus materialization currently fails closed before the first provider call. |
 | `BIM_V2_ENABLED` / `VITE_BIM_V2_ENABLED` | Keep both `false` until accepted-model, Shell-worker, Render IFC, and browser gates pass |
-| `INHOUSE_SPATIAL_GENERATOR_ENABLED` | Keep `false`; enables in-house accessory/hard-surface generator (Thermal Cascade: observe → plan → math → compile → draft → verify → approve → finalize). Replaces Tripo only for accessories, attachments, and printables. Organic avatars still use Tripo. | false |
+| `INHOUSE_SPATIAL_GENERATOR_ENABLED` | Keep `false` until the Pixel/Hermes, Blender, attachment-source, and orchestrator readiness blockers are resolved. If enabled early, the release now fails closed before any spatial-job PupCoin reservation. Organic avatars still use Tripo. |
 | `LAYER8_BASE_URL` | Base URL for Layer8 control plane (e.g., `https://layer8.pawsome.ai`) | |
 | `LAYER8_TENANT_API_KEY` | Tenant API key for Layer8 spatial operations | |
 | `LAYER8_SPATIAL_TIMEOUT_MS` | Optional timeout for Layer8 spatial calls (default 30000) | |
@@ -220,4 +228,6 @@ The deploy zip is **pre-built locally** under the pinned Node release. Hostinger
 3. In hPanel: **Websites → pawsome3d.com → Deployments → Settings and redeploy → Upload new files** → upload the zip → redeploy.
 4. Hostinger runs `npm install && npm run build` (the build is a verified no-op), then starts root **`server.cjs`**, which loads **`dist/server.cjs`**. Tables auto‑create on boot via `initDb()`.
 
-The server auto‑detects prod by the presence of `dist/index.html`; if the build is skipped, `index.html` at the repo root is a Vite **dev** template (`/src/main.tsx`) and the page renders blank. Environment variables live in Hostinger's deployment config (Deployments → Settings), not in a committed file. For the full set of deploy gotchas — SPA catch-all masking `/api` 404s, the stale `.git/*.lock` workaround, three.js dedupe, CDN pins — see **`DEPLOYMENT_NOTES.md`**.
+The server auto-detects prod by the presence of `dist/index.html`; if the build is skipped, `index.html` at the repo root is a Vite **dev** template (`/src/main.tsx`) and the page renders blank. Environment variables live in Hostinger's deployment config (Deployments → Settings), not in a committed file.
+
+The latest production 3D-builder verification, including the exact credit boundary and unresolved rig/collar gates, is recorded in [`docs/current/PRODUCTION_3D_SWEEP_2026-07-30.md`](docs/current/PRODUCTION_3D_SWEEP_2026-07-30.md).

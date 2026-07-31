@@ -252,6 +252,7 @@ export class PetGlbService {
         stage: attempt.stage,
         meshProfile: order.meshProfile,
         rigProfileJoints: attempt.stage === "rig" ? this.deps.rigProfileJoints : undefined,
+        requireTexture: attempt.stage === "rig" ? order.includeTexture : undefined,
       });
       const reportSha256 = canonicalHash(report);
       const { assetId, versionId } = await this.deps.persistVersion({

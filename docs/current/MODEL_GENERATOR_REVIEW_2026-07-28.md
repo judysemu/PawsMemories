@@ -148,7 +148,8 @@ specific:
 - reference: exact manifest hash and required views;
 - base: GLB parse, scene, non-empty mesh, triangle budget, self-contained buffers;
 - texture: all base checks plus material/texture evidence;
-- rig: all texture/base checks plus skin, joints, and weights;
+- rig: all base checks plus skin, joints, and weights; require texture evidence
+  only when the order purchased the Texture stage;
 - facial: morph-target coverage, only if the product is enabled later.
 
 ### R12 — Provider outputs are not persisted per stage

@@ -14,7 +14,7 @@ test("facial rigging is removed from every customer purchase surface", () => {
   assert.doesNotMatch(screen, /type="checkbox"[\s\S]{0,400}Include facial rig/i);
   assert.match(screen, /unavailable and is not charged/i);
   assert.match(screen, /at least 75% success/i);
-  assert.match(studio, /Facial blendshape rigging is not for sale/i);
+  assert.match(studio, /Facial blendshapes are separate from the body\/skeletal rig above and are not for sale/i);
 
   const catalogLine = pricing.split("\n").find((line) => line.includes("Facial Rig Add-on"));
   assert.ok(catalogLine);

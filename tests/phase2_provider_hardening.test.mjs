@@ -36,6 +36,10 @@ test("fake provider emits five genuinely high-resolution decodable images", asyn
 test("production provider fails closed without GEMINI_API_KEY", async () => {
   const provider = new GeminiReferenceImageProvider("");
   assert.equal(provider.model, "gemini-3.1-flash-image");
+  assert.equal(
+    new GeminiReferenceImageProvider("", "gemini-2.5-flash-image").model,
+    "gemini-3.1-flash-image",
+  );
   await assert.rejects(
     () => provider.generateMultiview({ prompt: "a dog" }, "text"),
     /GEMINI_API_KEY is required/,
@@ -52,4 +56,8 @@ test("reference generation cannot multiply calls through SDK retries or model fa
   assert.match(routeSource, /keyGenerator:\s*\(req\)\s*=>\s*getRequestUserPhone/);
   assert.match(serviceSource, /REFERENCE_GENERATION_MAX_ATTEMPTS/);
   assert.match(serviceSource, /ATTEMPT_LIMIT_REACHED/);
+  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP/);
+  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP/);
+  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP/);
+  assert.match(serviceSource, /GET_LOCK/);
 });

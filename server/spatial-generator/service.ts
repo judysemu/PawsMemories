@@ -655,17 +655,47 @@ export class SpatialGeneratorService {
     }
 
     // Check idempotency
-    const existing = await this.repo.getJobByOwnerAndIdempotency(
-      await this.pool.getConnection(),
-      ownerPhone,
-      input.idempotencyKey,
-    );
-    if (existing) {
-      return this.toJobPublic(existing);
+    const idempotencyConn = await this.pool.getConnection();
+    try {
+      const existing = await this.repo.getJobByOwnerAndIdempotency(
+        idempotencyConn,
+        ownerPhone,
+        input.idempotencyKey,
+      );
+      if (existing) {
+        return this.toJobPublic(existing);
+      }
+    } finally {
+      idempotencyConn.release();
     }
 
     const jobUuid = crypto.randomUUID();
     const inputHash = crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
+
+    let health: Awaited<ReturnType<SpatialGeneratorService["getHealthStatus"]>>;
+    try {
+      health = await this.getHealthStatus();
+    } catch {
+      throw new SpatialGeneratorServiceError(
+        "SPATIAL_PIPELINE_NOT_READY",
+        "Spatial generation is temporarily unavailable.",
+      );
+    }
+    if (
+      health.ready !== true
+      || health.featureEnabled !== true
+      || health.layer8Configured !== true
+      || health.pixelWorkerOnline !== true
+      || health.blenderWorkerHealthy !== true
+      || health.orchestratorReady !== true
+      || !Array.isArray(health.blockers)
+      || health.blockers.length > 0
+    ) {
+      throw new SpatialGeneratorServiceError(
+        "SPATIAL_PIPELINE_NOT_READY",
+        "Spatial generation is temporarily unavailable.",
+      );
+    }
 
     const conn = await this.pool.getConnection();
     try {
@@ -1786,10 +1816,13 @@ export class SpatialGeneratorService {
   // ─── Health ──────────────────────────────────────────────────────────────────
 
   async getHealthStatus(): Promise<{
+    ready: boolean;
     featureEnabled: boolean;
     layer8Configured: boolean;
     pixelWorkerOnline: boolean;
     blenderWorkerHealthy: boolean;
+    orchestratorReady: boolean;
+    blockers: string[];
     activeJobs: number;
     queuedAttempts: number;
   }> {
@@ -1804,19 +1837,37 @@ export class SpatialGeneratorService {
       const [activeRows] = await conn.query(
         "SELECT COUNT(*) as count FROM spatial_generation_jobs WHERE state NOT IN ('completed', 'failed', 'cancelled')",
       );
-      const activeJobs = (activeRows as any[])[0]?.count || 0;
+      const activeJobs = Number((activeRows as any[])[0]?.count || 0);
       
       // Count queued attempts
       const [queuedRows] = await conn.query(
         "SELECT COUNT(*) as count FROM spatial_generation_attempts WHERE state IN ('queued', 'observing', 'planning', 'awaiting_math', 'validating_math')",
       );
-      const queuedAttempts = (queuedRows as any[])[0]?.count || 0;
+      const queuedAttempts = Number((queuedRows as any[])[0]?.count || 0);
+
+      // These remain false until health is backed by explicit, authenticated
+      // worker evidence and a scheduler actually advances newly-created jobs.
+      // Layer8's legacy operation health is not proof that a Pixel worker or
+      // Blender bridge is online.
+      const pixelWorkerOnline = false;
+      const blenderWorkerHealthy = false;
+      const orchestratorReady = false;
+      const blockers = [
+        ...(!featureEnabled ? ["feature_flag"] : []),
+        ...(!layer8Configured ? ["layer8"] : []),
+        ...(!pixelWorkerOnline ? ["pixel_worker"] : []),
+        ...(!blenderWorkerHealthy ? ["blender_worker"] : []),
+        ...(!orchestratorReady ? ["orchestrator"] : []),
+      ];
 
       return {
+        ready: blockers.length === 0,
         featureEnabled,
         layer8Configured,
-        pixelWorkerOnline: false, // Will be implemented in Phase 1
-        blenderWorkerHealthy: false, // Will be implemented in Phase 3
+        pixelWorkerOnline,
+        blenderWorkerHealthy,
+        orchestratorReady,
+        blockers,
         activeJobs,
         queuedAttempts,
       };

@@ -894,7 +894,7 @@ export async function initDb(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Per-user, per-day usage counter for the paid AR endpoints (H2/H7 cost caps).
+    // Per-user, per-day usage counter for paid provider endpoints (H2/H7 caps).
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS api_usage_daily (
         user_phone  VARCHAR(32)  NOT NULL,
@@ -906,7 +906,7 @@ export async function initDb(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Aggregate request and reserved-cost budget for paid AR endpoints. This is
+    // Aggregate request and reserved-cost budget for paid provider endpoints. This is
     // separate from the user table so one transaction can lock both counters.
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS api_usage_global_daily (
@@ -915,6 +915,18 @@ export async function initDb(): Promise<void> {
         count                    INT         NOT NULL DEFAULT 0,
         reserved_cost_micro_usd  BIGINT      NOT NULL DEFAULT 0,
         PRIMARY KEY (endpoint, day)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // Durable process-independent provider-call window for endpoints that have
+    // a minute ceiling. One row per endpoint is locked in the same transaction
+    // as the daily counters, so concurrent application processes cannot race.
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS api_usage_global_minute (
+        endpoint           VARCHAR(32) NOT NULL,
+        window_started_at  DATETIME(3) NOT NULL,
+        count              INT         NOT NULL DEFAULT 0,
+        PRIMARY KEY (endpoint)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
@@ -2273,9 +2285,9 @@ export async function bumpDailyUsage(phone: string, endpoint: string): Promise<n
 }
 
 /**
- * Atomically reserve both user and aggregate capacity before a paid provider
- * call. Locks are always acquired global-first, then user, to keep concurrent
- * requests in a consistent order. A denied reservation changes neither row.
+ * Atomically reserve user, aggregate daily/cost, and optional aggregate minute
+ * capacity before a paid provider call. Global locks are always acquired before
+ * the user lock to keep concurrent requests ordered. A denial changes no counter.
  */
 export async function reservePaidUsage(
   phone: string,
@@ -2293,6 +2305,14 @@ export async function reservePaidUsage(
        ON DUPLICATE KEY UPDATE endpoint = VALUES(endpoint)`,
       [endpoint],
     );
+    if (limits.globalMinuteCallCap != null) {
+      await connection.query(
+        `INSERT INTO api_usage_global_minute (endpoint, window_started_at, count)
+         VALUES (?, UTC_TIMESTAMP(3), 0)
+         ON DUPLICATE KEY UPDATE endpoint = VALUES(endpoint)`,
+        [endpoint],
+      );
+    }
     await connection.query(
       `INSERT INTO api_usage_daily (user_phone, endpoint, day, count)
        VALUES (?, ?, UTC_DATE(), 0)
@@ -2307,6 +2327,24 @@ export async function reservePaidUsage(
        FOR UPDATE`,
       [endpoint],
     ) as any;
+    let globalMinuteCount = 0;
+    if (limits.globalMinuteCallCap != null) {
+      const [minuteRows] = await connection.query(
+        `SELECT count,
+                CASE
+                  WHEN window_started_at > UTC_TIMESTAMP(3) - INTERVAL 1 MINUTE
+                  THEN 1 ELSE 0
+                END AS window_active
+         FROM api_usage_global_minute
+         WHERE endpoint = ?
+         FOR UPDATE`,
+        [endpoint],
+      ) as any;
+      const minuteRow = minuteRows?.[0];
+      globalMinuteCount = Number(minuteRow?.window_active || 0) === 1
+        ? Number(minuteRow?.count || 0)
+        : 0;
+    }
     const [userRows] = await connection.query(
       `SELECT count
        FROM api_usage_daily
@@ -2323,6 +2361,10 @@ export async function reservePaidUsage(
     let reason: PaidUsageReservation["reason"];
     if (userCount >= limits.userDailyCap) reason = "user_cap";
     else if (globalCount >= limits.globalDailyCap) reason = "global_cap";
+    else if (
+      limits.globalMinuteCallCap != null
+      && globalMinuteCount >= limits.globalMinuteCallCap
+    ) reason = "global_minute_cap";
     else if (nextCost > limits.globalDailyCostMicroUsd) reason = "global_cost_cap";
 
     if (reason) {
@@ -2332,6 +2374,7 @@ export async function reservePaidUsage(
         reason,
         userCount,
         globalCount,
+        ...(limits.globalMinuteCallCap == null ? {} : { globalMinuteCount }),
         globalReservedCostMicroUsd,
       };
     }
@@ -2349,12 +2392,30 @@ export async function reservePaidUsage(
        WHERE user_phone = ? AND endpoint = ? AND day = UTC_DATE()`,
       [phone, endpoint],
     );
+    if (limits.globalMinuteCallCap != null) {
+      await connection.query(
+        `UPDATE api_usage_global_minute
+         SET count = CASE
+               WHEN window_started_at <= UTC_TIMESTAMP(3) - INTERVAL 1 MINUTE
+               THEN 1 ELSE count + 1
+             END,
+             window_started_at = CASE
+               WHEN window_started_at <= UTC_TIMESTAMP(3) - INTERVAL 1 MINUTE
+               THEN UTC_TIMESTAMP(3) ELSE window_started_at
+             END
+         WHERE endpoint = ?`,
+        [endpoint],
+      );
+    }
     await connection.commit();
 
     return {
       allowed: true,
       userCount: userCount + 1,
       globalCount: globalCount + 1,
+      ...(limits.globalMinuteCallCap == null
+        ? {}
+        : { globalMinuteCount: globalMinuteCount + 1 }),
       globalReservedCostMicroUsd: nextCost,
     };
   } catch (error) {

@@ -20,6 +20,11 @@ import { sendMail } from "./server/mail";
 import rateLimit from "express-rate-limit";
 import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, deductCredits, addCredits, getCreditBalance, getCreditHistory, wasSessionCredited, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, restoreReservedGenerationCredits, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserPhone, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getPawprintCategories, getPawprintTemplatesSync, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, consumePasswordReset, setUserPassword, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
+import {
+  ImageGenerationBudgetError,
+  rethrowImageGenerationBudgetError,
+  reserveImageGenerationCall,
+} from "./server/imageGenerationBudget";
 import { classifyPetImage, type GenerateFn } from "./server/petClassify";
 import { injectMeta } from "./server/seoMeta";
 import { semanticScan as runSemanticScan } from "./server/semanticScan";
@@ -1325,7 +1330,6 @@ async function startServer() {
     keyGenerator: (req: any) => req.user?.phone || "anon",
     message: { error: "Too many requests. Please slow down and try again in a minute." },
   });
-
   /**
    * Kill-switch + per-user daily-cap guard for a paid AR endpoint (H2/H7).
    * Returns true if the caller may proceed. Call AFTER cache/ownership checks
@@ -2805,11 +2809,11 @@ async function startServer() {
   // BO-3: provider wiring for the Wags slot materializer. Image generation
   // reuses the shared Gemini chain (hoisted async function declaration) and
   // storage reuses the standard B2 uploader.
-  const wagsMaterializerDeps = {
+  const makeWagsMaterializerDeps = (operatorPhone: string) => ({
     generateImage: (prompt: string, label: string) =>
-      generateImageWithFallback([{ text: prompt }], label),
+      generateImageWithFallback([{ text: prompt }], label, operatorPhone),
     uploadImage: (dataUrl: string) => uploadBase64Image(dataUrl),
-  };
+  });
 
   // POST /api/admin/wags/boxes/:id/materialize — regenerate failed/pending
   // slot assets for an approved box (idempotent: generated slots are skipped).
@@ -2818,7 +2822,7 @@ async function startServer() {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid box id." });
     try {
-      const result = await materializeBoxAssets(getPool(), wagsMaterializerDeps, id);
+      const result = await materializeBoxAssets(getPool(), makeWagsMaterializerDeps(req.user.phone), id);
       res.json(result);
     } catch (err: any) {
       console.error("[admin/wags materialize]", err?.message || err);
@@ -2858,7 +2862,7 @@ async function startServer() {
           ? (typeof boxRow.plan_json === "string" ? JSON.parse(boxRow.plan_json) : boxRow.plan_json)
           : null;
         const delivery = await deliverBox(getPool(), { id, user_phone: boxRow.user_phone, plan_json: plan }, { finalizeStatus: false });
-        void materializeBoxAssets(getPool(), wagsMaterializerDeps, id)
+        void materializeBoxAssets(getPool(), makeWagsMaterializerDeps(req.user.phone), id)
           .then((result) => console.log(`[wags materializer] box ${id}: generated=${result.generated} failed=${result.failed} skipped=${result.skipped} delivered=${result.delivered}`))
           .catch((err) => console.error(`[wags materializer] box ${id} failed:`, err?.message || err));
         return res.json({ id, status: "materializing", delivery });
@@ -3778,7 +3782,11 @@ async function startServer() {
         }
         finalDataUrl = uploadDataUrl;
       } else if (type === "prompt" && prompt) {
-        finalDataUrl = await generateImageWithFallback([{ text: prompt }], "scene-background");
+        finalDataUrl = await generateImageWithFallback(
+          [{ text: prompt }],
+          "scene-background",
+          req.user!.phone,
+        );
       } else {
         return res.status(400).json({ error: "Valid type (location|upload|prompt) and payload required" });
       }
@@ -3803,7 +3811,10 @@ async function startServer() {
 
       res.json({ success: true, bgId, imageUrl });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to prepare background" });
+      const status = err instanceof ImageGenerationBudgetError
+        ? (err.code === "IMAGE_GENERATION_USER_CAP" ? 429 : 503)
+        : 500;
+      res.status(status).json({ error: err.message || "Failed to prepare background", code: err?.code });
     }
   });
 
@@ -3960,11 +3971,20 @@ async function startServer() {
   //  - gemini-3-pro-image          = Nano Banana Pro    (state-of-the-art, studio 4K) → best quality
   //  - gemini-3.1-flash-image      = Nano Banana 2      (fast, production-scale)
   //  - gemini-3.1-flash-lite-image = Nano Banana 2 Lite (ultra-low latency / cost)
-  //  - gemini-2.5-flash-image      = Nano Banana        (older, known generateContent-compatible fallback)
   // Override without a redeploy via GEMINI_IMAGE_MODELS (comma-separated).
-  const IMAGE_MODELS: string[] = (process.env.GEMINI_IMAGE_MODELS ||
-    "gemini-3-pro-image,gemini-3.1-flash-image,gemini-3.1-flash-lite-image,gemini-2.5-flash-image")
-    .split(",").map((s) => s.trim()).filter(Boolean);
+  const currentImageModelChain = (raw: string): string[] => {
+    const configured = raw
+      .split(",")
+      .map((model) => model.trim())
+      .filter(Boolean)
+      // Gemini 2.x image names are retired from this production boundary.
+      .filter((model) => !/^gemini-2\./i.test(model));
+    return configured.length > 0 ? configured : ["gemini-3.1-flash-image"];
+  };
+  const IMAGE_MODELS: string[] = currentImageModelChain(
+    process.env.GEMINI_IMAGE_MODELS ||
+      "gemini-3-pro-image,gemini-3.1-flash-image,gemini-3.1-flash-lite-image",
+  );
 
   /**
    * Per-tier image model chains for Fido's Styles quality tiers. Each falls back
@@ -3973,15 +3993,17 @@ async function startServer() {
    * GEMINI_IMAGE_MODELS — see GEMINI_CALL_AUDIT.md §4.5.
    */
   const IMAGE_MODELS_BY_TIER: Record<"draft" | "standard" | "studio", string[]> = {
-    draft: (process.env.GEMINI_IMAGE_MODELS_DRAFT ||
-      "gemini-3.1-flash-lite-image,gemini-3.1-flash-image")
-      .split(",").map((s) => s.trim()).filter(Boolean),
-    standard: (process.env.GEMINI_IMAGE_MODELS_STANDARD ||
-      "gemini-3.1-flash-image,gemini-2.5-flash-image")
-      .split(",").map((s) => s.trim()).filter(Boolean),
-    studio: (process.env.GEMINI_IMAGE_MODELS_STUDIO ||
-      "gemini-3-pro-image,gemini-3.1-flash-image")
-      .split(",").map((s) => s.trim()).filter(Boolean),
+    draft: currentImageModelChain(
+      process.env.GEMINI_IMAGE_MODELS_DRAFT ||
+        "gemini-3.1-flash-lite-image,gemini-3.1-flash-image",
+    ),
+    standard: currentImageModelChain(
+      process.env.GEMINI_IMAGE_MODELS_STANDARD || "gemini-3.1-flash-image",
+    ),
+    studio: currentImageModelChain(
+      process.env.GEMINI_IMAGE_MODELS_STUDIO ||
+        "gemini-3-pro-image,gemini-3.1-flash-image",
+    ),
   };
   void IMAGE_MODELS_BY_TIER; // wired by the Fido's Styles workspace (spec §6.5)
 
@@ -3991,16 +4013,21 @@ async function startServer() {
    * CRITICAL: image output from `generateContent` requires
    * `config.responseModalities` to include "IMAGE" — without it the model returns
    * TEXT only, no inlineData part, and the whole avatar pipeline silently produces
-   * nothing (and never uploads to Backblaze). Aspect-ratio control is only honoured
-   * by `gemini-2.5-flash-image`, so `imageConfig` is sent only to that model.
+   * nothing (and never uploads to Backblaze). The active 3.x image models receive
+   * the same square image configuration.
    */
   async function generateImageWithFallback(
     parts: any[],
     label: string,
+    userPhone: string,
     errRef?: { code?: number | string; message?: string; quota?: boolean }
   ): Promise<string | null> {
     for (const model of IMAGE_MODELS) {
       try {
+        // Reserve one durable budget unit for each actual image-model request,
+        // including fallbacks. Admins are included because provider spend is
+        // independent of PupCoin billing.
+        await reserveImageGenerationCall(userPhone);
         const response = await ai.models.generateContent({
           model,
           contents: [{ role: "user", parts }],
@@ -4027,6 +4054,7 @@ async function startServer() {
         console.warn(`[${label}] ${model} returned no image part (finishReason=${finish}${block ? ", block=" + block : ""}). text="${txt}"`);
         if (errRef) errRef.message = `no image part from ${model} (finishReason=${finish}${block ? ", block=" + block : ""})`;
       } catch (err: any) {
+        if (err instanceof ImageGenerationBudgetError) throw err;
         const msg = err?.message || String(err);
         const code = err?.status ?? err?.code;
         const quota = /RESOURCE_EXHAUSTED|resource_?exhausted|depleted|quota|too_many_requests|\b429\b/i.test(msg) || code === 429;
@@ -4046,7 +4074,8 @@ async function startServer() {
   async function generateTurnaroundViews(
     frontDataUrl: string,
     palette: string | null,
-    type: ExtendedSubjectClass
+    type: ExtendedSubjectClass,
+    userPhone: string,
   ): Promise<Partial<Record<"left" | "back" | "right", string>>> {
     const m = frontDataUrl.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
     if (!m) return {};
@@ -4057,7 +4086,8 @@ async function startServer() {
       views.map(async ({ view, prompt }) => {
         const img = await generateImageWithFallback(
           [frontPart, { text: prompt + lock + " Respond with only the generated image." }],
-          `turnaround:${view}`
+          `turnaround:${view}`,
+          userPhone,
         );
         return [view, img] as const;
       })
@@ -4073,6 +4103,7 @@ async function startServer() {
     type: ExtendedSubjectClass,
     hasFacePhoto?: boolean,
     extra?: string,
+    userPhone?: string,
     errRef?: { code?: number | string; message?: string; quota?: boolean },
     style?: string | null,
     subjectSubtype?: string | null,
@@ -4099,7 +4130,8 @@ async function startServer() {
       + (corrective ? ` IMPORTANT — fix these issues from the previous attempt: ${corrective}.` : "");
     // Route through the shared helper so the responseModalities fix + failure
     // logging apply identically to every image path in the pipeline.
-    return generateImageWithFallback([...imageParts, { text: referencePrompt }], "referenceImage", errRef);
+    if (!userPhone) throw new Error("Authenticated image-generation owner is required.");
+    return generateImageWithFallback([...imageParts, { text: referencePrompt }], "referenceImage", userPhone, errRef);
   }
 
   app.post("/api/avatars", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
@@ -4143,6 +4175,17 @@ async function startServer() {
         if (photoList.length > 6) {
           return res.status(400).json({ error: "Maximum 6 photos per avatar (1 face + 5 body)." });
         }
+      }
+
+      // The customer-gated Pet GLB builder owns new model creation once it is
+      // enabled. Reject stale legacy clients before any Gemini image request;
+      // the old route could otherwise fan one click into 4-6 Pro image calls
+      // and only discover the migration after that provider spend.
+      if (isPetGlbEnabled() || isModelBuildV3Enabled()) {
+        return res.status(410).json({
+          error: "Legacy avatar creation has moved to the customer-gated Create flow.",
+          code: "LEGACY_AVATAR_DISABLED",
+        });
       }
 
       let autoDetection: TriageResult | null = null;
@@ -4216,9 +4259,24 @@ async function startServer() {
         let candidate: string | null;
         if (inputMode === "text") {
           const fields: TextPromptFields = { subject, style, lighting, corrective };
-          candidate = await generateImageWithFallback([{ text: buildTextPrompt(fields) }], "text-to-reference", imgErr);
+          candidate = await generateImageWithFallback(
+            [{ text: buildTextPrompt(fields) }],
+            "text-to-reference",
+            req.user!.phone,
+            imgErr,
+          );
         } else {
-          candidate = await generatePetReferenceImage(photoList, accent, avatarType, hasFacePhoto, corrective, imgErr, style, subjectSubtype);
+          candidate = await generatePetReferenceImage(
+            photoList,
+            accent,
+            avatarType,
+            hasFacePhoto,
+            corrective,
+            req.user!.phone,
+            imgErr,
+            style,
+            subjectSubtype,
+          );
         }
 
         if (!candidate) {
@@ -4298,7 +4356,12 @@ async function startServer() {
       if (avatarType === 'dog' && chosenImage.startsWith("data:image")) {
         try {
           const paletteStr = usedReferenceImage ? await extractPalette(chosenImage, avatarType) : null;
-          const rawViews = await generateTurnaroundViews(chosenImage, paletteStr, avatarType);
+          const rawViews = await generateTurnaroundViews(
+            chosenImage,
+            paletteStr,
+            avatarType,
+            req.user!.phone,
+          );
           const uploaded: { left?: string; back?: string; right?: string } = {};
           for (const key of ["left", "back", "right"] as const) {
             const v = rawViews[key];
@@ -4306,6 +4369,7 @@ async function startServer() {
           }
           if (Object.keys(uploaded).length) viewSet = uploaded;
         } catch (e: any) {
+          rethrowImageGenerationBudgetError(e);
           console.warn("[POST /api/avatars] Turnaround/multiview generation skipped:", e?.message || e);
         }
       }
@@ -4365,18 +4429,6 @@ async function startServer() {
           };
 
       // Layer 2: start Tripo3D generation (multiview when turnaround views exist).
-      // BO-0: When V3 is live, refuse new legacy avatar builds — route through Create flow.
-      if (isModelBuildV3Enabled()) {
-        // Already charged — refund before rejecting
-        if (!isAdmin && payableAvatarCost > 0) {
-          try { await restoreReservedGenerationCredits(req.user!.phone, payableAvatarCost); } catch {}
-          avatarCreditsDebited = 0;
-        }
-        return res.status(503).json({
-          error: "Legacy avatar creation is disabled during migration. Use the Create flow instead.",
-          code: "LEGACY_AVATAR_DISABLED",
-        });
-      }
       const handle = await startImageTo3D({ imageUrl: finalImageUrl, views: viewSet, geometry: geo });
       const avatarId = await createAvatar(req.user!.phone, name, finalImageUrl, handle, {
         avatar_type: avatarType,
@@ -4395,6 +4447,12 @@ async function startServer() {
       }
       if (freeAvatarClaimed) {
         try { await releaseFreeAvatar(req.user!.phone); } catch {}
+      }
+      if (err instanceof ImageGenerationBudgetError) {
+        return res.status(err.code === "IMAGE_GENERATION_USER_CAP" ? 429 : 503).json({
+          error: err.message,
+          code: err.code,
+        });
       }
       if (isTripoInsufficientCredit(err)) {
         console.error("[Tripo] Platform account out of credits — top up TRIPO_API_KEY account");
@@ -4995,7 +5053,8 @@ async function startServer() {
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
-      }
+      },
+      retryOptions: { attempts: 1 },
     }
   });
 
@@ -5630,7 +5689,11 @@ async function startServer() {
             text: `Please restyle and merge this pet's appearance into a new image matching this prompt description: ${promptText}. Ensure the pet's core features (dog/cat/fur patterns) are recognizable but beautifully rendered in the requested artistic style and background. Respond with only the generated image.`,
           },
         ];
-        const generatedBase64 = await generateImageWithFallback(restyParts, "create-creation-restyle");
+        const generatedBase64 = await generateImageWithFallback(
+          restyParts,
+          "create-creation-restyle",
+          userPhone,
+        );
 
         if (generatedBase64) {
           // Phase 2: Upload to object storage
@@ -5663,6 +5726,7 @@ async function startServer() {
 
       // Fresh generation using imagen model
       try {
+        await reserveImageGenerationCall(userPhone);
         const response = await ai.models.generateImages({
           model: 'imagen-4.0-generate-001',
           prompt: promptText,
@@ -5702,6 +5766,7 @@ async function startServer() {
         
         return res.json({ success: true, imageUrl: finalImageUrl, creationId, mode: "generate" });
       } catch (e: any) {
+        rethrowImageGenerationBudgetError(e);
         // Imagen failed — fall back to the same IMAGE_MODELS generateContent chain
         // used for avatar generation. TEXT_MODELS is not appropriate here because
         // this path needs image output, not text (GEMINI_CALL_AUDIT.md §4.2).
@@ -5710,6 +5775,7 @@ async function startServer() {
         const generatedBase64 = await generateImageWithFallback(
           [{ text: `Generate a beautiful artistic image matching this prompt: ${promptText}` }],
           "create-creation-imagen-fallback",
+          userPhone,
         );
 
         if (generatedBase64) {
@@ -5746,7 +5812,14 @@ async function startServer() {
         try { await restoreReservedGenerationCredits((req as AuthedRequest).user!.phone, imageCreditsDebited); } catch {}
       }
       console.error("create-creation error:", err);
-      res.status(500).json({ success: false, error: err.message || "Failed to generate memory." });
+      const status = err instanceof ImageGenerationBudgetError
+        ? (err.code === "IMAGE_GENERATION_USER_CAP" ? 429 : 503)
+        : 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || "Failed to generate memory.",
+        code: err?.code,
+      });
     }
   });
 
@@ -6719,6 +6792,7 @@ async function startServer() {
           candidateUrl = await generateImageWithFallback(
             [{ text: buildTextPrompt(fields) }],
             "create-pipeline-text-reference",
+            userPhone,
           );
         } else {
           const photos = inputPhotoUrl ? [inputPhotoUrl] : [];
@@ -6728,14 +6802,24 @@ async function startServer() {
             species as ExtendedSubjectClass,
             !!inputPhotoUrl,
             "",
+            userPhone,
             {},
             style || "Realistic",
             breed || null
           );
         }
-      } catch (genErr) {
+      } catch (genErr: any) {
         console.error("Reference generation error:", genErr);
-        return res.status(500).json({ success: false, error: "Failed to generate candidate image. No PupCoins were deducted." });
+        const status = genErr instanceof ImageGenerationBudgetError
+          ? (genErr.code === "IMAGE_GENERATION_USER_CAP" ? 429 : 503)
+          : 500;
+        return res.status(status).json({
+          success: false,
+          error: genErr instanceof ImageGenerationBudgetError
+            ? genErr.message
+            : "Failed to generate candidate image. No PupCoins were deducted.",
+          code: genErr?.code,
+        });
       }
 
       if (!candidateUrl) {
@@ -7048,7 +7132,11 @@ async function startServer() {
       const fields: TextPromptFields = { subject, style, framing, angle, lighting };
       const prompt = buildTextPrompt(fields);
 
-      const image = await generateImageWithFallback([{ text: prompt }], "text-to-reference");
+      const image = await generateImageWithFallback(
+        [{ text: prompt }],
+        "text-to-reference",
+        req.user!.phone,
+      );
       if (!image) {
         return res.status(502).json({ success: false, error: "Could not generate a reference image. Try rephrasing the subject." });
       }
@@ -7057,7 +7145,14 @@ async function startServer() {
       res.json({ success: true, image, prompt });
     } catch (err: any) {
       console.error("[text-to-reference] Error:", err);
-      res.status(500).json({ success: false, error: err?.message || "Failed to generate reference image." });
+      const status = err instanceof ImageGenerationBudgetError
+        ? (err.code === "IMAGE_GENERATION_USER_CAP" ? 429 : 503)
+        : 500;
+      res.status(status).json({
+        success: false,
+        error: err?.message || "Failed to generate reference image.",
+        code: err?.code,
+      });
     }
   });
 

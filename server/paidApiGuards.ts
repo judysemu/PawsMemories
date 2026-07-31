@@ -1,29 +1,33 @@
 /**
  * server/paidApiGuards.ts — H2/H7 hardening for the paid AR endpoints
- * (`/api/pets/classify`, `/api/pets/:id/rig`, `/api/ar/semantic-scan`).
+ * (`/api/pets/classify`, `/api/pets/:id/rig`, `/api/ar/semantic-scan`) plus
+ * the shared Gemini/Imagen image-output call boundary.
  *
- * Pure config logic only: kill-switches + per-user and aggregate daily budgets
- * derived from env.
+ * Pure config logic only: kill-switches + per-user, aggregate daily, cost, and
+ * shared-image minute budgets derived from env.
  * No DB or express imports, so it is unit-testable in isolation. The daily
- * atomic reservation lives in `db.ts` (`reservePaidUsage`) and the Express
- * wiring - rate limiter + 503/429 responses - lives in `petSimRouter.ts`.
+ * and minute atomic reservation lives in `db.ts` (`reservePaidUsage`); HTTP
+ * 503/429 mapping lives at each consuming route boundary.
  *
  * Env contract:
- *   PETSIM_PAID_APIS_ENABLED   master kill-switch for all three (default: on)
+ *   PETSIM_PAID_APIS_ENABLED   master kill-switch for all four (default: on)
  *   PETSIM_CLASSIFY_ENABLED    per-endpoint switch (default: on)
  *   PETSIM_SEMANTIC_SCAN_ENABLED per-endpoint switch (default: on)
+ *   PETSIM_IMAGE_GENERATION_ENABLED image-output switch (default: on)
  *   PETSIM_RIG_ENABLED         per-endpoint switch (default: OFF, historical)
  *   PETSIM_CLASSIFY_DAILY_CAP  per-user/day cap (default: 25)
  *   PETSIM_RIG_DAILY_CAP       per-user/day cap (default: 5)
  *   PETSIM_SEMANTIC_SCAN_DAILY_CAP per-user/day cap (default: 50)
+ *   PETSIM_IMAGE_GENERATION_DAILY_CAP per-user/day provider-call cap (default: 5)
+ *   PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP shared provider calls/minute (default: 10)
  *   PETSIM_<ENDPOINT>_GLOBAL_DAILY_CAP aggregate request cap
  *   PETSIM_<ENDPOINT>_ESTIMATED_COST_MICRO_USD reserved cost per provider call
  *   PETSIM_<ENDPOINT>_GLOBAL_DAILY_COST_MICRO_USD aggregate reserved-cost cap
  */
 
-export type PaidEndpoint = "classify" | "rig" | "semantic_scan";
+export type PaidEndpoint = "classify" | "rig" | "semantic_scan" | "image_generation";
 
-export const PAID_ENDPOINTS: PaidEndpoint[] = ["classify", "rig", "semantic_scan"];
+export const PAID_ENDPOINTS: PaidEndpoint[] = ["classify", "rig", "semantic_scan", "image_generation"];
 
 type Env = Record<string, string | undefined>;
 
@@ -32,6 +36,7 @@ const ENV_TOKEN: Record<PaidEndpoint, string> = {
   classify: "CLASSIFY",
   rig: "RIG",
   semantic_scan: "SEMANTIC_SCAN",
+  image_generation: "IMAGE_GENERATION",
 };
 
 /** Default per-user, per-day request caps. */
@@ -39,6 +44,7 @@ const DEFAULT_DAILY_CAPS: Record<PaidEndpoint, number> = {
   classify: 25,
   rig: 5,
   semantic_scan: 50,
+  image_generation: 5,
 };
 
 /** Conservative aggregate request ceilings. Rig remains closed by default. */
@@ -46,6 +52,7 @@ const DEFAULT_GLOBAL_DAILY_CAPS: Record<PaidEndpoint, number> = {
   classify: 250,
   rig: 0,
   semantic_scan: 500,
+  image_generation: 50,
 };
 
 /** Upper-bound cost reservations in millionths of one US dollar. */
@@ -53,6 +60,7 @@ const DEFAULT_ESTIMATED_COST_MICRO_USD: Record<PaidEndpoint, number> = {
   classify: 10_000,
   rig: 1_000_000,
   semantic_scan: 10_000,
+  image_generation: 1_000_000,
 };
 
 /** Aggregate daily reserved-cost ceilings in millionths of one US dollar. */
@@ -60,13 +68,23 @@ const DEFAULT_GLOBAL_DAILY_COST_MICRO_USD: Record<PaidEndpoint, number> = {
   classify: 2_500_000,
   rig: 0,
   semantic_scan: 5_000_000,
+  image_generation: 50_000_000,
 };
+
+/**
+ * Shared image generation gets ten actual provider attempts per minute, leaving
+ * headroom below the observed 20 RPM Nano Banana Pro quota. The dedicated
+ * five-view reference generator uses its own Flash model and independent cap;
+ * the two counters must not be represented as one atomic combined ceiling.
+ */
+const DEFAULT_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP = 10;
 
 /** Per-endpoint default for the enable flag. Rig stays off by default (historical). */
 const DEFAULT_ENABLED: Record<PaidEndpoint, boolean> = {
   classify: true,
   rig: false,
   semantic_scan: true,
+  image_generation: true,
 };
 
 /**
@@ -127,27 +145,47 @@ export function globalDailyCostMicroUsdFor(ep: PaidEndpoint, env: Env = process.
   );
 }
 
+/** Durable shared-image provider-call ceiling. Other paid endpoints have none. */
+export function globalMinuteCallCapFor(
+  ep: PaidEndpoint,
+  env: Env = process.env,
+): number | undefined {
+  if (ep !== "image_generation") return undefined;
+  return nonNegativeInteger(
+    env.PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP,
+    DEFAULT_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP,
+  );
+}
+
 export interface PaidUsageLimits {
   userDailyCap: number;
   globalDailyCap: number;
+  globalMinuteCallCap?: number;
   estimatedCostMicroUsd: number;
   globalDailyCostMicroUsd: number;
 }
 
-export type PaidUsageDenialReason = "user_cap" | "global_cap" | "global_cost_cap";
+export type PaidUsageDenialReason =
+  | "user_cap"
+  | "global_cap"
+  | "global_minute_cap"
+  | "global_cost_cap";
 
 export interface PaidUsageReservation {
   allowed: boolean;
   reason?: PaidUsageDenialReason;
   userCount: number;
   globalCount: number;
+  globalMinuteCount?: number;
   globalReservedCostMicroUsd: number;
 }
 
 export function paidUsageLimitsFor(ep: PaidEndpoint, env: Env = process.env): PaidUsageLimits {
+  const globalMinuteCallCap = globalMinuteCallCapFor(ep, env);
   return {
     userDailyCap: dailyCapFor(ep, env),
     globalDailyCap: globalDailyCapFor(ep, env),
+    ...(globalMinuteCallCap == null ? {} : { globalMinuteCallCap }),
     estimatedCostMicroUsd: estimatedCostMicroUsdFor(ep, env),
     globalDailyCostMicroUsd: globalDailyCostMicroUsdFor(ep, env),
   };

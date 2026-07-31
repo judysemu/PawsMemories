@@ -12,7 +12,7 @@ import { deliverBox } from "../server/wags/delivery.ts";
 // Fake pool: dispatches on SQL shape, records writes. No live MySQL.
 // ---------------------------------------------------------------------------
 
-function makeFakePool({ boxStatus = "approved", items }) {
+function makeFakePool({ boxStatus = "approved", tier = "basic", items }) {
   const state = {
     boxStatus,
     items: items.map((item, index) => ({ id: index + 1, asset_status: null, asset_url: null, asset_error: null, ...item })),
@@ -27,7 +27,7 @@ function makeFakePool({ boxStatus = "approved", items }) {
             season: "autumn", theme: "Harvest Hounds", pet_name: "Biscuit", pet_breed: "Corgi",
             items: state.items.map((i) => ({ slot: i.slot, title: i.title, description: i.description, colors: ["rust orange"] })),
           }),
-          species: "dog", tier: "plus",
+          species: "dog", tier,
         }]];
       }
       if (sql.includes("SELECT id, slot, title, description, asset_status")) {
@@ -210,6 +210,34 @@ test("materializing an unapproved box is refused", async () => {
     () => materializeBoxAssets(pool, { generateImage: async () => null, uploadImage: async () => "" }, 7),
     /not approved/,
   );
+});
+
+test("Plus materialization fails closed before any partial seven-call image run", async () => {
+  const plusItems = [
+    SEASONAL_ITEM,
+    { slot: "pawprint", title: "Harvest Card", description: "Pawprint art" },
+    ...Array.from({ length: 5 }, (_, index) => ({
+      slot: `sticker_${index + 1}`,
+      title: `Sticker ${index + 1}`,
+      description: "Transparent sticker",
+    })),
+  ];
+  const { pool, state } = makeFakePool({ tier: "plus", items: plusItems });
+  let generateCalls = 0;
+
+  await assert.rejects(
+    () => materializeBoxAssets(pool, {
+      generateImage: async () => {
+        generateCalls += 1;
+        return null;
+      },
+      uploadImage: async () => "",
+    }, 7),
+    /WAGS_PLUS_IMAGE_BUDGET_ATOMICITY_REQUIRED/,
+  );
+
+  assert.equal(generateCalls, 0);
+  assert.equal(state.items.every((item) => item.asset_status === null), true);
 });
 
 // ---------------------------------------------------------------------------

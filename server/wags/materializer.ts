@@ -194,6 +194,15 @@ export async function materializeBoxAssets(
   const items: BoxItemRow[] = itemRows || [];
   if (items.length === 0) throw new Error(`Box ${boxId} has no delivered items to materialize.`);
 
+  const unfinishedGenerativeItems = items.filter(
+    (item) => isGenerativeSlot(item.slot) && item.asset_status !== "generated",
+  );
+  if (String(box.tier) === "plus" && unfinishedGenerativeItems.length > 0) {
+    throw new Error(
+      "WAGS_PLUS_IMAGE_BUDGET_ATOMICITY_REQUIRED: Plus asset generation remains disabled until all seven image calls can be reserved atomically.",
+    );
+  }
+
   let generated = 0;
   let failed = 0;
   let skipped = 0;

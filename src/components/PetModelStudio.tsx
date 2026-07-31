@@ -91,6 +91,82 @@ interface GeneratedReferenceView {
   signedUrl: string;
 }
 
+export interface CollarReadiness {
+  ready: boolean;
+  blockers: string[];
+}
+
+type AuthenticatedFetcher = (input: string, init?: RequestInit) => Promise<Response>;
+
+type CollarBuildResult<T> =
+  | { status: "created"; readiness: CollarReadiness; job: T }
+  | { status: "unready" | "stale"; readiness: CollarReadiness };
+
+const PUBLIC_COLLAR_READINESS_BLOCKERS = new Set([
+  "feature_flag",
+  "layer8",
+  "pixel_worker",
+  "blender_worker",
+  "orchestrator",
+  "readiness_check_failed",
+  "readiness_unconfirmed",
+  "readiness_unavailable",
+  "readiness_stale",
+]);
+
+function unavailableCollarReadiness(blocker = "readiness_unavailable"): CollarReadiness {
+  return { ready: false, blockers: [blocker] };
+}
+
+export async function fetchCollarReadiness(
+  fetcher: AuthenticatedFetcher = authedFetch,
+): Promise<CollarReadiness> {
+  try {
+    const response = await fetcher("/api/spatial-generator/health");
+    const body = await response.json().catch(() => ({}));
+    const blockers = Array.isArray(body?.blockers)
+      ? body.blockers.filter(
+        (item: unknown): item is string =>
+          typeof item === "string" && PUBLIC_COLLAR_READINESS_BLOCKERS.has(item),
+      )
+      : [];
+    const ready = response.ok
+      && body?.ready === true
+      && body?.featureEnabled === true
+      && body?.layer8Configured === true
+      && body?.pixelWorkerOnline === true
+      && body?.blenderWorkerHealthy === true
+      && body?.orchestratorReady === true
+      && blockers.length === 0;
+    return ready
+      ? { ready: true, blockers: [] }
+      : { ready: false, blockers: blockers.length > 0 ? blockers : ["readiness_unavailable"] };
+  } catch {
+    return unavailableCollarReadiness();
+  }
+}
+
+export async function runReadyCollarBuild<T>(
+  submit: () => Promise<T>,
+  fetcher: AuthenticatedFetcher = authedFetch,
+): Promise<CollarBuildResult<T>> {
+  const readiness = await fetchCollarReadiness(fetcher);
+  if (!readiness.ready) return { status: "unready", readiness };
+
+  try {
+    return { status: "created", readiness, job: await submit() };
+  } catch (cause) {
+    const error = cause as { status?: unknown; code?: unknown } | null;
+    if (error?.status === 503 || error?.code === "SPATIAL_PIPELINE_NOT_READY") {
+      return {
+        status: "stale",
+        readiness: unavailableCollarReadiness("readiness_stale"),
+      };
+    }
+    throw cause;
+  }
+}
+
 const REFERENCE_FIELDS = [
   ["frontUrl", "Front"],
   ["leftUrl", "Left side"],
@@ -110,8 +186,8 @@ const STAGE_LABELS: Record<StageKind, string> = {
   reference: "360° views",
   base: "Blank base mesh",
   texture: "Texture",
-  rig_check: "Rig readiness",
-  rig: "Rig",
+  rig_check: "Body-rig readiness",
+  rig: "Animation-ready body rig",
 };
 
 function idempotencyKey(): string {
@@ -127,7 +203,15 @@ async function requestJson(path: string, init?: RequestInit): Promise<any> {
   } catch {
     throw new Error(`Server returned an unreadable response (${response.status}).`);
   }
-  if (!response.ok) throw new Error(body?.message || body?.error || "Request failed.");
+  if (!response.ok) {
+    const error = new Error(body?.message || body?.error || "Request failed.") as Error & {
+      status?: number;
+      code?: string;
+    };
+    error.status = response.status;
+    if (typeof body?.error === "string") error.code = body.error;
+    throw error;
+  }
   return body;
 }
 
@@ -154,6 +238,7 @@ export default function PetModelStudio() {
   const [collarClearanceMm, setCollarClearanceMm] = useState(10);
   const [collarColor, setCollarColor] = useState("#2563eb");
   const [collarJob, setCollarJob] = useState<{ jobUuid?: string; state?: string } | null>(null);
+  const [collarReadiness, setCollarReadiness] = useState<CollarReadiness | null>(null);
   const [references, setReferences] = useState<Record<string, string>>({});
   const [referenceSession, setReferenceSession] = useState<{ sessionUuid: string; manifestHash: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -185,8 +270,27 @@ export default function PetModelStudio() {
   }, [view?.currentStage?.attemptUuid]);
 
   useEffect(() => {
+    if (!view?.order.approvedVersionId) {
+      setCollarReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    setCollarReadiness(null);
+    fetchCollarReadiness()
+      .then((readiness) => {
+        if (cancelled) return;
+        setCollarReadiness(readiness);
+      })
+      .catch(() => {
+        if (!cancelled) setCollarReadiness({ ready: false, blockers: ["readiness_unavailable"] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view?.order.approvedVersionId]);
+
+  useEffect(() => {
     if (!includeTexture) {
-      setIncludeRig(false);
       setStylePreset("reference");
       setStyleDirection("");
     }
@@ -407,26 +511,35 @@ export default function PetModelStudio() {
       .catch(() => {});
   };
 
-  const buildCollar = () => {
+  const buildCollar = async () => {
     const targetAssetVersionId = view?.order.approvedVersionId;
-    if (!targetAssetVersionId) return;
-    call("/api/spatial-generator/collar/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        idempotencyKey: `collar_${crypto.randomUUID()}`,
-        targetAssetVersionId,
-        sizeClass: collarSizeClass,
-        neckCircumferenceMm,
-        strapWidthMm: collarWidthMm,
-        clearanceMm: collarClearanceMm,
-        strapThicknessMm: 3,
-        color: collarColor,
-        includeBuckle: true,
-        includeDRing: true,
-        targetUse: "attachment",
-      }),
-    }).then(setCollarJob).catch(() => {});
+    if (!targetAssetVersionId || collarReadiness?.ready !== true) return;
+    setCollarReadiness(null);
+    try {
+      const result = await runReadyCollarBuild(() => call("/api/spatial-generator/collar/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: `collar_${crypto.randomUUID()}`,
+          targetAssetVersionId,
+          sizeClass: collarSizeClass,
+          neckCircumferenceMm,
+          strapWidthMm: collarWidthMm,
+          clearanceMm: collarClearanceMm,
+          strapThicknessMm: 3,
+          color: collarColor,
+          includeBuckle: true,
+          includeDRing: true,
+          targetUse: "attachment",
+        }),
+      }));
+      setCollarReadiness(result.readiness);
+      if (result.status === "created") setCollarJob(result.job);
+    } catch {
+      // The fresh health check passed; a non-readiness submission error does not
+      // make the worker chain unhealthy.
+      setCollarReadiness({ ready: true, blockers: [] });
+    }
   };
 
   const inspectOperatorOrder = (candidate: OrderView) => {
@@ -592,11 +705,13 @@ export default function PetModelStudio() {
                   <span className="block text-xs opacity-65">The Texture tool unlocks when the untextured mesh finishes.</span>
                 </span>
               </label>
-              <label className={`flex items-start gap-3 rounded-2xl border p-3 ${includeTexture ? "border-white/15" : "border-white/5 opacity-45"}`}>
-                <input type="checkbox" checked={includeRig} disabled={!includeTexture} onChange={(event) => setIncludeRig(event.target.checked)} className="mt-1" />
+              <label className="flex items-start gap-3 rounded-2xl border border-white/15 p-3">
+                <input type="checkbox" checked={includeRig} onChange={(event) => setIncludeRig(event.target.checked)} className="mt-1" />
                 <span>
-                  <span className="text-sm font-medium">Animate after texture</span>
-                  <span className="block text-xs opacity-65">The Animate tool unlocks only after rig compatibility passes.</span>
+                  <span className="text-sm font-medium">Animation-ready body rig · {product.prices.rig} PupCoins</span>
+                  <span className="block text-xs opacity-65">
+                    Adds a skeleton and skin weights after the base mesh, or after Texture when selected. Animation tools unlock only after compatibility passes.
+                  </span>
                 </span>
               </label>
               <label className="flex items-start gap-3 text-xs">
@@ -692,7 +807,7 @@ export default function PetModelStudio() {
             </div>
             <PriceRow label="Blank base mesh" value={product.prices.base} />
             <PriceRow label="Texture" value={includeTexture ? product.prices.texture : 0} muted={!includeTexture} />
-            <PriceRow label="Rig" value={includeRig ? product.prices.rig : 0} muted={!includeRig} />
+            <PriceRow label="Animation-ready body rig" value={includeRig ? product.prices.rig : 0} muted={!includeRig} />
             <div className="border-t border-white/15 pt-3">
               <PriceRow label="Maximum total" value={total} strong />
             </div>
@@ -702,7 +817,7 @@ export default function PetModelStudio() {
               Approve model → choose {printHeight} mm size → enter shipping → secure card checkout → Slant 3D prints and ships.
             </div>
             <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs">
-              Facial blendshape rigging is not for sale. It returns only after at least {Math.round(product.facialRig.minimumSuccessRate * 100)}% measured reliability.
+              Facial blendshapes are separate from the body/skeletal rig above and are not for sale. They return only after at least {Math.round(product.facialRig.minimumSuccessRate * 100)}% measured reliability.
             </div>
             {recentOrders.length > 0 && (
               <div className="space-y-2 border-t border-white/15 pt-4">
@@ -911,7 +1026,7 @@ export default function PetModelStudio() {
                       : stage.stage === "base" && view.order.includeTexture
                         ? `Approve base & add texture · ${view.quote.texture} PupCoins`
                         : stage.stage === "rig_check"
-                          ? `Approve rigging · ${view.quote.rig} PupCoins`
+                          ? `Approve body rigging · ${view.quote.rig} PupCoins`
                           : `Approve ${STAGE_LABELS[stage.stage]}`}
                   </button>
                 )}
@@ -997,9 +1112,20 @@ export default function PetModelStudio() {
                 <div className="rounded-xl bg-black/20 p-3 text-xs opacity-70">
                   Includes a rigid buckle and D-ring. The flexible strap follows upper-neck bones; metal hardware remains rigid.
                 </div>
-                <button type="button" onClick={buildCollar} disabled={busy}
+                {collarReadiness?.ready !== true && (
+                  <div className="rounded-xl border border-amber-300/25 bg-amber-300/10 p-3 text-xs text-amber-100">
+                    {collarReadiness === null
+                      ? "Checking the collar worker chain…"
+                      : "Collar generation is unavailable until every worker and the job orchestrator pass readiness. The build is disabled before any PupCoins can be charged."}
+                  </div>
+                )}
+                <button type="button" onClick={buildCollar} disabled={busy || collarReadiness?.ready !== true}
                   className="w-full rounded-2xl bg-violet-400 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-40">
-                  {busy ? "Starting collar build…" : "Build collar draft"}
+                  {busy
+                    ? "Starting collar build…"
+                    : collarReadiness?.ready === true
+                      ? "Build collar draft"
+                      : "Collar builder unavailable — no charge"}
                 </button>
                 {collarJob && (
                   <p className="text-xs text-emerald-200">
