@@ -39,9 +39,27 @@ function runCommand(stage) {
   }
 }
 
-export function runBuild({ runner = runCommand, clean = true } = {}) {
+export function removeReleaseMetadata(directory = path.join(rootDir, "dist")) {
+  if (!fs.existsSync(directory)) return 0;
+  let removed = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      removed += removeReleaseMetadata(fullPath);
+    } else if (entry.isFile() && entry.name === ".DS_Store") {
+      fs.rmSync(fullPath, { force: true });
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+export function runBuild({ runner = runCommand, clean = true, sanitizer = removeReleaseMetadata } = {}) {
   if (clean) fs.rmSync(path.join(rootDir, "dist"), { recursive: true, force: true });
-  for (const stage of BUILD_STAGES) runner(stage);
+  for (const stage of BUILD_STAGES) {
+    runner(stage);
+    if (stage.name === "client") sanitizer(path.join(rootDir, "dist"));
+  }
 }
 
 if (process.argv[1] === __filename) {

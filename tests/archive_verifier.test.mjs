@@ -66,3 +66,21 @@ test("shared verifier rejects added, missing, and wrong-commit content", () => {
     fs.rmSync(missing.directory, { recursive: true, force: true });
   }
 });
+
+test("shared verifier rejects filesystem metadata even if it was manifested", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "paws-archive-metadata-"));
+  try {
+    fs.writeFileSync(path.join(directory, ".DS_Store"), "metadata");
+    assert.throws(
+      () => generateManifest({
+        APP_COMMIT_SHA: COMMIT,
+        APP_BRANCH: "main",
+        APP_BUILD_TIME: "2026-07-22T12:00:00.000Z",
+        RELEASE_DIRTY: "false",
+      }, directory),
+      /filesystem metadata/,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

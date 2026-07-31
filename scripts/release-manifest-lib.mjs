@@ -29,6 +29,9 @@ export function listReleaseFiles(rootDir) {
       const fullPath = path.join(directory, entry.name);
       const relativePath = toPosixPath(path.relative(rootDir, fullPath));
       if (relativePath === RELEASE_MANIFEST_FILE) continue;
+      if (entry.name === ".DS_Store") {
+        throw new Error(`Release archives may not contain filesystem metadata: ${relativePath}`);
+      }
       if (entry.isSymbolicLink()) {
         throw new Error(`Release archives may not contain symbolic links: ${relativePath}`);
       }
