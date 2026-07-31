@@ -22,6 +22,15 @@ const HASHES = {
   output: "c".repeat(64),
   payment: "d".repeat(64),
 };
+const RECIPIENT = {
+  name: "Test Customer",
+  email: "customer@example.com",
+  address1: "1 Test Street",
+  city: "Denver",
+  stateCode: "CO",
+  countryCode: "US",
+  postalCode: "80202",
+};
 
 function templateSpec() {
   return {
@@ -407,6 +416,7 @@ test("Phase 6 completion binds immutable worker evidence and freezes paid print 
     providerSku: "CARD-5X7",
     placement: "front",
     quantity: 25,
+    recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
     idempotencyKey: "print-request-001",
   });
@@ -423,6 +433,7 @@ test("Phase 6 completion binds immutable worker evidence and freezes paid print 
     providerSku: "CARD-5X7",
     placement: "front",
     quantity: 25,
+    recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
     idempotencyKey: "print-request-001",
   });
@@ -438,6 +449,7 @@ test("Phase 6 provider submission is payment-gated, outside transactions, and re
     providerSku: "CARD-5X7",
     placement: "front",
     quantity: 10,
+    recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
     idempotencyKey: "print-request-002",
   });
@@ -471,6 +483,7 @@ test("Phase 6 provider submission is payment-gated, outside transactions, and re
     providerSku: "CARD-5X7",
     placement: "front",
     quantity: 1,
+    recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
     idempotencyKey: "print-request-replay-conflict",
   });
@@ -490,6 +503,7 @@ test("Phase 6 refuses to freeze print work without confirmed payment evidence", 
       providerSku: "CARD-5X7",
       placement: "front",
       quantity: 10,
+      recipient: RECIPIENT,
       paidPaymentUuid: PAYMENT_UUID,
       idempotencyKey: "print-request-unpaid",
     }),
@@ -507,6 +521,7 @@ test("Phase 6 reconciliation adopts provider evidence without making claims befo
     providerSku: "CARD-5X7",
     placement: "front",
     quantity: 10,
+    recipient: RECIPIENT,
     paidPaymentUuid: PAYMENT_UUID,
     idempotencyKey: "print-request-003",
   });

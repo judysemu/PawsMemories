@@ -13,6 +13,7 @@ import type {
 } from "./apiPorts.ts";
 import { MySqlStationeryV2Repository } from "./repository.ts";
 import { StationeryV2Service } from "./service.ts";
+import { PrintfulStationeryProvider, Slant3dStationeryProvider } from "./providers.ts";
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -140,13 +141,16 @@ export function createStationeryV2Production(options: {
   const workerSecret = requiredSecret(env, "STATIONERY_RENDER_WORKER_SECRET");
   const renderEndpoint = requiredHttpsUrl(env, "STATIONERY_RENDER_WORKER_URL");
   const repository = new MySqlStationeryV2Repository(() => pool);
+  const providers = {
+    printful: new PrintfulStationeryProvider(env),
+    slant3d: new Slant3dStationeryProvider(env),
+  };
   const service = new StationeryV2Service({
     repository,
     renderDispatcher: new HttpsStationeryRenderDispatcher(renderEndpoint, workerSecret, options.fetchImpl),
     paymentEvidence: new SqlStationeryPaymentEvidenceReader(pool),
     frozenFileAccess: new PrivateStationeryFileAccess(pool),
-    // Provider adapters stay absent until shipping contracts and sandbox gates pass.
-    providers: {},
+    providers,
   });
   return {
     service,

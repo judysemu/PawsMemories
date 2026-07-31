@@ -16,6 +16,19 @@ export interface FulfillmentProviderPort {
     idempotencyKey: string;
     printManifestHash: string;
     frozenFileUrl: string;
+    providerSku: string;
+    placement: string;
+    quantity: number;
+    recipient: {
+      name: string;
+      email: string;
+      address1: string;
+      address2?: string;
+      city: string;
+      stateCode?: string;
+      countryCode: string;
+      postalCode: string;
+    };
   }): Promise<{ providerOrderId: string; state: "submitted" | "processing" }>;
   observe(providerOrderId: string | null, idempotencyKey: string): Promise<ProviderObservation>;
   requestRefund(input: { providerOrderId: string; amountMinor: number; idempotencyKey: string }): Promise<{

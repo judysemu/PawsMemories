@@ -19,6 +19,17 @@ export const TemplateVersionParamSchema = z.object({
 }).strict();
 export const ProviderParamSchema = z.object({ provider: z.enum(["printful", "slant3d"]) }).strict();
 
+export const ShippingRecipientSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  email: z.string().email().max(320),
+  address1: z.string().trim().min(1).max(200),
+  address2: z.string().trim().max(200).optional(),
+  city: z.string().trim().min(1).max(120),
+  stateCode: z.string().trim().max(32).optional(),
+  countryCode: z.string().trim().regex(/^[A-Z]{2}$/),
+  postalCode: z.string().trim().min(1).max(32),
+}).strict();
+
 export const TemplateVersionPublicSchema = z.object({
   spec: TemplateVersionSpecSchema,
   specHash: Sha256Schema,
@@ -91,6 +102,7 @@ export const CreatePrintOrderRequestSchema = z.object({
   providerSku: z.string().trim().min(1).max(160),
   placement: z.string().trim().min(1).max(120),
   quantity: z.number().int().positive().max(10_000),
+  recipient: ShippingRecipientSchema,
   paidPaymentUuid: z.string().uuid(),
   idempotencyKey: ApiIdempotencyKeySchema,
 }).strict();

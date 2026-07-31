@@ -224,6 +224,14 @@ export class StationeryV2Service {
   async createPrintOrder(ownerId: string, rawRequest: CreatePrintOrderRequest): Promise<PrintOrderPublic> {
     assertStationeryV2Enabled();
     const request = CreatePrintOrderRequestSchema.parse(rawRequest);
+    // Never accept payment evidence into a durable print order unless the
+    // selected provider can actually receive the order. This prevents a
+    // misleading paid-but-unfulfillable queue when production adapters are
+    // missing or misconfigured.
+    const provider = this.providers[request.provider];
+    if (!provider || provider.provider !== request.provider) {
+      throw new StationeryApiError("Fulfillment provider is not configured.", "PROVIDER_UNAVAILABLE", 503);
+    }
     const requestHash = sha256Canonical(request);
     const existing = await this.repository.getPrintOrderByIdempotency(ownerId, request.idempotencyKey);
     if (existing) {
@@ -256,6 +264,7 @@ export class StationeryV2Service {
       providerSku: request.providerSku,
       placement: request.placement,
       quantity: request.quantity,
+      recipient: request.recipient,
       frozenFile: renderJob.output,
       renderManifestHash: renderJob.renderManifest.manifestHash,
       validationReportHash: renderJob.renderManifest.validationReportHash,
@@ -291,6 +300,7 @@ export class StationeryV2Service {
       providerSku: order.printManifest.providerSku,
       placement: order.printManifest.placement,
       quantity: order.printManifest.quantity,
+      recipient: order.printManifest.recipient,
       paidPaymentUuid: order.paymentEvidence.paymentUuid,
       idempotencyKey: request.idempotencyKey,
     }) !== requestHash) {
@@ -339,6 +349,10 @@ export class StationeryV2Service {
         idempotencyKey: order.providerIdempotencyKey,
         printManifestHash: order.printManifest.manifestHash,
         frozenFileUrl,
+        providerSku: order.printManifest.providerSku,
+        placement: order.printManifest.placement,
+        quantity: order.printManifest.quantity,
+        recipient: order.printManifest.recipient,
       }));
       const applied = await this.applyEventUnderLock(order, {
         eventId: `submission-acknowledged:${order.providerIdempotencyKey}:${acknowledgement.providerOrderId}`,
