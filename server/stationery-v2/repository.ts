@@ -340,6 +340,18 @@ export class MySqlStationeryV2Repository implements StationeryApiRepositoryPort 
     return { ...parsePrintOrder(rows[0]), ownerId: String(rows[0].owner_id) };
   }
 
+  async getPrintOrderByProviderReference(input: { provider: "printful" | "slant3d"; providerIdempotencyKey?: string; providerOrderId?: string }): Promise<PrintOrderPublic | null> {
+    if (!input.providerIdempotencyKey && !input.providerOrderId) return null;
+    const clauses = ["fo.provider = ?"];
+    const values: unknown[] = [input.provider];
+    const references: string[] = [];
+    if (input.providerIdempotencyKey) { references.push("fo.provider_idempotency_key = ?"); values.push(input.providerIdempotencyKey); }
+    if (input.providerOrderId) { references.push("fo.provider_order_id = ?"); values.push(input.providerOrderId); }
+    clauses.push(`(${references.join(" OR ")})`);
+    const [rows]: any = await this.getPool().query(`${printOrderSelect()} WHERE ${clauses.join(" AND ")} LIMIT 1`, values);
+    return rows[0] ? parsePrintOrder(rows[0]) : null;
+  }
+
   async getByLocalOrderUuid(localOrderUuid: string): Promise<ProviderSubmission | null> {
     const [rows]: any = await this.getPool().query(
       `SELECT fo.*, pm.manifest_hash AS print_manifest_hash

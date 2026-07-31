@@ -58,6 +58,21 @@ export class HmacSha256Authenticator implements ProviderWebhookAuthenticatorPort
     const expected = crypto.createHmac("sha256", secret).update(input.rawBody).digest("hex");
     return crypto.timingSafeEqual(Buffer.from(supplied.toLowerCase()), Buffer.from(expected));
   }
+
+  async authenticateNative(input: { provider: "printful" | "slant3d"; headers: IncomingHttpHeaders; rawBody: Buffer }): Promise<boolean> {
+    const secret = this.secrets[input.provider];
+    if (!secret || input.rawBody.byteLength === 0) return false;
+    const supplied = input.provider === "printful"
+      ? singleHeader(input.headers["x-pf-webhook-signature"])
+      : singleHeader(input.headers["x-slant3d-webhook-signature"] ?? input.headers["x-slant3d-signature"]);
+    if (!supplied) return false;
+    const key = input.provider === "printful" && /^[a-f0-9]+$/i.test(secret) && secret.length % 2 === 0
+      ? Buffer.from(secret, "hex")
+      : Buffer.from(secret, "utf8");
+    const expected = crypto.createHmac("sha256", key).update(input.rawBody).digest("hex");
+    return /^[a-f0-9]{64}$/i.test(supplied)
+      && crypto.timingSafeEqual(Buffer.from(supplied.toLowerCase(), "utf8"), Buffer.from(expected, "utf8"));
+  }
 }
 
 export class HttpsStationeryRenderDispatcher implements RenderDispatcherPort {

@@ -73,6 +73,7 @@ export interface StationeryApiRepositoryPort extends FulfillmentRepositoryPort {
   getPrintOrder(ownerId: string, localOrderUuid: string): Promise<PrintOrderPublic | null>;
   getPrintOrderByIdempotency(ownerId: string, idempotencyKey: string): Promise<PrintOrderPublic | null>;
   getPrintOrderByUuid(localOrderUuid: string): Promise<(PrintOrderPublic & { ownerId: string }) | null>;
+  getPrintOrderByProviderReference(input: { provider: "printful" | "slant3d"; providerIdempotencyKey?: string; providerOrderId?: string }): Promise<PrintOrderPublic | null>;
   recordReconciliation(input: {
     reconciliationUuid: string;
     localOrderUuid: string;

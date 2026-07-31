@@ -24,6 +24,7 @@ import {
   type ReconciliationResult,
   type RenderJobPublic,
 } from "./apiContracts.ts";
+import { parseNativeProviderWebhook } from "./nativeWebhooks.ts";
 import type {
   FrozenFileAccessPort,
   PaymentEvidenceReaderPort,
@@ -409,6 +410,18 @@ export class StationeryV2Service {
       throw new StationeryApiError("Print order was not found for this provider.", "PRINT_ORDER_NOT_FOUND", 404);
     }
     return ProviderEventResultSchema.parse(await this.applyEventUnderLock(PrintOrderPublicSchema.strip().parse(order), request.event));
+  }
+
+  async applyNativeProviderEvent(provider: "printful" | "slant3d", payload: unknown): Promise<ProviderEventResult> {
+    assertStationeryV2Enabled();
+    const reference = parseNativeProviderWebhook(provider, payload);
+    const order = await this.repository.getPrintOrderByProviderReference({
+      provider,
+      providerIdempotencyKey: reference.providerIdempotencyKey ?? undefined,
+      providerOrderId: reference.providerOrderId ?? undefined,
+    });
+    if (!order) throw new StationeryApiError("Native provider event could not be mapped to a local print order.", "PRINT_ORDER_NOT_FOUND", 404);
+    return ProviderEventResultSchema.parse(await this.applyEventUnderLock(order, reference.event));
   }
 
   async reconcilePrintOrder(ownerId: string, localOrderUuid: string, reason: string): Promise<ReconciliationResult> {

@@ -1,4 +1,5 @@
 import { Router, json, type NextFunction, type Request, type Response } from "express";
+import type { IncomingHttpHeaders } from "node:http";
 import { z } from "zod";
 import { requireAuth, type AuthedRequest } from "../../auth.ts";
 import {
@@ -144,6 +145,22 @@ export function createStationeryV2Router(
       if (!authenticated) throw new StationeryApiError("Provider webhook authentication failed.", "WEBHOOK_UNAUTHORIZED", 401);
       const body = ProviderWebhookRequestSchema.parse(req.body);
       res.json(ProviderEventResultSchema.parse(await service.applyAuthenticatedProviderEvent(params.provider, body)));
+    } catch (error) {
+      handleStationeryError(res, error);
+    }
+  });
+
+  router.post("/provider-events/:provider/native", async (req: RawBodyRequest, res: Response) => {
+    try {
+      const params = ProviderParamSchema.parse(req.params);
+      const rawBody = requireRawBody(req);
+      const authenticateNative = (dependencies.providerWebhookAuthenticator as typeof dependencies.providerWebhookAuthenticator & {
+        authenticateNative?: (input: { provider: "printful" | "slant3d"; headers: IncomingHttpHeaders; rawBody: Buffer }) => Promise<boolean>;
+      }).authenticateNative;
+      if (!authenticateNative || !await authenticateNative({ provider: params.provider, headers: req.headers, rawBody })) {
+        throw new StationeryApiError("Native provider webhook authentication failed.", "WEBHOOK_UNAUTHORIZED", 401);
+      }
+      res.json(ProviderEventResultSchema.parse(await service.applyNativeProviderEvent(params.provider, req.body)));
     } catch (error) {
       handleStationeryError(res, error);
     }
