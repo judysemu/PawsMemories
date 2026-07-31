@@ -63,6 +63,18 @@ function printfulVariantId(env: NodeJS.ProcessEnv, sku: string): number {
   return id;
 }
 
+function validatePrintfulVariantMap(env: NodeJS.ProcessEnv): void {
+  const rawMap = String(env.PRINTFUL_STATIONERY_VARIANT_MAP || "");
+  if (!rawMap.trim()) throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP is required.");
+  let map: Record<string, unknown>;
+  try { map = JSON.parse(rawMap) as Record<string, unknown>; } catch { throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must be valid JSON."); }
+  if (!map || typeof map !== "object" || Object.keys(map).length === 0) throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP must contain at least one SKU.");
+  for (const [sku, value] of Object.entries(map)) {
+    const id = Number(value);
+    if (!sku.trim() || !Number.isInteger(id) || id <= 0) throw new Error("PRINTFUL_STATIONERY_VARIANT_MAP contains an invalid variant ID.");
+  }
+}
+
 function recipientPrintful(recipient: Recipient) {
   return {
     name: recipient.name,
@@ -88,6 +100,7 @@ export class PrintfulStationeryProvider implements FulfillmentProviderPort {
     this.token = required(env, "PRINTFUL_API_KEY");
     this.baseUrl = String(env.PRINTFUL_API_BASE_URL || "https://api.printful.com").replace(/\/$/, "");
     this.storeId = String(env.PRINTFUL_STORE_ID || "").trim();
+    validatePrintfulVariantMap(env);
   }
 
   async submitFrozenManifest(input: SubmissionInput) {
