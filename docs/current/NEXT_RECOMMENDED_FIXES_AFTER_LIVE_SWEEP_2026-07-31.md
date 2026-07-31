@@ -130,8 +130,38 @@ The listed `PETSIM_*` daily and global caps govern AI generation categories. The
 - No real shipping address, payment method, Stripe checkout, Printful order, or Slant 3D order was submitted.
 - No stale production order was deleted or force-completed.
 - No credentials, API keys, signed asset URLs, or secret environment values were copied into source control or this report.
-- `furryfriend.cc` was not started in this pass because the instruction was to stop after committing this live-sweep report.
+- `furryfriend.cc` was deployed separately after this sweep. That static editorial deployment does not prove or change any Pawsome3D production status in this report.
 
 ## Resume point
 
 Start with the private GLB preview and non-zero operator viewer height. Re-run the exact customer reference → base → texture → customer approval → operator visual inspection → operator release → Fur Bin reload chain. Do not claim end-to-end completion until the released asset is visibly inspectable and persists as the exact approved version.
+
+## Local P1 execution evidence — 2026-07-31
+
+This section records local code and artifact evidence only. It does not upgrade any DEPLOYED, LIVE, or END-TO-END status.
+
+| P1 item | CODE | LOCAL | ARCHIVE | DEPLOYED | LIVE | END-TO-END | Evidence / remaining gate |
+|---|---|---|---|---|---|---|---|
+| Stale Pet GLB recovery | PASS | PASS | N/A | NOT RUN | NOT RUN | NOT RUN | Additive schema v45, bounded stale-current leases, durable-handle-only resume, redacted operator evidence, and immutable-debit refunds are implemented. Five real-MySQL recovery tests pass, including exclusive leases, exactly-once refunds, no refund after a concurrent stage transition, no blind provider create, and evidence persistence. |
+| Exact deployment archive boot | PASS | PASS | PENDING CLEAN RUN | NOT RUN | NOT RUN | NOT RUN | The smoke test extracts the real ZIP, installs production dependencies, boots the packaged root `server.cjs`, checks five routes and release metadata, and proves missing-secret and missing-sound boot failures. The dedicated database reset is restricted to `paws_archive_smoke*`. |
+| Pinned model viewer | PASS | PASS | PASS | NOT RUN | NOT RUN | NOT RUN | `@google/model-viewer@4.0.0` and application `three@0.169.0` are lockfile-pinned, the runtime CDN loader is removed, and the production build emits a local model-viewer chunk. Nested development/library Three.js versions remain visible in `npm ls`; no live runtime duplication claim is made. |
+| Rig generation closed | PASS | PASS | N/A | NOT RUN | NOT RUN | NOT RUN | A zero rig request or cost cap reports unavailable in the product contract and rejects rig orders before charge/provider dispatch. Production limits were not raised. |
+| Animator release candidate | PASS | PASS | PASS | NOT RUN | NOT RUN | NOT RUN | Admin can reach the existing release candidate while customers retain the Under Construction gate. Deterministic scene, audio, ffmpeg mux, ownership, and packaged-asset tests pass. A live browser export with audible output remains required before customer release. |
+
+### Accepted local P1 checkpoint
+
+- Commit: `4b1c783` (`fix: complete P1 production hardening`).
+- Required runtime: Node `v24.18.0`.
+- Typecheck: PASS.
+- Focused recovery/rig/Animator tests: 37 passed, 0 failed, 0 skipped.
+- Full suite: 1,399 tests; 1,396 passed, 0 failed, 3 repository-defined skips.
+- Contract suite: 40 passed, 0 failed.
+- Security suite: 8 passed, 0 failed.
+- Production build: PASS; the viewer is bundled locally and no Model Viewer CDN reference is present.
+- Clean archive hash and size are intentionally recorded in a follow-up evidence commit after the committed archive is built and smoke-tested.
+
+## Remaining P0 work
+
+P1 is locally accepted, not deployed. The original P0 release boundary remains open: authenticated same-origin GLB streaming with range support, non-zero viewer layout and explicit load/error state, exact version/hash load-gated operator approval, and atomic idempotent Fur Bin registration. No production deployment or Pawsome3D end-to-end rerun was performed for commit `4b1c783`.
+
+The updated copy/paste handoff is `docs/current/CODEX_REMAINING_P0_P1_HANDOFF_2026-07-31.md`.
