@@ -132,7 +132,7 @@ export class GeminiReferenceImageProvider implements ReferenceImageProvider {
       if (input.photoBuffer && input.photoMimeType) {
         sourceParts.push({ inlineData: { data: input.photoBuffer.toString("base64"), mimeType: input.photoMimeType } });
       }
-      const baseDescription = input.prompt?.trim() || "Preserve the exact identity, anatomy, markings, colors, proportions, and accessories of the supplied subject.";
+      const baseDescription = `${input.prompt?.trim() || "Preserve the exact identity, anatomy, markings, colors, proportions, and accessories of the supplied subject."} The supplied photo may be a four-photo contact sheet ordered top-left front, top-right left profile, bottom-left rear, bottom-right right profile; treat those four panels as separate observed angles of the same subject, not as a collage to reproduce.`;
       const retryClause = input.retryNotes?.trim() ? ` Requested correction: ${input.retryNotes.trim()}` : "";
       const front = await this.generateImage([
         ...sourceParts,
