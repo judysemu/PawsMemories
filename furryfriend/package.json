@@ -1,0 +1,13 @@
+{
+  "name": "furryfriend-guide",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.15 <25"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs && node verify.mjs"
+  }
+}

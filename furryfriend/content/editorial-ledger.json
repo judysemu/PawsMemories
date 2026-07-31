@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "workflow": [
+    "question_received",
+    "intent_qualified",
+    "sources_collected",
+    "evidence_checked",
+    "answer_planned",
+    "drafted",
+    "seo_reviewed",
+    "fact_safety_reviewed",
+    "human_review_required",
+    "published",
+    "monitored"
+  ],
+  "jobs": [
+    {
+      "slug": "how-to-honor-a-beloved-pets-memory",
+      "state": "human_review_required",
+      "version": 1,
+      "productClaims": ["custom_3d_model_available", "pawprint_digital_keepsake_available"]
+    },
+    {
+      "slug": "turn-one-photo-into-an-animated-3d-video",
+      "state": "human_review_required",
+      "version": 1,
+      "productClaims": ["animation_workflow_concept_only"]
+    },
+    {
+      "slug": "unique-gifts-for-dog-owners-who-have-everything",
+      "state": "human_review_required",
+      "version": 1,
+      "productClaims": ["pawprint_digital_email_send_only"]
+    },
+    {
+      "slug": "cat-as-a-pre-1900-historical-figure",
+      "state": "human_review_required",
+      "version": 1,
+      "productClaims": ["historical_collection_concept_only"]
+    }
+  ],
+  "claimEvidence": [
+    {
+      "id": "custom_3d_model_available",
+      "status": "verified_product_entry",
+      "source": "https://pawsome3d.com/create",
+      "note": "Link only to the current creation flow; do not assert price, delivery time, or print material."
+    },
+    {
+      "id": "pawprint_digital_keepsake_available",
+      "status": "verified_product_entry",
+      "source": "https://pawsome3d.com/pawprints",
+      "note": "Describe a digital Pawprint option without prepaid-gift or sender-reward claims."
+    },
+    {
+      "id": "animation_workflow_concept_only",
+      "status": "blocked_unverified_product_claim",
+      "source": "docs/current/NEXT_RECOMMENDED_FIXES_AFTER_LIVE_SWEEP_2026-07-31.md",
+      "note": "Animator remains customer-gated; article must stay a concept guide."
+    },
+    {
+      "id": "pawprint_digital_email_send_only",
+      "status": "blocked_unverified_product_claim",
+      "source": "docs/current/FURRYFRIEND_SITE_BRIEF_2026-07-31.md",
+      "note": "Do not call Send a Pawprint prepaid or promise a recipient entitlement, discount, or sender reward."
+    },
+    {
+      "id": "historical_collection_concept_only",
+      "status": "blocked_unverified_product_claim",
+      "source": "docs/current/FURRYFRIEND_SITE_BRIEF_2026-07-31.md",
+      "note": "No collection-specific SKU or availability claim until a live destination is verified."
+    }
+  ]
+}
