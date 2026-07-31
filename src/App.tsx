@@ -183,6 +183,7 @@ const SHELL_ICONS: Record<string, React.ComponentType<{ size?: number; strokeWid
 const SHELL_NAV_ICONS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number; "aria-hidden"?: boolean | "true" | "false" }>> = {
   home: House,
   "fur-bin": Archive,
+  pawprints: PawPrint,
   bim: Building2,
   "wags-inbox": Gift,
 };

@@ -118,6 +118,19 @@ function idempotencyKey(): string {
   return crypto.randomUUID();
 }
 
+async function requestJson(path: string, init?: RequestInit): Promise<any> {
+  const response = await authedFetch(path, init);
+  const text = await response.text();
+  let body: any = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Server returned an unreadable response (${response.status}).`);
+  }
+  if (!response.ok) throw new Error(body?.message || body?.error || "Request failed.");
+  return body;
+}
+
 export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
@@ -147,6 +160,7 @@ export default function PetModelStudio() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -182,13 +196,7 @@ export default function PetModelStudio() {
     setBusy(true);
     setError(null);
     try {
-      const response = await authedFetch(path, init);
-      const text = await response.text();
-      let body: any = {};
-      try { body = text ? JSON.parse(text) : {}; }
-      catch { throw new Error(`Server returned an unreadable response (${response.status}).`); }
-      if (!response.ok) throw new Error(body?.message || body?.error || "Request failed.");
-      return body;
+      return await requestJson(path, init);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Request failed.";
       setError(message);
@@ -216,6 +224,10 @@ export default function PetModelStudio() {
   }, []);
 
   const start = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setGenerationMessage("Preparing your reference session…");
     try {
       const sourceImage = references.frontUrl;
       if (inputMode !== "text" && !sourceImage) {
@@ -227,6 +239,7 @@ export default function PetModelStudio() {
         subjectProfile,
         sourceImage,
       );
+      setGenerationMessage("Generating the complete 360° view set…");
       const generated = await startReferenceAttempt(session.sessionUuid, `views_${crypto.randomUUID()}`);
       const generatedViews = (generated.session.views || []) as GeneratedReferenceView[];
       const manifestHash = String(generated.session.manifestHash || "");
@@ -244,7 +257,8 @@ export default function PetModelStudio() {
       if (Object.values(generatedManifest).some((value) => !value)) {
         throw new Error("The generated 360° view set is missing a required angle.");
       }
-      const created = await call("/api/pet-glb/orders", {
+      setGenerationMessage("Creating your private model build…");
+      const created = await requestJson("/api/pet-glb/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -258,7 +272,8 @@ export default function PetModelStudio() {
         }),
       }) as OrderView;
       applyView(created);
-      const withReferences = await call(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
+      setGenerationMessage("Saving the generated views for approval…");
+      const withReferences = await requestJson(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ references: generatedManifest }),
@@ -267,11 +282,16 @@ export default function PetModelStudio() {
       setReferenceSession({ sessionUuid: session.sessionUuid, manifestHash });
       applyView(withReferences);
       if (autoContinue) {
+        setGenerationMessage("Approving the views and starting the base mesh…");
         await approveReferenceManifest(session.sessionUuid, manifestHash);
         await approveStage(withReferences);
       }
+      setGenerationMessage(autoContinue ? "Base mesh started." : "360° views are ready for your approval.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
+      setGenerationMessage(null);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -286,6 +306,17 @@ export default function PetModelStudio() {
       reader.readAsDataURL(file);
     });
     event.target.value = "";
+  };
+
+  const removeReference = (key: string) => {
+    setReferences((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setReferenceSession(null);
+    setGenerationMessage(null);
+    setError(null);
   };
 
   const saveReferences = () => {
@@ -510,10 +541,20 @@ export default function PetModelStudio() {
               </label>
               <div className="grid grid-cols-5 gap-1.5">
                 {REFERENCE_FIELDS.map(([key, label]) => (
-                  <div key={key} className={`aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
+                  <div key={key} className={`relative aspect-square overflow-hidden rounded-lg border ${references[key] ? "border-emerald-300/50" : "border-white/10 bg-black/20"}`}>
                     {references[key]
                       ? <img src={references[key]} alt={`${label} upload`} className="h-full w-full object-cover" />
                       : <span className="flex h-full items-center justify-center px-1 text-center text-[9px] opacity-45">{key === "frontUrl" ? "Required" : `${label} optional`}</span>}
+                    {references[key] && (
+                      <button
+                        type="button"
+                        onClick={() => removeReference(key)}
+                        aria-label={`Remove ${label} image`}
+                        className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-black/75 text-base leading-none text-white shadow"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -597,9 +638,18 @@ export default function PetModelStudio() {
             )}
             <button onClick={start} disabled={busy || (inputMode !== "text" ? !primaryReferenceReady : !selectedStyle.trim())}
               className="group relative w-full overflow-hidden rounded-2xl bg-cyan-400 px-4 py-3.5 font-bold text-slate-950 disabled:opacity-40">
-              <span className="relative z-10">{busy ? "Gathering reference sand…" : "Generate base model"}</span>
+              <span className="relative z-10">{busy ? "Generating 360° views…" : "Generate base model"}</span>
               {busy && <span className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_20%_80%,#f5d08a_0_2px,transparent_3px)] bg-[length:18px_18px]" />}
             </button>
+            {(generationMessage || error) && (
+              <div
+                role={error ? "alert" : "status"}
+                aria-live="polite"
+                className={`rounded-2xl border px-3 py-2 text-xs ${error ? "border-red-400/35 bg-red-400/10 text-red-100" : "border-cyan-300/25 bg-cyan-300/10 text-cyan-50"}`}
+              >
+                {error || generationMessage}
+              </div>
+            )}
           </section>
 
           <section className="relative min-h-[720px] overflow-hidden rounded-3xl border border-white/15 bg-[radial-gradient(circle_at_50%_35%,rgba(34,211,238,0.13),transparent_38%),linear-gradient(145deg,rgba(15,23,42,0.95),rgba(3,7,18,0.98))]">
@@ -616,7 +666,23 @@ export default function PetModelStudio() {
                 <p className="mt-2 text-sm opacity-60">Reference sand gathers into an untextured base mesh. Texture and Animate unlock only after the mesh is complete.</p>
               </div>
             </div>
-            <PrintGallery />
+            <div className="border-t border-white/10 bg-black/25 p-5">
+              <div className="flex items-start gap-4">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-violet-400/15 text-2xl">🦴</span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-violet-200">New accessory</p>
+                  <h3 className="mt-1 text-lg font-semibold">Custom-fit collars</h3>
+                  <p className="mt-1 text-xs opacity-65">
+                    Finish a base model, then enter your pet's neck measurement to build a printable collar with a rigid buckle and D-ring.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                    <span className="rounded-full border border-white/10 px-3 py-1">Cats & dogs</span>
+                    <span className="rounded-full border border-white/10 px-3 py-1">5–15 mm fur clearance</span>
+                    <span className="rounded-full border border-white/10 px-3 py-1">Approval before export</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <aside className="h-fit space-y-4 rounded-3xl border border-white/15 bg-white/[0.08] p-5 backdrop-blur-xl">
@@ -981,36 +1047,6 @@ function PriceRow({ label, value, muted, strong }: { label: string; value: numbe
     <div className={`flex items-center justify-between text-sm ${muted ? "opacity-40" : ""} ${strong ? "font-semibold" : ""}`}>
       <span>{label}</span>
       <span>{value} PupCoins</span>
-    </div>
-  );
-}
-
-const PRINT_EXAMPLES = [
-  { src: "/model-lab/3dashephardmod.png", alt: "Australian Shepherd collectible on an engraved base" },
-  { src: "/model-lab/3dbetsy.png", alt: "Dalmatian puppy print on a Betsy name base" },
-  { src: "/model-lab/3dbodhi.png", alt: "Small fluffy dog print on an engraved base" },
-  { src: "/model-lab/3dgermanshepmod.png", alt: "German Shepherd figurine on a Fido name base" },
-  { src: "/model-lab/3dgoldenmod.png", alt: "Golden doodle figurine on a Reggie name base" },
-] as const;
-
-function PrintGallery() {
-  return (
-    <div className="border-t border-white/10 bg-black/25 p-4">
-      <div className="mb-3 flex items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-amber-200">Made physical</p>
-          <h3 className="text-lg font-semibold">Personalized 3D printed keepsakes</h3>
-        </div>
-        <span className="text-xs opacity-55">Printed examples</span>
-      </div>
-      <div className="grid grid-cols-5 gap-2">
-        {PRINT_EXAMPLES.map((example) => (
-          <figure key={example.src} className="group aspect-square overflow-hidden rounded-xl border border-white/10 bg-white/5">
-            <img src={example.src} alt={example.alt} loading="lazy"
-              className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-          </figure>
-        ))}
-      </div>
     </div>
   );
 }

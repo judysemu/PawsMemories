@@ -53,6 +53,14 @@ interface Props {
   onOpenPawprints: () => void;
 }
 
+const PRINT_EXAMPLES = [
+  { src: "/model-lab/3dashephardmod.png", alt: "Australian Shepherd collectible on an engraved base" },
+  { src: "/model-lab/3dbetsy.png", alt: "Dalmatian puppy print on a Betsy name base" },
+  { src: "/model-lab/3dbodhi.png", alt: "Small fluffy dog print on an engraved base" },
+  { src: "/model-lab/3dgermanshepmod.png", alt: "German Shepherd figurine on a Fido name base" },
+  { src: "/model-lab/3dgoldenmod.png", alt: "Golden doodle figurine on a Reggie name base" },
+] as const;
+
 /** Minimum viable shipping payload. Vendors reject partial addresses outright. */
 function addressComplete(address: ShippingAddress): boolean {
   return Boolean(
@@ -304,6 +312,27 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
           icon={<Package size={20} />}
           badge={<StatusBadge available={modelPrintingAvailable} />}
         >
+          <div className="mb-6">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[.16em] text-primary">Printed examples</p>
+                <p className="mt-1 text-sm text-on-surface-variant">See how personalized pet models look as finished, shelf-ready keepsakes.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {PRINT_EXAMPLES.map((example) => (
+                <figure key={example.src} className="group aspect-square overflow-hidden rounded-2xl border border-outline-variant/35 bg-surface-container-low">
+                  <img
+                    src={example.src}
+                    alt={example.alt}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                  />
+                </figure>
+              ))}
+            </div>
+          </div>
+
           {!userProfile.email ? (
             <p className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4 text-sm text-on-surface-variant">
               Sign in to choose one of your 3D pet models to print.
