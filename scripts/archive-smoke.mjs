@@ -76,13 +76,23 @@ try {
   for (const asset of packagedSoundManifest.assets) assert(fs.existsSync(path.join(extractRoot, "dist", asset.publicUrl.replace(/^\//, ""))), `missing Animator sound ${asset.id}`);
   const envDir = path.join(extractRoot, "dist", "server", "animator", "environments"); assert(fs.readdirSync(envDir).filter((name) => name.endsWith(".json")).length >= 8, "Animator environments incomplete");
   run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], extractRoot);
-  const port = await freePort(); const env = { NODE_ENV: manifest.dirty ? "development" : "production", PORT: String(port), DB_HOST: process.env.DB_HOST || "127.0.0.1", DB_PORT: process.env.DB_PORT || "3306", DB_NAME: process.env.DB_NAME || "paws_archive_smoke", DB_USER: process.env.DB_USER || "root", DB_PASSWORD: process.env.DB_PASSWORD || "", JWT_SECRET: "archive-smoke-only-deterministic-secret", ADMIN_KEY: "archive-smoke-admin-key", ADMIN_EMAIL: "archive-smoke@example.invalid", ADMIN_PASSWORD: "archive-smoke-admin-password", MEDIA_BUCKET_URL: "https://example.invalid", APP_COMMIT_SHA: expectedCommit };
+  const port = await freePort(); const env = { NODE_ENV: manifest.dirty ? "development" : "production", PORT: String(port), DB_HOST: process.env.DB_HOST || "127.0.0.1", DB_PORT: process.env.DB_PORT || "3306", DB_NAME: process.env.DB_NAME || "paws_archive_smoke", DB_USER: process.env.DB_USER || "root", DB_PASSWORD: process.env.DB_PASSWORD || "", JWT_SECRET: "archive-smoke-only-deterministic-secret", GEMINI_API_KEY: "archive-smoke-only-invalid-never-called", ADMIN_KEY: "archive-smoke-admin-key", ADMIN_EMAIL: "archive-smoke@example.invalid", ADMIN_PASSWORD: "archive-smoke-admin-password", MEDIA_BUCKET_URL: "https://example.invalid", APP_COMMIT_SHA: expectedCommit };
   assert(createDatabaseIfNeeded(env), "isolated test database could not be created; provide a reachable MySQL service");
   const childOutput = [];
   child = spawn("node", ["server.cjs"], { cwd: extractRoot, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.on("data", (chunk) => childOutput.push(chunk.toString())); child.stderr.on("data", (chunk) => childOutput.push(chunk.toString()));
   const base = `http://127.0.0.1:${port}`;
-  await waitFor(base, "/healthz", 200, 120_000, childOutput); assert(JSON.parse((await waitFor(base, "/readyz", 200, 120_000, childOutput)).body).status === "ready", "readyz was not ready"); assert(JSON.parse((await request(base, "/version")).body).commit === expectedCommit, "/version commit mismatch"); assert((await request(base, "/")).response.status === 200, "/ failed"); assert((await request(base, "/create")).response.status === 200, "/create failed"); await terminate(child); child = null;
+  await waitFor(base, "/healthz", 200, 120_000, childOutput);
+  assert(JSON.parse((await waitFor(base, "/readyz", 200, 120_000, childOutput)).body).status === "ready", "readyz was not ready");
+  assert(JSON.parse((await request(base, "/version")).body).commit === expectedCommit, "/version commit mismatch");
+  for (const route of ["/", "/create"]) {
+    const result = await request(base, route);
+    assert(
+      result.response.status === 200,
+      `${route} failed with ${result.response.status}: ${result.body.slice(0, 300)}; server=${childOutput.join("").slice(-1000)}`,
+    );
+  }
+  await terminate(child); child = null;
   await expectBootFailure({ ...env, NODE_ENV: "production", JWT_SECRET: "" }, "JWT_SECRET");
   const missingAsset = path.join(extractRoot, "dist", packagedSoundManifest.assets[0].publicUrl.replace(/^\//, "")); fs.rmSync(missingAsset); await expectBootFailure({ ...env, NODE_ENV: "production" }, "sound");
   const archiveSha = crypto.createHash("sha256").update(fs.readFileSync(archivePath)).digest("hex"); console.log(`Archive smoke PASS: archive=${archivePath} commit=${expectedCommit} dirty=${manifest.dirty} bytes=${fs.statSync(archivePath).size} sha256=${archiveSha}`);
