@@ -37,6 +37,12 @@
       "state": "human_review_required",
       "version": 1,
       "productClaims": ["historical_collection_concept_only"]
+    },
+    {
+      "slug": "from-puppy-to-parent-a-letter-from-an-adopted-stray",
+      "state": "human_review_required",
+      "version": 1,
+      "productClaims": ["custom_3d_model_available"]
     }
   ],
   "claimEvidence": [

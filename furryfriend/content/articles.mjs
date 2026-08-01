@@ -233,5 +233,55 @@ export const articles = [
       href: "https://pawsome3d.com/how-it-works",
       note: "See the current Pawsome3D process without assuming a historical collection is available."
     }
+  },
+  {
+    slug: "from-puppy-to-parent-a-letter-from-an-adopted-stray",
+    title: "From Puppy to Parent: A Letter from an Adopted Stray",
+    metaDescription: "A touching letter written from the perspective of an adopted stray dog looking back on growing up alongside their human parent.",
+    topic: "Pet stories & adoption",
+    readMinutes: 6,
+    image: "/assets/pawsome-logo.png",
+    imageAlt: "A heartfelt keepsake illustration celebrating an adopted dog and owner",
+    dek: "Before I knew your name or the warmth of a bed, I knew what it felt like to be small in a big, noisy world. This is the story of how a scared rescue pup grew into your faithful companion.",
+    takeaways: [
+      "Adoption is a mutual transformation—you save a life, and they reshape yours.",
+      "A pet's body language changes from guarded uncertainty to peaceful trust over time.",
+      "Celebrating the journey from stray pup to senior companion deepens the bond.",
+      "Preserving photos from early adoption days creates a lifelong visual story."
+    ],
+    sections: [
+      {
+        heading: "To the person who opened the door",
+        paragraphs: [
+          "I still remember the day you met me. I was shaggy, cautious, and unsure whether hand movements meant food or danger. My ears were constantly twitching, listening for sounds that meant I needed to run.",
+          "When you took me home, everything was unfamiliar: soft blankets, steady meals, and a quiet room where I didn't have to guard my dish. Slowly, the tension left my shoulders."
+        ]
+      },
+      {
+        heading: "Growing up together",
+        paragraphs: [
+          "As the months passed, my coat grew shiny and my tail found its wag. I learned the sound of your car turning down the street, the precise rhythm of your footsteps, and the unspoken language of our daily walks.",
+          "We grew up together. You watched me transition from a clumsy pup into a confident companion. I watched you navigate long workdays, quiet evenings, and all the small moments in between."
+        ]
+      },
+      {
+        heading: "From rescued to guardian",
+        paragraphs: [
+          "Now, looking back across the years, I realize something: you thought you were rescuing me, but in truth, we rescued each other. The bond formed between a stray and their human is written in patience, trust, and unspoken devotion.",
+          "Whether through everyday memories, shared adventures, or lasting 3D keepsakes, celebrating our story honors every step of the journey we walked side by side."
+        ]
+      }
+    ],
+    checklist: [
+      "Gather early rescue photos and compare them with present-day photos.",
+      "Write down two or three milestone memories from your pet's adoption journey.",
+      "Celebrate your pet's unique personality traits and physical growth.",
+      "Consider a lasting digital or 3D keepsake to preserve their story."
+    ],
+    cta: {
+      label: "Turn your rescue's story into a 3D keepsake",
+      href: "https://pawsome3d.com/create",
+      note: "Explore Pawsome3D's custom 3D model creation flow for your pet."
+    }
   }
 ];
