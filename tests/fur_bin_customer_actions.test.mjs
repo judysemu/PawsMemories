@@ -40,5 +40,6 @@ test("Fur Reels uses the supplied transparent icon and Fur Bin follows it", () =
   const app = read("src/App.tsx");
   assert.match(shell, /fur-reels-icon\.png/);
   assert.match(app, /item\.imageSrc/);
+  assert.match(app, /item\.imageSrc[\s\S]*?h-5 w-5/);
   assert.ok(shell.indexOf('id: "animate"') < shell.indexOf('id: "fur-bin"'));
 });
