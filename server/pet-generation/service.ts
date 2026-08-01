@@ -527,13 +527,19 @@ export class PetGlbService {
     ownerPhone: string,
   ): Promise<{ url: string; versionId: number; expiresInSeconds: number }> {
     const order = await this.requireOwned(orderUuid, ownerPhone);
-    const current = await this.stages.findCurrent(order.id);
-    if (!current?.assetVersionId) {
-      throw new PetGenerationError("NO_STAGE_ARTIFACT", "Current stage has no previewable GLB");
+    let previewAttempt = await this.stages.findCurrent(order.id);
+    const visited = new Set<number>();
+    while (previewAttempt && !previewAttempt.assetVersionId && previewAttempt.sourceAttemptId) {
+      if (visited.has(previewAttempt.id)) break;
+      visited.add(previewAttempt.id);
+      previewAttempt = await this.stages.findById(previewAttempt.sourceAttemptId);
+    }
+    if (!previewAttempt?.assetVersionId) {
+      throw new PetGenerationError("NO_STAGE_ARTIFACT", "This build does not have a previewable model yet");
     }
     return {
-      url: await this.deps.signDownload(current.assetVersionId, ownerPhone, DOWNLOAD_TTL_SECONDS),
-      versionId: current.assetVersionId,
+      url: await this.deps.signDownload(previewAttempt.assetVersionId, ownerPhone, DOWNLOAD_TTL_SECONDS),
+      versionId: previewAttempt.assetVersionId,
       expiresInSeconds: DOWNLOAD_TTL_SECONDS,
     };
   }
@@ -732,7 +738,7 @@ export class PetGlbService {
       if (!source) throw new PetGenerationError("SOURCE_STAGE_MISSING", "Rig source model was not found");
     }
     if (source.state !== "approved") {
-      throw new PetGenerationError("SOURCE_NOT_APPROVED", "Next stage source is not customer-approved");
+      throw new PetGenerationError("SOURCE_NOT_READY", "The previous validated model stage is not ready");
     }
     return source;
   }

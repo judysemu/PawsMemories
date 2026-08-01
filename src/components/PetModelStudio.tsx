@@ -404,12 +404,12 @@ export default function PetModelStudio() {
   const previewIdentity = livePreviewIdentity(view);
   useEffect(() => {
     const orderUuid = view?.order.orderUuid;
-    const versionId = view?.currentStage?.assetVersionId;
-    if (!orderUuid || !versionId) return;
+    const stage = view?.currentStage;
+    if (!orderUuid || !stage || stage.stage === "reference") return;
     const requestId = ++previewRequestIdRef.current;
     requestJson(`/api/pet-glb/orders/${orderUuid}/stages/current/preview`)
       .then((body) => {
-        if (requestId === previewRequestIdRef.current && Number(body.versionId) === versionId) {
+        if (requestId === previewRequestIdRef.current && Number(body.versionId) > 0) {
           setPreviewUrl(String(body.url));
         }
       })
@@ -421,7 +421,7 @@ export default function PetModelStudio() {
     return () => {
       if (requestId === previewRequestIdRef.current) previewRequestIdRef.current += 1;
     };
-  }, [previewIdentity, view?.currentStage?.assetVersionId, view?.order.orderUuid]);
+  }, [previewIdentity, view?.currentStage?.stage, view?.order.orderUuid]);
 
   const start = async () => {
     if (busy) return;
