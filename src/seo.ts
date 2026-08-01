@@ -71,7 +71,7 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
 
 const PRIVATE_TITLES: Partial<Record<Screen, string>> = {
   [Screen.MODELS]: "Furball3D Model Builder",
-  [Screen.ANIMATOR]: "Video Creator & 3D Animator",
+  [Screen.ANIMATOR]: "Fur Reels - AI Pet Videos",
   [Screen.PAWLISHER]: "Fido's Styles",
   [Screen.FURBIN]: "Fur Bin",
   [Screen.ALBUMS]: "My Albums",

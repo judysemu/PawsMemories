@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Download, Film, Mic2, Play, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
+import { Download, Film, ImagePlus, Mic2, Play, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
 import { Creation, UserProfile } from "../types";
-import { createVideo, createVoicePreview, pollJob } from "../api";
+import { addUserPhoto, createVideo, createVoicePreview, pollJob } from "../api";
 import { AI_VIDEO_SCRIPTS, DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "../aiVideoScripts";
 import { CREDIT_PRICES } from "../pricing";
 
@@ -30,10 +30,32 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const [error, setError] = useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [voiceAudio, setVoiceAudio] = useState<string | null>(null);
+  const [uploadMessage, setUploadMessage] = useState("");
 
   const cost = CREDIT_PRICES.ANIMATED_VIDEO;
   const canAfford = userProfile.isAdmin || (userProfile.credits ?? 0) >= cost;
   const selected = images.find((creation) => creation.id === selectedId) || null;
+
+  const uploadAnotherPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setUploadMessage("");
+    if (!/^image\/(?:png|jpe?g|webp)$/i.test(file.type) || file.size > 20 * 1024 * 1024) {
+      setUploadMessage("Choose a PNG, JPEG, or WebP photo smaller than 20 MB.");
+      return;
+    }
+    try {
+      const image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("The photo could not be read."));
+        reader.readAsDataURL(file);
+      });
+      await addUserPhoto(image);
+      setUploadMessage("Photo saved to your account. Create a portrait from it, then it will appear here for animation.");
+    } catch (caught: any) {
+      setUploadMessage(caught?.message || "The photo could not be uploaded.");
+    }
+  };
 
   const selectTemplate = (templateId: string) => {
     const template = AI_VIDEO_SCRIPTS.find((candidate) => candidate.id === templateId) || DEFAULT_AI_VIDEO_SCRIPT;
@@ -105,11 +127,11 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   );
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 animate-fade-in" aria-labelledby="ai-video-title">
+    <main className="mx-auto w-full max-w-[1500px] px-4 pb-28 pt-4 animate-fade-in lg:h-[calc(100dvh-5rem)] lg:overflow-hidden" aria-labelledby="ai-video-title">
       <header className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3"><Film size={23} className="text-primary" /><h1 id="ai-video-title" className="text-2xl font-black text-on-surface">8-Second AI Video Studio</h1></div>
-          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">Choose a scene, direct every beat, lighting, camera, and sound, then let AI animate your pet. This is guided video generation—not a manual animator tool. <strong>{cost} PupCoins</strong> per video.</p>
+          <div className="flex items-center gap-3"><Film size={23} className="text-primary" /><h1 id="ai-video-title" className="text-2xl font-black text-on-surface">Fur Reels</h1></div>
+          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">This guided video generation studio directs an eight-second AI video with your pet, including motion, lighting, camera, native sound, and an optional short voice line. <strong>{cost} PupCoins</strong> per reel.</p>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
       </header>
@@ -131,21 +153,33 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
           <p className="text-xs">The job is registered, so it continues safely if you leave this page.</p>
         </section>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,.9fr)]">
-          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-6">
+        <div className="grid gap-4 lg:h-[calc(100%-5.5rem)] lg:grid-cols-[minmax(220px,.72fr)_minmax(0,1.35fr)_minmax(280px,.9fr)]">
+          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 lg:overflow-y-auto">
             <div>
-              <h2 className="text-sm font-black text-on-surface">1. Choose your pet image</h2>
+              <h2 className="text-sm font-black text-on-surface">Your uploads</h2>
+              <p className="mt-1 text-xs text-on-surface-variant">Choose the portrait you want to bring to life.</p>
               {images.length === 0 ? <p className="mt-3 rounded-xl border border-outline-variant/40 p-5 text-sm text-on-surface-variant">Create a pet portrait first, then return here to animate it.</p> : (
-                <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4">{images.map((creation) => (
-                  <button key={creation.id} type="button" onClick={() => setSelectedId(creation.id)} className={`relative aspect-square overflow-hidden rounded-xl border-2 ${selectedId === creation.id ? "border-primary ring-2 ring-primary/30" : "border-transparent"}`}>
+                <div className="mt-3 grid grid-cols-2 gap-2.5">{images.map((creation) => (
+                  <button key={creation.id} type="button" onClick={() => setSelectedId(creation.id)} className={`relative overflow-hidden rounded-xl border-2 text-left ${selectedId === creation.id ? "border-primary ring-2 ring-primary/30" : "border-transparent"}`}>
                     <img src={creation.image_url as string} alt={creation.name || creation.place_label || "Creation"} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    <span className="block truncate bg-surface px-2 py-1.5 text-[10px] font-bold text-on-surface">{creation.name || creation.place_label || "Pet portrait"}</span>
                   </button>
                 ))}</div>
               )}
+              <input id="fur-reels-upload" type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { void uploadAnotherPhoto(event.target.files?.[0]); event.target.value = ""; }} />
+              <button type="button" onClick={() => document.getElementById("fur-reels-upload")?.click()} className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/35 px-3 text-sm font-black text-primary"><ImagePlus size={16} /> Upload another photo</button>
+              {uploadMessage && <p className="mt-2 text-xs leading-relaxed text-on-surface-variant" role="status">{uploadMessage}</p>}
             </div>
+          </section>
 
+          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-6 lg:overflow-y-auto">
+            <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
+              <h2 className="text-sm font-black text-on-surface">What works best</h2>
+              <ul className="mt-2 space-y-1 text-xs leading-relaxed text-on-surface-variant"><li>• One main pet and one clear action</li><li>• Four simple two-second beats</li><li>• Slow movement and one smooth camera move</li><li>• Consistent setting, lighting, and pet identity</li></ul>
+              <p className="mt-2 text-xs font-bold text-primary">Avoid rapid cuts, crowds, costume changes, collisions, tiny props, and complex choreography.</p>
+            </div>
             <div>
-              <label htmlFor="ai-video-template" className="text-sm font-black text-on-surface">2. Choose an 8-second story</label>
+              <label htmlFor="ai-video-template" className="text-sm font-black text-on-surface">Choose an 8-second story</label>
               <select id="ai-video-template" value={script.id} onChange={(event) => selectTemplate(event.target.value)} className="mt-2 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-3 text-sm text-on-surface">
                 {AI_VIDEO_SCRIPTS.map((template) => <option key={template.id} value={template.id}>{template.title} · {template.genre}</option>)}
               </select>
@@ -167,7 +201,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
             </div>
           </section>
 
-          <aside className="space-y-5">
+          <aside className="space-y-5 lg:overflow-y-auto lg:pr-1">
             <section className="rounded-3xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
               <div className="flex items-center gap-2"><Mic2 size={18} className="text-primary" /><h2 className="text-sm font-black text-on-surface">3. Add sound and a short voice line</h2></div>
               <p className="mt-2 text-xs text-on-surface-variant">The finished video includes native scene sound. Add one optional spoken line; preview it here with the configured Pawsome3D voice service.</p>
@@ -186,6 +220,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
                 <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
               </div>
               <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Exactly 8 seconds · four directed beats · native sound · identity protection</div>
+              <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">Your finished Fur Reels are saved to your account and appear here when you return.</p>
               {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
               <button type="button" onClick={() => void generate()} disabled={!selected} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 font-extrabold text-on-primary disabled:opacity-50">
                 <Wand2 size={18} /> {canAfford ? `Generate Video · ${cost} PupCoins` : `Get PupCoins (${cost})`}

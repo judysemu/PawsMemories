@@ -19,7 +19,7 @@ test("the create-video route forwards the normalized selection instead of a squa
   const end = serverSource.indexOf('app.post("/api/create-talking-video"', start);
   const route = serverSource.slice(start, end);
   assert.match(route, /normalizeVideoAspectRatio\(req\.body\?\.aspectRatio\)/);
-  assert.match(route, /config: \{ aspectRatio \}/);
+  assert.match(route, /config: \{ aspectRatio, durationSeconds: 8, numberOfVideos: 1 \}/);
   assert.doesNotMatch(route, /aspectRatio:\s*["']1:1["']/);
 });
 

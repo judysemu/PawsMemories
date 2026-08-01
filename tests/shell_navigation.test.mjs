@@ -12,13 +12,13 @@ test("top panel exposes Create, Voice Test, Pawprints, and the staged 3D Model s
   ]);
 });
 
-test("desktop sidebar keeps creation studios out of the global shell", () => {
-  // Pawprints is intentionally available here as the requested left-panel tab.
+test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () => {
   // WAGS_INBOX is a content destination (like Fur Bin), not a creation studio.
   assert.deepEqual(SIDEBAR_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.FURBIN,
     Screen.PAWPRINTS,
+    Screen.ANIMATOR,
     Screen.WAGS_INBOX,
   ]);
   // MOBILE_NAV is NOT "sidebar + Profile". Profile and Voice Test both have a
@@ -57,7 +57,7 @@ test("mobile bottom bar fits its grid alongside the Help button", () => {
 test("RD-1: no shell entry routes to a gated (UnderConstructionLock) screen", () => {
   // PAWLISHER removed from this set: Fido's Styles is unlocked (Phase 6) and
   // renders the real workspace, so a shell entry to it would no longer dead-end.
-  const gated = new Set([Screen.MODELS, Screen.ANIMATOR]);
+  const gated = new Set([Screen.MODELS]);
   for (const panel of [TOP_PRIMARY_NAV, SIDEBAR_NAV, MOBILE_NAV]) {
     assert.ok(!panel.some(({ screen }) => gated.has(screen)), "shell navigation must not dead-end into a lock screen");
   }

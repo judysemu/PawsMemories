@@ -20,9 +20,7 @@ test("Scene controller wrapper is memoized so initial asset loading cannot loop"
   assert.match(source, /const wrappedController = useMemo/);
 });
 
-test("Animator and Video Creator source code is preserved (not deleted)", () => {
-  // The component source files must remain intact even though they are gated
-  // behind UnderConstructionLock in App.tsx.
+test("Animator source is preserved while Fur Reels remains the customer generator", () => {
   const builder = fs.readFileSync("src/animator/components/AnimatorScreen.tsx", "utf8");
   const videoCreator = fs.readFileSync("src/components/AnimationStudio.tsx", "utf8");
   assert.match(builder, /3D Animation Builder/);
@@ -30,20 +28,16 @@ test("Animator and Video Creator source code is preserved (not deleted)", () => 
   assert.match(builder, /workspaceTool/);
   assert.match(builder, /MousePointer2[\s\S]*Move3D[\s\S]*Bone/);
   assert.match(builder, /onOpenVideoCreator/);
-  assert.match(videoCreator, /Video Creator/);
-  assert.match(videoCreator, /Open 3D Animation Builder/);
+  assert.match(videoCreator, /Fur Reels/);
+  assert.match(videoCreator, /guided video generation/i);
 });
 
-test("Animator is customer-gated while administrators can exercise the release candidate", () => {
+test("Fur Reels is customer-routable without exposing the manual Animator", () => {
   const app = fs.readFileSync("src/App.tsx", "utf8");
-  // Animator mode state and openAnimationStudio helper are retained
-  assert.match(app, /useState<"simple" \| "pro">\("simple"\)/);
-  assert.match(app, /const openAnimationStudio = \(\) => \{[\s\S]*setAnimatorMode\("simple"\)/);
+  assert.match(app, /const openAnimationStudio = \(\) => \{/);
   const animatorBlock = app.match(/currentScreen === Screen\.ANIMATOR[\s\S]*?Safety net/)?.[0] || "";
-  assert.match(animatorBlock, /userProfile\.isAdmin/);
-  assert.match(animatorBlock, /<AnimatorScreen[\s\S]*?\/>/);
-  assert.match(animatorBlock, /<UnderConstructionLock/);
-  assert.match(app, /featureName="Animation Studio"/);
+  assert.match(animatorBlock, /<AnimationStudio/);
+  assert.doesNotMatch(animatorBlock, /AnimatorScreen|UnderConstructionLock|userProfile\.isAdmin/);
   // Phase 6: Fido's Styles is UNLOCKED — PAWLISHER renders the real workspace.
   assert.match(app, /currentScreen === Screen\.PAWLISHER[\s\S]{0,400}FidosStylesScreen/);
   assert.doesNotMatch(app, /featureName="Fido's Styles"/,
