@@ -2,6 +2,7 @@ import React from "react";
 import { ArrowRight, Camera, Palette, ShieldCheck, Printer, Sparkles, Star, Heart, Gift, Dog, PawPrint } from "lucide-react";
 import { UserProfile } from "../types";
 import HeroScroller from "./HeroScroller";
+import FamousPortraits from "./FamousPortraits";
 
 interface HomePageProps {
   userProfile: UserProfile;
@@ -11,47 +12,6 @@ interface HomePageProps {
   onOpenFurball: () => void;
   onOpenFidos: () => void;
 }
-
-/* Featured showcase — local studio photography served from public/featured-models.
-   Previously four hotlinked lh3.googleusercontent.com URLs, which put a
-   third-party CDN on the critical path of the homepage above the fold.
-   Sources are center-cropped to 4:5 and encoded as WebP (~14-32 KB each,
-   down from ~4.6 MB of source PNG/JPEG). A matching .jpg sits alongside
-   each .webp on disk as a fallback asset. */
-const FEATURED_MODELS = [
-  {
-    name: "Chihuahua Classic",
-    breed: "Chihuahua",
-    style: "Realistic",
-    size: '4" tall',
-    price: "Example design",
-    image: "/featured-models/chihuahua.webp",
-  },
-  {
-    name: "Tuxedo Charmer",
-    breed: "Boston Terrier",
-    style: "Realistic",
-    size: '5" tall',
-    price: "Example design",
-    image: "/featured-models/boston-terrier.webp",
-  },
-  {
-    name: "Tuck",
-    breed: "Labradoodle",
-    style: "Realistic",
-    size: '6" tall',
-    price: "Example design",
-    image: "/featured-models/tuck.webp",
-  },
-  {
-    name: "Snow Shiba",
-    breed: "Shiba Inu",
-    style: "Realistic",
-    size: '5" tall',
-    price: "Example design",
-    image: "/featured-models/shiba-inu.webp",
-  },
-];
 
 const HOW_IT_WORKS = [
   { step: 1, title: "Upload", desc: "Share a photo of your pet and tell us a bit about them.", icon: Camera },
@@ -176,49 +136,7 @@ export default function HomePage({
         />
       </section>
 
-      {/* ─────────────── FEATURED MODELS ─────────────── */}
-      <section className="mt-14 px-4 sm:px-6">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-6 flex items-center gap-2">
-            <Star size={18} className="text-primary" />
-            <h2 className="text-xs font-black uppercase tracking-[.18em] text-primary">Featured Models</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {FEATURED_MODELS.map((model) => (
-              <article
-                key={model.name}
-                className="glass-showcase group cursor-pointer overflow-hidden rounded-[1.6rem]"
-                onClick={onOpenCreate}
-              >
-                <div className="relative aspect-[4/5] overflow-hidden">
-                  <img
-                    src={model.image}
-                    alt={`${model.name} — ${model.breed} 3D model`}
-                    width={800}
-                    height={1000}
-                    loading="lazy"
-                    decoding="async"
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 pt-12">
-                    <h3 className="text-sm font-black text-white">{model.name}</h3>
-                    <p className="mt-0.5 text-[11px] text-white/80">{model.breed} · {model.style}</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-4">
-                  <div>
-                    <span className="text-[10px] font-bold text-on-surface-variant">{model.size}</span>
-                    <span className="ml-2 text-xs font-bold text-primary">{model.price}</span>
-                  </div>
-                  <span className="flex items-center gap-1 text-xs font-bold text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                    Customize <ArrowRight size={12} />
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
+      <FamousPortraits onOpenPawprints={onOpenPawprints} />
 
       {/* ─────────────── HOW IT WORKS ─────────────── */}
       <section className="mt-16 px-4 sm:px-6">
