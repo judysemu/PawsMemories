@@ -1,7 +1,7 @@
 # Pawsome3D Pet-Owner Experience Release Design
 
 **Date:** 2026-08-01  
-**Release strategy:** Two production deployments on `main`  
+**Release strategy:** Deployment 2 ships first on `main`; the functional model hotfix follows as Deployment 1
 **Audience:** Pet owners and gift buyers who should not need 3D, animation, or printing expertise
 
 ## Product principle
@@ -17,7 +17,11 @@ The customer journey is:
 5. Find the finished pet in Fur Bin.
 6. Download, animate, or order a keepsake.
 
-## Deployment 1: Functional model hotfix
+## Release order
+
+Implementation begins with **Deployment 2: Famous Portraits, Historic Pawprints, and Fur Reels**. Deployment 1 remains in scope, but it does not delay the customer-facing collection launch.
+
+## Deployment 1: Functional model hotfix (second release)
 
 ### 1. Restore the live model viewer
 
@@ -106,18 +110,18 @@ Email failure does not roll back a completed model. Delivery status is persisted
 
 The customer approves the generated reference images before paid model construction. Generated GLB stages do not pause for private customer review. Validated versions land automatically in Fur Bin, where **How is it? Keep it / Toss it** remains the feedback flow. Toss feedback preserves the model and automatically attaches the user, order, asset, version, provider job, and hash context to the admin message.
 
-## Deployment 2: Famous Portraits, Historic Pawprints, and Fur Reels
+## Deployment 2: Famous Portraits, Historic Pawprints, and Fur Reels (first release)
 
 ### 1. Famous Portraits homepage feature
 
-Replace **Featured Models** with **Famous Portraits** and route every portrait action into the Historic Pawprints experience. The four owned images generated on 2026-07-31 remain the lead collection:
+Replace **Featured Models** with **Famous Portraits** and route every portrait action into the Historic Pawprints experience. The collection opens with clear tabs: **Historic Women**, **Presidents & World Leaders**, **Sports Legends**, **Myth & Holiday**, and **Arts & Adventure**. The four owned images generated on 2026-07-31 remain the lead collection:
 
 - The Composer
 - The Naturalist
 - The Novelist
 - The Lamplight Healer
 
-Expand the owned catalog to fifteen roles with real repository paths, versioned images, dimensions, hashes, provenance, accessible alt text, and availability state:
+Expand the original historical and fantasy collection with real repository paths, versioned images, dimensions, hashes, provenance, accessible alt text, and availability state:
 
 - Joan of Arc
 - Moses
@@ -133,6 +137,65 @@ Expand the owned catalog to fifteen roles with real repository paths, versioned 
 
 Portraits remain unmistakably pets. Religious and cultural figures use respectful composition and customer copy; comedy comes from the pet inhabiting the scene, not from degrading the represented tradition or person.
 
+Add at least eight historical women, exceeding the requested five:
+
+- Harriet Tubman
+- Ada Lovelace
+- Marie Curie
+- Amelia Earhart
+- Frida Kahlo
+- Queen Elizabeth I
+- Sacagawea
+- Sojourner Truth
+
+Add ten former United States presidents or world leaders:
+
+- George Washington
+- Abraham Lincoln
+- Theodore Roosevelt
+- Franklin D. Roosevelt
+- Dwight D. Eisenhower
+- John F. Kennedy
+- Winston Churchill
+- Nelson Mandela
+- Napoleon Bonaparte
+- Queen Victoria
+
+Historical portraits use recognizable periods, roles, settings, and costume language without mocking disability, ethnicity, religion, or culture. Customer copy explains that the result is a playful pet portrait inspired by history, not an authentic historical reproduction.
+
+### Sports Legends collection
+
+Sports Legends are generalized pet-athlete archetypes, not named athlete portraits. Public titles, visible copy, filenames, alt text, generated imagery, and checkout metadata contain no athlete name, team name, league mark, signature, sponsor, or copied uniform design. A pet remains the only recognizable subject.
+
+Where a jersey number is an established part of a uniform-based athlete reference, the number may be retained after source verification. Every wordmark is fictional: for example, a red basketball jersey may read **PURRS** with number **23**, never the original team name. Sports without stable jersey numbers use no invented number.
+
+Launch archetypes are:
+
+- Airborne Alley Cat — red **PURRS** basketball jersey, number 23
+- Ring Champion — boxing robe and gloves, no number
+- Gravity-Defying Gymnast — competition-inspired leotard, no copied federation marks and no number
+- Lightning Sprinter — track kit without national marks or number
+- Championship Quarterback — fictional football uniform, number 12
+- Center-Court Maestro — classic tennis whites, no number
+- Ice Visionary — fictional **ICE PAWS** hockey sweater, number 99
+- Left-Footed Playmaker — fictional football kit, number 10
+- Beautiful-Game Legend — distinct vintage fictional football kit, number 10
+- Medal-Lane Swimmer — swim setting, no number
+- All-Around Champion — early twentieth-century multi-sport styling, no number
+- Vert-Ramp Pioneer — skateboarding scene, no number
+- Flying Snowboarder — halfpipe scene, no number
+- Long-Range Sharpshooter — fictional **PAWS** basketball jersey, number 30
+- No-Look Quarterback — fictional football uniform, number 15
+- Field General — fictional football uniform, number 18
+- Two-Way Showstopper — fictional football uniform, number 21
+- Home-Run Legend — vintage fictional baseball uniform, number 3
+- Two-Way Baseball Phenom — modern fictional baseball uniform, number 17
+- Cool-Under-Pressure Quarterback — fictional football uniform, number 16
+- Golden-Era Strongpet — classic strength-sport setting, no number
+- Power-Serve Champion — tennis setting, no number
+
+The internal catalog records `displayName`, `publicSlug`, `category`, `prompt`, `altText`, `uniformNumber`, `fictionalMark`, `palette`, `inspirationSource`, `numberSource`, `assetPath`, `dimensions`, `sha256`, and `availability`. `inspirationSource` and `numberSource` are private provenance fields; athlete names never leak into customer-facing payloads.
+
 ### 2. Historic Pawprints entry screen
 
 Pawprints no longer begins with a generic upload prompt. It opens with two large choices:
@@ -142,7 +205,7 @@ Pawprints no longer begins with a generic upload prompt. It opens with two large
 
 The existing general digital and Printful browsing options are hidden from this customer path without deleting their backend compatibility.
 
-Digital offers fifteen scripted portrait templates matching the Famous Portraits catalog. Physical offers five launch templates that share the exact print canvas and configured Printful product dimensions:
+Digital exposes the complete approved Famous Portraits launch catalog as scripted templates. Physical offers five launch templates that share the exact print canvas and configured Printful product dimensions:
 
 - The Composer
 - Joan of Arc
@@ -230,6 +293,9 @@ Verification supports release confidence but is not presented as a customer-faci
 - one real textured-model display check;
 - completion-email idempotency evidence;
 - Stripe/Printful route preservation for Historic Pawprints;
+- catalog checks proving every visible portrait has a real versioned asset path, dimensions, hash, alt text, and availability state;
+- sports-content checks proving no athlete, team, league, signature, or sponsor name appears in public payloads or rendered copy;
+- source evidence for every retained sports jersey number and a no-number rule for non-jersey sports;
 - live Fur Reels persistence and return-visit check when provider credits permit.
 
 Any unavailable paid-provider execution is reported separately from deployment readiness and is never disguised as a pass.
