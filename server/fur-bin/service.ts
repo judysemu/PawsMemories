@@ -779,7 +779,7 @@ export class FurBinService {
     const hasFacial = badges.find((badge) => badge.id === "facial")?.state === "verified";
     const hasAnimations = badges.find((badge) => badge.id === "animation")?.state === "verified";
     const [orderRows] = await pool.query(
-      `SELECT order_uuid, reference_manifest_json, include_texture, include_rig
+      `SELECT order_uuid, reference_session_id, reference_manifest_json, include_texture, include_rig
          FROM pet_glb_orders
         WHERE owner_phone = ? AND asset_id = ?
         ORDER BY id DESC LIMIT 1`,
@@ -791,7 +791,28 @@ export class FurBinService {
           ? JSON.parse(sourceOrder.reference_manifest_json || "{}")
           : sourceOrder.reference_manifest_json || {})
       : {};
-    const coverUrl = typeof manifest.frontUrl === "string" ? manifest.frontUrl : undefined;
+    let coverUrl: string | undefined;
+    if (sourceOrder?.reference_session_id) {
+      const [frontRows] = await pool.query(
+        `SELECT rv.asset_version_id
+           FROM reference_sessions rs
+           JOIN reference_views rv
+             ON rv.attempt_id = rs.approved_attempt_id
+            AND rv.view_kind = 'front'
+          WHERE rs.id = ? AND rs.owner_id = ?
+          LIMIT 1`,
+        [sourceOrder.reference_session_id, ownerId],
+      );
+      const frontVersionId = Number((frontRows as any[])[0]?.asset_version_id || 0);
+      if (frontVersionId > 0) {
+        const frontVersion = await findVersionById(pool, frontVersionId);
+        const frontAsset = frontVersion ? await findAssetById(pool, frontVersion.asset_id) : null;
+        if (frontVersion && frontAsset && frontAsset.owner_id === ownerId && frontVersion.asset_id === frontAsset.id) {
+          coverUrl = (await this.signUrl(frontAsset, frontVersion, ownerId, false)) || undefined;
+        }
+      }
+    }
+    coverUrl ||= durableReferenceUrl(manifest.frontUrl);
     const retryPriceCredits = sourceOrder
       ? petGlbTotalCost({ texture: Boolean(sourceOrder.include_texture), rig: Boolean(sourceOrder.include_rig) })
       : undefined;
@@ -838,6 +859,19 @@ export class FurBinService {
       createdAt: new Date(item.created_at).toISOString(),
       updatedAt: new Date(item.updated_at).toISOString(),
     };
+  }
+}
+
+function durableReferenceUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    const isPresigned = url.searchParams.has("X-Amz-Signature")
+      || url.searchParams.has("X-Amz-Credential")
+      || url.searchParams.has("X-Amz-Expires");
+    return isPresigned ? undefined : url.toString();
+  } catch {
+    return undefined;
   }
 }
 
