@@ -1,8 +1,9 @@
 // ─── Phase 5 Feature Flag ───────────────────────────────────────────────────
-// Server-authoritative, default-off. Controls Fur Bin V5 canonical library & showcase.
+// Server-authoritative and on by default. Set false only for an emergency
+// rollback; generated GLBs depend on this canonical private library.
 
 export function isFurBinV5Enabled(): boolean {
-  return process.env.FUR_BIN_V5_ENABLED === "true";
+  return process.env.FUR_BIN_V5_ENABLED !== "false";
 }
 
 export function assertFurBinV5Enabled(): void {

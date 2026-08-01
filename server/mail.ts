@@ -53,6 +53,7 @@ export async function sendMail(payload: MailPayload): Promise<boolean> {
     if (!res.ok) {
       const text = await res.text();
       console.warn(`[mail] Resend returned ${res.status}: ${text}`);
+      return false;
     } else {
       const json = await res.json();
       console.log(`[mail] Sent to ${payload.to}: id=${json.id}`);

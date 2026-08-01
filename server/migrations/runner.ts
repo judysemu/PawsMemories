@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 45;
+export const CURRENT_SCHEMA_VERSION = 46;
 
 export interface Migration {
   version: number;
@@ -2264,6 +2264,53 @@ export const MIGRATIONS: Migration[] = [
         KEY idx_pet_glb_recovery_order (order_id, created_at),
         CONSTRAINT fk_pet_glb_recovery_stage FOREIGN KEY (stage_attempt_id) REFERENCES pet_glb_stage_attempts(id) ON DELETE RESTRICT,
         CONSTRAINT fk_pet_glb_recovery_order FOREIGN KEY (order_id) REFERENCES pet_glb_orders(id) ON DELETE RESTRICT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 46,
+    name: "fur_bin_feedback_and_ai_video_scripts",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS fur_bin_feedback (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        feedback_uuid CHAR(36) NOT NULL,
+        item_id BIGINT NOT NULL,
+        owner_id VARCHAR(190) NOT NULL,
+        asset_id BIGINT NOT NULL,
+        asset_version_id BIGINT NULL,
+        pet_glb_order_uuid CHAR(36) NULL,
+        decision ENUM('keep','toss') NOT NULL,
+        subject VARCHAR(200) NULL,
+        message TEXT NULL,
+        context_json JSON NOT NULL,
+        email_status ENUM('not_required','pending','sent','failed','unconfigured') NOT NULL DEFAULT 'not_required',
+        email_error VARCHAR(500) NULL,
+        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        UNIQUE KEY uniq_fur_bin_feedback_uuid (feedback_uuid),
+        KEY idx_fur_bin_feedback_item (item_id, created_at),
+        KEY idx_fur_bin_feedback_owner (owner_id, created_at),
+        KEY idx_fur_bin_feedback_email (email_status, created_at),
+        CONSTRAINT fk_fur_bin_feedback_item FOREIGN KEY (item_id) REFERENCES fur_bin_items(id) ON DELETE RESTRICT,
+        CONSTRAINT fk_fur_bin_feedback_asset FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE RESTRICT,
+        CONSTRAINT fk_fur_bin_feedback_version FOREIGN KEY (asset_version_id) REFERENCES asset_versions(id) ON DELETE RESTRICT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS ai_video_requests (
+        job_id INT NOT NULL PRIMARY KEY,
+        template_id VARCHAR(80) NULL,
+        script_json JSON NOT NULL,
+        compiled_prompt TEXT NOT NULL,
+        duration_seconds TINYINT UNSIGNED NOT NULL DEFAULT 8,
+        aspect_ratio ENUM('16:9','9:16') NOT NULL DEFAULT '9:16',
+        generate_audio BOOLEAN NOT NULL DEFAULT TRUE,
+        voice_text VARCHAR(280) NULL,
+        voice_id VARCHAR(128) NULL,
+        provider VARCHAR(32) NOT NULL DEFAULT 'veo',
+        provider_model VARCHAR(120) NOT NULL,
+        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        KEY idx_ai_video_provider (provider, created_at),
+        CONSTRAINT fk_ai_video_job FOREIGN KEY (job_id) REFERENCES generation_jobs(id) ON DELETE RESTRICT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },

@@ -8,6 +8,7 @@ import { FurBinService, FurBinError } from "./service";
 import {
   SearchFurBinRequestSchema,
   RegisterFurBinItemRequestSchema,
+  SubmitFurBinFeedbackRequestSchema,
   CreateCollectionRequestSchema,
   AddCollectionItemRequestSchema,
   PublishShowcaseRequestSchema,
@@ -115,6 +116,16 @@ export function createFurBinRouter(
     try {
       const item = await service.getItemPublic(ownerId(req), req.params.uuid);
       res.json(item);
+    } catch (err: any) {
+      handleError(res, err);
+    }
+  });
+
+  router.post("/items/:uuid/feedback", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const body = SubmitFurBinFeedbackRequestSchema.parse(req.body);
+      const result = await service.submitFeedback(ownerId(req), req.params.uuid, body);
+      res.status(body.decision === "toss" && !result.emailSent ? 202 : 201).json(result);
     } catch (err: any) {
       handleError(res, err);
     }

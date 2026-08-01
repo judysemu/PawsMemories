@@ -45,6 +45,8 @@ import {
   findVersionByAssetAndNumber,
 } from "../assets/repository";
 import { generateSignedUrlForVersion } from "../assets/access";
+import { sendMail } from "../mail";
+import type { SubmitFurBinFeedbackRequest } from "./schemas";
 
 export class FurBinError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -130,6 +132,133 @@ export class FurBinService {
     } finally {
       conn.release();
     }
+  }
+
+  async submitFeedback(
+    ownerId: string,
+    itemUuid: string,
+    input: SubmitFurBinFeedbackRequest,
+  ): Promise<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }> {
+    assertFurBinV5Enabled();
+    const pool = this.getPoolFn();
+    const conn = await pool.getConnection();
+    const feedbackUuid = crypto.randomUUID();
+    let feedbackId = 0;
+    let context: Record<string, unknown> = {};
+    try {
+      await conn.beginTransaction();
+      const item = await findFurBinItemByUuidForUpdate(conn, itemUuid);
+      if (!item) throw new FurBinError("Fur Bin item not found", "NOT_FOUND");
+      if (item.owner_id !== ownerId) throw new FurBinError("Not authorized", "FORBIDDEN");
+      const [assetRows] = await conn.query(
+        `SELECT a.asset_uuid, a.asset_type, av.version_number, av.sha256,
+                av.mime_type, av.size_bytes
+           FROM assets a
+           LEFT JOIN asset_versions av ON av.id = ? AND av.asset_id = a.id
+          WHERE a.id = ? LIMIT 1`,
+        [item.current_version_id, item.asset_id],
+      );
+      const asset = (assetRows as any[])[0] || {};
+      const [userRows] = await conn.query(
+        "SELECT phone, email, full_name, city FROM users WHERE phone = ? LIMIT 1",
+        [ownerId],
+      );
+      const user = (userRows as any[])[0] || { phone: ownerId };
+      const [orderRows] = await conn.query(
+        `SELECT order_uuid, state, current_stage, generation_job_id, created_at
+           FROM pet_glb_orders WHERE owner_phone = ? AND asset_id = ?
+          ORDER BY id DESC LIMIT 1`,
+        [ownerId, item.asset_id],
+      );
+      const order = (orderRows as any[])[0] || null;
+      context = {
+        user: {
+          phone: String(user.phone || ownerId),
+          email: user.email || null,
+          fullName: user.full_name || null,
+          city: user.city || null,
+        },
+        furBin: { itemUuid, itemTitle: item.title, itemStatus: item.status },
+        asset: {
+          assetUuid: asset.asset_uuid || null,
+          assetType: asset.asset_type || null,
+          versionNumber: asset.version_number ? Number(asset.version_number) : null,
+          sha256: asset.sha256 || null,
+          mimeType: asset.mime_type || null,
+          sizeBytes: asset.size_bytes ? Number(asset.size_bytes) : null,
+        },
+        order: order ? {
+          orderUuid: order.order_uuid,
+          state: order.state,
+          currentStage: order.current_stage,
+          generationJobId: order.generation_job_id,
+          createdAt: order.created_at,
+        } : null,
+      };
+      const emailStatus = input.decision === "toss" ? "pending" : "not_required";
+      const [insert] = await conn.query(
+        `INSERT INTO fur_bin_feedback
+           (feedback_uuid, item_id, owner_id, asset_id, asset_version_id,
+            pet_glb_order_uuid, decision, subject, message, context_json, email_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          feedbackUuid,
+          item.id,
+          ownerId,
+          item.asset_id,
+          item.current_version_id,
+          order?.order_uuid || null,
+          input.decision,
+          input.decision === "toss" ? input.subject : null,
+          input.decision === "toss" ? input.message : null,
+          JSON.stringify(context),
+          emailStatus,
+        ],
+      );
+      feedbackId = Number((insert as any).insertId);
+      await conn.commit();
+    } catch (error: any) {
+      await conn.rollback().catch(() => {});
+      if (error instanceof FurBinError) throw error;
+      throw new FurBinError(`Could not save model feedback: ${error.message}`, "FEEDBACK_FAILED");
+    } finally {
+      conn.release();
+    }
+
+    if (input.decision === "keep") {
+      return { decision: input.decision, emailSent: false, feedbackUuid };
+    }
+
+    const adminEmail = process.env.MODEL_FEEDBACK_EMAIL || process.env.ADMIN_EMAIL || "rob@stelar.host";
+    const safe = (value: unknown) => escapeHtml(String(value ?? "Not provided"));
+    const user = context.user as Record<string, unknown>;
+    const asset = context.asset as Record<string, unknown>;
+    const order = context.order as Record<string, unknown> | null;
+    const emailSent = await sendMail({
+      to: adminEmail,
+      subject: `[Pawsome3D model feedback] ${input.subject}`,
+      replyTo: typeof user.email === "string" ? user.email : undefined,
+      html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.55">
+<h2>Customer tossed a generated GLB</h2>
+<p><strong>Subject:</strong> ${safe(input.subject)}</p>
+<p><strong>Message:</strong><br>${escapeHtml(input.message).replace(/\n/g, "<br>")}</p>
+<h3>Customer</h3>
+<ul><li>Name: ${safe(user.fullName)}</li><li>Email: ${safe(user.email)}</li><li>Phone: ${safe(user.phone)}</li><li>City: ${safe(user.city)}</li></ul>
+<h3>Asset and order</h3>
+<ul><li>Fur Bin item: ${safe(itemUuid)}</li><li>Asset: ${safe(asset.assetUuid)}</li><li>Version: ${safe(asset.versionNumber)}</li><li>SHA-256: ${safe(asset.sha256)}</li><li>Order: ${safe(order?.orderUuid)}</li><li>Order state: ${safe(order?.state)}</li><li>Provider job: ${safe(order?.generationJobId)}</li><li>Feedback record: ${safe(feedbackUuid)}</li></ul>
+</div>`,
+    });
+    await pool.query(
+      `UPDATE fur_bin_feedback
+          SET email_status = ?, email_error = ?
+        WHERE id = ?`,
+      [
+        emailSent ? "sent" : (process.env.RESEND_API_KEY && process.env.MAIL_FROM ? "failed" : "unconfigured"),
+        emailSent ? null : "Admin email was not accepted by the configured mail service",
+        feedbackId,
+      ],
+    );
+    return { decision: input.decision, emailSent, feedbackUuid };
   }
 
   // ── 2. Search & View Private Library ──────────────────────────────────────
@@ -634,6 +763,11 @@ export class FurBinService {
     const hasRig = badges.find((badge) => badge.id === "rig")?.state === "verified";
     const hasFacial = badges.find((badge) => badge.id === "facial")?.state === "verified";
     const hasAnimations = badges.find((badge) => badge.id === "animation")?.state === "verified";
+    const [feedbackRows] = await pool.query(
+      "SELECT decision FROM fur_bin_feedback WHERE item_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1",
+      [item.id, ownerId],
+    );
+    const feedbackDecision = (feedbackRows as any[])[0]?.decision as "keep" | "toss" | undefined;
 
     return {
       itemUuid: item.item_uuid,
@@ -670,10 +804,21 @@ export class FurBinService {
       })),
       showcase,
       signedViewUrl,
+      feedbackDecision,
       createdAt: new Date(item.created_at).toISOString(),
       updatedAt: new Date(item.updated_at).toISOString(),
     };
   }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[character] || character);
 }
 
 function buildMeasuredBadges(evidence: any | null): MeasuredBadgePublic[] {

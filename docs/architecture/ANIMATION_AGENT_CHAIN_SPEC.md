@@ -1,6 +1,10 @@
 # Interactive 3D modeler + idle/walk animation for the paid pet GLB
 
-Status: **DRAFT.** Direction locked with owner 2026-07-27.
+Status: **IMPLEMENTED CUSTOMER PATH UPDATED 2026-07-31.** The shipped customer
+surface is the guided 8-second AI Video Studio. The manual Three.js timeline
+workspace remains internal source tooling and is not exposed as the customer
+Animator product. Generated Pet GLB stages auto-deliver to Fur Bin after the
+single reference-set approval; Keep/Toss feedback replaces private GLB review.
 
 **v1 animation path — Tripo-native (NOT the Blender chain).** Tripo already does
 quadruped auto-rig + preset animation, and the client code exists: `startRig`
@@ -14,8 +18,8 @@ quality upgrade, not v1.
 
 **Product shape — one unified 3D modeler.** The UI presents a single 3D modeler
 (Tripo/Meshy-style studio). The customer buys the GLB either:
-- **Step by step** — Tripo's pipeline is exposed as user-gated stages; the build
-  pauses after each and the customer selects the next move.
+- **Tracked automatic stages** — after reference approval, Tripo stages advance
+  durably without additional customer or operator release stops.
 - **"Do it for me"** — the full pipeline runs automatically to a rigged +
   idle/walk-animated GLB.
 

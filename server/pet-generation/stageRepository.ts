@@ -619,6 +619,13 @@ export class PetGlbStageRepository {
           throw new PetGenerationError("STALE_STAGE", "Completed stage is no longer current");
         }
       }
+      await this.upsertFurBinItem(conn, {
+        orderId: input.orderId,
+        assetId: input.assetId,
+        assetVersionId: input.assetVersionId,
+        stage: input.stage,
+        artifactSha256: input.artifactSha256,
+      });
       await conn.commit();
     } catch (error) {
       await conn.rollback().catch(() => {});
@@ -722,6 +729,13 @@ export class PetGlbStageRepository {
       if ((orderResult as any).affectedRows !== 1) {
         throw new PetGenerationError("STALE_STAGE", "Recovered stage is no longer current");
       }
+      await this.upsertFurBinItem(conn, {
+        orderId,
+        assetId: attempt.assetId,
+        assetVersionId: attempt.assetVersionId,
+        stage: attempt.stage,
+        artifactSha256: attempt.artifactSha256,
+      });
       await conn.commit();
     } catch (error) {
       await conn.rollback().catch(() => {});
@@ -773,6 +787,128 @@ export class PetGlbStageRepository {
       conn.release();
     }
     return (await this.findById(attemptId))!;
+  }
+
+  /**
+   * Advance a validated GLB stage after the customer has approved the reference
+   * set. Generated model stages no longer pause for private customer review.
+   * Each selected paid stage still uses a deterministic wallet ledger key.
+   */
+  async autoAdvanceCompletedStage(input: {
+    orderId: number;
+    ownerPhone: string;
+    attemptId: number;
+    nextStage: Exclude<PetGlbStageKind, "reference"> | null;
+    nextInputHash: string | null;
+    nextPriceCredits: number;
+  }): Promise<{ current: PetGlbStageAttempt; next: PetGlbStageAttempt | null }> {
+    const conn = await this.getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+      const order = await this.lockOrder(conn, input.orderId, input.ownerPhone);
+      const current = await this.currentWithConnection(conn, input.orderId, true);
+      if (!current || current.id !== input.attemptId) {
+        throw new PetGenerationError("STALE_STAGE", "Completed stage is no longer current");
+      }
+      if (current.state !== "awaiting_customer_approval" || current.stage === "reference") {
+        throw new PetGenerationError("STAGE_NOT_ADVANCEABLE", "Completed GLB stage is not ready to advance");
+      }
+      if (!current.artifactSha256) {
+        throw new PetGenerationError("NO_FINAL_ASSET", "Completed GLB evidence is incomplete");
+      }
+      if (current.stage !== "rig_check" && (!current.assetId || !current.assetVersionId)) {
+        throw new PetGenerationError("NO_FINAL_ASSET", "Completed GLB asset evidence is incomplete");
+      }
+      if (current.stage === "rig_check" && !current.capabilityReport?.riggable) {
+        throw new PetGenerationError("RIG_NOT_SUPPORTED", "Provider pre-rig check did not confirm this model is riggable");
+      }
+      if (current.stage !== "rig_check" && current.validationReport && !current.validationReport.operatorReady) {
+        throw new PetGenerationError("VALIDATION_BLOCKED", "Stage validation did not pass");
+      }
+
+      const approvalKey = `auto:${current.attemptUuid}`;
+      const [approvedResult] = await conn.query(
+        `UPDATE pet_glb_stage_attempts
+            SET state = 'approved', approval_idempotency_key = ?, approval_hash = ?,
+                approved_by = 'system:auto-delivery', approved_at = NOW(3), updated_at = NOW(3)
+          WHERE id = ? AND state = 'awaiting_customer_approval'`,
+        [approvalKey, current.artifactSha256, current.id],
+      );
+      if ((approvedResult as any).affectedRows !== 1) {
+        throw new PetGenerationError("CONCURRENT_TRANSITION", "Automatic stage advance lost a race");
+      }
+
+      if (!input.nextStage) {
+        if (!current.assetVersionId) {
+          throw new PetGenerationError("NO_FINAL_ASSET", "A capability stage cannot be delivered");
+        }
+        const [deliveryResult] = await conn.query(
+          `UPDATE pet_glb_orders
+              SET state = 'delivered', approved_version_id = ?, final_customer_version_id = ?,
+                  delivered_at = COALESCE(delivered_at, NOW(3)), updated_at = NOW(3)
+            WHERE id = ? AND current_stage_attempt_id = ?`,
+          [current.assetVersionId, current.assetVersionId, input.orderId, current.id],
+        );
+        if ((deliveryResult as any).affectedRows !== 1) {
+          throw new PetGenerationError("STALE_STAGE", "Final GLB is no longer current");
+        }
+        await conn.query(
+          `INSERT INTO pet_glb_order_events
+             (order_id, from_state, to_state, actor_type, actor_id, reason)
+           VALUES (?, ?, 'delivered', 'system', 'auto-delivery', ?)`,
+          [input.orderId, order.state, `${current.stage}_validated_to_fur_bin`],
+        );
+        await conn.commit();
+        return { current: { ...current, state: "approved", approvedAt: new Date() }, next: null };
+      }
+
+      if (!input.nextInputHash) {
+        throw new PetGenerationError("NEXT_INPUT_HASH_REQUIRED", "Next stage input hash is missing");
+      }
+      const chargeKey = input.nextPriceCredits > 0
+        ? `pet_glb:${order.order_uuid}:${input.nextStage}:auto:${current.attemptUuid}`
+        : null;
+      if (input.nextPriceCredits > 0) {
+        await this.chargeWallet(
+          conn,
+          input.ownerPhone,
+          input.nextPriceCredits,
+          chargeKey!,
+          `pet_glb_${input.nextStage}`,
+        );
+      }
+      const next = await this.insertAttempt(conn, {
+        orderId: input.orderId,
+        stage: input.nextStage,
+        state: "queued",
+        inputHash: input.nextInputHash,
+        sourceAttemptId: current.id,
+        priceCredits: input.nextPriceCredits,
+        creditsDisposition: input.nextPriceCredits > 0 ? "charged" : "none",
+        chargeIdempotencyKey: chargeKey,
+      });
+      const toState = ORDER_STATE_FOR_QUEUE[input.nextStage];
+      await conn.query(
+        `UPDATE pet_glb_orders
+            SET current_stage = ?, current_stage_attempt_id = ?, state = ?,
+                credits_reserved = credits_reserved + ?, updated_at = NOW(3)
+          WHERE id = ?`,
+        [input.nextStage, next.id, toState, input.nextPriceCredits, input.orderId],
+      );
+      await conn.query(
+        `INSERT INTO pet_glb_order_events
+           (order_id, from_state, to_state, actor_type, actor_id, reason)
+         VALUES (?, ?, ?, 'system', 'auto-pipeline', ?)`,
+        [input.orderId, order.state, toState, `${current.stage}_validated_start_${input.nextStage}`],
+      );
+      await conn.commit();
+      return { current: { ...current, state: "approved", approvedAt: new Date() }, next };
+    } catch (error) {
+      await conn.rollback().catch(() => {});
+      throw error;
+    } finally {
+      conn.release();
+    }
   }
 
   async rejectCurrent(
@@ -1123,6 +1259,82 @@ export class PetGlbStageRepository {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+  }
+
+  /**
+   * Register or advance the owner's private Fur Bin item inside the same
+   * transaction that finalizes a persisted GLB stage. A later request, email,
+   * or release-review action is not required for assignment.
+   */
+  private async upsertFurBinItem(
+    conn: mysql.PoolConnection,
+    input: {
+      orderId: number;
+      assetId: number;
+      assetVersionId: number;
+      stage: PetGlbModelStageKind;
+      artifactSha256: string;
+    },
+  ): Promise<void> {
+    const [orderRows] = await conn.query(
+      "SELECT order_uuid, owner_phone FROM pet_glb_orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      [input.orderId],
+    );
+    const order = (orderRows as any[])[0];
+    if (!order) {
+      throw new PetGenerationError("ORDER_NOT_FOUND", "Order not found while assigning Fur Bin item");
+    }
+    const [existingRows] = await conn.query(
+      "SELECT id, current_version_id, status FROM fur_bin_items WHERE owner_id = ? AND asset_id = ? LIMIT 1 FOR UPDATE",
+      [order.owner_phone, input.assetId],
+    );
+    const existing = (existingRows as any[])[0];
+    const title = `3D pet model ${String(order.order_uuid).slice(0, 8)}`;
+    await conn.query(
+      `INSERT INTO fur_bin_items
+         (item_uuid, owner_id, asset_id, current_version_id, title, description,
+          tags_json, has_rig, has_animations, storage_bytes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+         (SELECT COALESCE(SUM(size_bytes), 0) FROM asset_versions WHERE asset_id = ?), 'active')
+       ON DUPLICATE KEY UPDATE
+         current_version_id = VALUES(current_version_id),
+         title = VALUES(title), description = VALUES(description), tags_json = VALUES(tags_json),
+         has_rig = GREATEST(has_rig, VALUES(has_rig)),
+         has_animations = GREATEST(has_animations, VALUES(has_animations)),
+         storage_bytes = VALUES(storage_bytes), status = 'active', updated_at = NOW(3)`,
+      [
+        crypto.randomUUID(),
+        order.owner_phone,
+        input.assetId,
+        input.assetVersionId,
+        title,
+        "Generated GLB versions are saved automatically. Keep it or send feedback from Fur Bin.",
+        JSON.stringify(["pet-glb", input.stage, "generated"]),
+        input.stage === "rig" ? 1 : 0,
+        input.stage === "rig" ? 1 : 0,
+        input.assetId,
+      ],
+    );
+    if (!existing || Number(existing.current_version_id) !== input.assetVersionId || existing.status !== "active") {
+      const [itemRows] = await conn.query(
+        "SELECT id FROM fur_bin_items WHERE owner_id = ? AND asset_id = ? LIMIT 1",
+        [order.owner_phone, input.assetId],
+      );
+      const itemId = Number((itemRows as any[])[0]?.id || 0);
+      if (!itemId) {
+        throw new PetGenerationError("FUR_BIN_ASSIGNMENT_FAILED", "Fur Bin item was not persisted");
+      }
+      const eventType = existing ? "current_changed" : "registered";
+      const evidenceHash = crypto.createHash("sha256")
+        .update(`${order.order_uuid}:${input.stage}:${input.assetVersionId}:${input.artifactSha256}`)
+        .digest("hex");
+      await conn.query(
+        `INSERT INTO fur_bin_version_events
+           (event_uuid, item_id, actor_id, event_type, from_version_id, to_version_id, evidence_hash)
+         VALUES (?, ?, 'system:auto-delivery', ?, ?, ?, ?)`,
+        [crypto.randomUUID(), itemId, eventType, existing?.current_version_id || null, input.assetVersionId, evidenceHash],
+      );
+    }
   }
 
   private async currentWithConnection(

@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { z } from "zod";
 import { PET_GLB_STAGE_PRICES, petGlbTotalCost } from "../../src/pricing";
-import { globalDailyCapFor, globalDailyCostMicroUsdFor, isEndpointEnabled } from "../paidApiGuards";
 import type {
   MeshProfile,
   PetGlbOrderConfiguration,
@@ -137,16 +136,16 @@ export const FACIAL_RIG_POLICY = Object.freeze({
 });
 
 export function rigGenerationAvailability(env: Record<string, string | undefined> = process.env) {
-  const enabled = isEndpointEnabled("rig", env);
-  const requestCap = globalDailyCapFor("rig", env);
-  const costCapMicroUsd = globalDailyCostMicroUsdFor("rig", env);
-  const available = enabled && requestCap > 0 && costCapMicroUsd > 0;
+  // CUSTOM_RIGGED_PET_GLB_V1 has its own priced stage plus durable debit,
+  // provider-handle, and refund evidence. PETSIM_RIG_* belongs to the legacy
+  // pet simulator and must not silently close this body-rig product.
+  const available = env.PET_GLB_BODY_RIG_ENABLED !== "false";
   return {
     available,
-    requestCap,
-    costCapMicroUsd,
+    requestCap: null,
+    costCapMicroUsd: null,
     reason: available
       ? null
-      : "Animation-ready rigging is temporarily closed while its funded production path is verified.",
+      : "Animation-ready body rigging is disabled by PET_GLB_BODY_RIG_ENABLED=false.",
   } as const;
 }

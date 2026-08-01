@@ -1,37 +1,66 @@
-import React, { useState, useMemo } from "react";
-import { Film, Sparkles, Download, RefreshCw, Wand2, Music, Music2, X, Wrench } from "lucide-react";
-import { Creation, PublicUser } from "../types";
-import { createVideo, pollJob } from "../api";
-import { MOTION_PRESETS, DEFAULT_MOTION_PRESET } from "../motionPresets";
+import React, { useMemo, useState } from "react";
+import { Download, Film, Mic2, Play, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
+import { Creation, UserProfile } from "../types";
+import { createVideo, createVoicePreview, pollJob } from "../api";
+import { AI_VIDEO_SCRIPTS, DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "../aiVideoScripts";
 import { CREDIT_PRICES } from "../pricing";
 
 interface AnimationStudioProps {
   creations: Creation[];
-  userProfile: PublicUser;
-  onOpenPro: () => void;
+  userProfile: UserProfile;
   onOpenCreditStore: () => void;
   onClose: () => void;
   onCreationsChanged?: () => Promise<void> | void;
 }
 
-/**
- * Animate landing screen: pick one of your generated images + a motion prompt
- * to make a video, or open the contained advanced 3D Animation Builder.
- */
-export default function AnimationStudio({ creations, userProfile, onOpenPro, onOpenCreditStore, onClose, onCreationsChanged }: AnimationStudioProps) {
-  const images = useMemo(() => creations.filter((c) => c.image_url), [creations]);
+type EditableScript = AiVideoScriptTemplate & { voiceText: string };
+
+function editable(template: AiVideoScriptTemplate): EditableScript {
+  return { ...template, stageDirections: [...template.stageDirections], voiceText: "" };
+}
+
+/** Customer AI video generation: a guided script, never a manual timeline editor. */
+export default function AnimationStudio({ creations, userProfile, onOpenCreditStore, onClose, onCreationsChanged }: AnimationStudioProps) {
+  const images = useMemo(() => creations.filter((creation) => creation.image_url), [creations]);
   const [selectedId, setSelectedId] = useState<number | null>(images[0]?.id ?? null);
-  const [presetValue, setPresetValue] = useState<string>(DEFAULT_MOTION_PRESET.value);
-  const [customPrompt, setCustomPrompt] = useState("");
-  const [addSound, setAddSound] = useState(true);
-  const [aspect, setAspect] = useState<"16:9" | "9:16">("16:9");
+  const [script, setScript] = useState<EditableScript>(() => editable(DEFAULT_AI_VIDEO_SCRIPT));
+  const [aspect, setAspect] = useState<"16:9" | "9:16">("9:16");
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [voiceAudio, setVoiceAudio] = useState<string | null>(null);
 
   const cost = CREDIT_PRICES.ANIMATED_VIDEO;
-  const canAfford = userProfile.isAdmin || userProfile.isTester || (userProfile.credits ?? 0) >= cost;
-  const selected = images.find((c) => c.id === selectedId) || null;
+  const canAfford = userProfile.isAdmin || (userProfile.credits ?? 0) >= cost;
+  const selected = images.find((creation) => creation.id === selectedId) || null;
+
+  const selectTemplate = (templateId: string) => {
+    const template = AI_VIDEO_SCRIPTS.find((candidate) => candidate.id === templateId) || DEFAULT_AI_VIDEO_SCRIPT;
+    setScript(editable(template));
+    setVoiceAudio(null);
+    setVoiceStatus("idle");
+  };
+
+  const updateStageDirection = (index: number, value: string) => {
+    const directions = [...script.stageDirections] as [string, string, string, string];
+    directions[index] = value;
+    setScript((current) => ({ ...current, stageDirections: directions }));
+  };
+
+  const previewVoice = async () => {
+    if (!script.voiceText.trim()) return;
+    setVoiceStatus("loading");
+    setVoiceAudio(null);
+    try {
+      const preview = await createVoicePreview(script.voiceText.trim());
+      setVoiceAudio(`data:${preview.mimeType};base64,${preview.audioBase64}`);
+      setVoiceStatus("ready");
+    } catch (voiceError: any) {
+      setVoiceStatus("error");
+      setError(voiceError?.message || "The voice preview could not be generated.");
+    }
+  };
 
   const generate = async () => {
     if (!selected) { setError("Pick an image to animate first."); return; }
@@ -39,12 +68,10 @@ export default function AnimationStudio({ creations, userProfile, onOpenPro, onO
     setError(null);
     setResultUrl(null);
     setStatus("generating");
-    const motionPrompt = customPrompt.trim() || MOTION_PRESETS.find((p) => p.value === presetValue)?.prompt || DEFAULT_MOTION_PRESET.prompt;
     try {
-      const { jobId } = await createVideo(selected.id, motionPrompt, addSound, aspect);
-      // Poll for completion.
-      for (let i = 0; i < 150; i++) {
-        await new Promise((r) => setTimeout(r, 4000));
+      const { jobId } = await createVideo(selected.id, script, true, aspect);
+      for (let attempt = 0; attempt < 150; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
         try {
           const job = await pollJob(jobId);
           if (job.status === "done" && job.video_url) {
@@ -53,122 +80,120 @@ export default function AnimationStudio({ creations, userProfile, onOpenPro, onO
             await onCreationsChanged?.();
             return;
           }
-          if (job.status === "failed") { throw new Error(job.error || "Video generation failed."); }
-        } catch (pollErr: any) {
-          if (pollErr?.message && /failed/i.test(pollErr.message)) throw pollErr;
-          // else transient — keep polling
+          if (job.status === "failed") throw new Error(job.error || "Video generation failed.");
+        } catch (pollError: any) {
+          if (pollError?.message && /failed/i.test(pollError.message)) throw pollError;
         }
       }
-      throw new Error("This is taking longer than expected. Check your FurBin shortly — it may still finish.");
-    } catch (err: any) {
-      setError(err?.message || "Could not create the animation.");
+      throw new Error("This is taking longer than expected. Your tracked job can continue in the background.");
+    } catch (generationError: any) {
+      setError(generationError?.message || "Could not create the animation.");
       setStatus("error");
     }
   };
 
-  return (
-    <div className="w-full max-w-3xl mx-auto px-4 pt-6 pb-28 animate-fade-in">
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <Film size={22} className="text-primary" />
-          <h1 className="text-xl font-extrabold text-on-surface">Video Creator</h1>
-        </div>
-        <button onClick={onClose} className="text-on-surface-variant hover:text-primary p-2 rounded-full" aria-label="Close"><X size={20} /></button>
-      </div>
-      <p className="text-sm text-on-surface-variant mb-5">
-        Create a generated video from one image and a motion prompt. Need a full scene, cast, and timeline? Open the 3D Animation Builder below. <strong>{cost} PupCoins</strong> per video.
-      </p>
+  const field = (label: string, key: keyof Pick<EditableScript, "setting" | "characters" | "motions" | "lighting" | "filter" | "camera">, rows = 2) => (
+    <label className="block text-xs font-bold text-on-surface">
+      {label}
+      <textarea
+        value={script[key]}
+        onChange={(event) => setScript((current) => ({ ...current, [key]: event.target.value }))}
+        rows={rows}
+        className="mt-1 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm font-normal text-on-surface"
+      />
+    </label>
+  );
 
-      {/* Result */}
-      {status === "done" && resultUrl && (
-        <div className="mb-6 rounded-2xl overflow-hidden border border-outline-variant/40 bg-black/40">
-          <video src={resultUrl} controls autoPlay loop className="w-full max-h-[420px] bg-black" />
-          <div className="flex gap-2 p-3">
-            <a href={resultUrl} download className="flex-1 text-center py-2.5 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2"><Download size={16} /> Download</a>
-            <button onClick={() => { setStatus("idle"); setResultUrl(null); }} className="flex-1 py-2.5 rounded-full bg-surface-container-high text-on-surface font-bold text-sm">Make another</button>
-          </div>
+  return (
+    <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 animate-fade-in" aria-labelledby="ai-video-title">
+      <header className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3"><Film size={23} className="text-primary" /><h1 id="ai-video-title" className="text-2xl font-black text-on-surface">8-Second AI Video Studio</h1></div>
+          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">Choose a scene, direct every beat, lighting, camera, and sound, then let AI animate your pet. This is guided video generation—not a manual animator tool. <strong>{cost} PupCoins</strong> per video.</p>
         </div>
+        <button type="button" onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
+      </header>
+
+      {status === "done" && resultUrl && (
+        <section className="mb-6 overflow-hidden rounded-2xl border border-outline-variant/40 bg-black/40">
+          <video src={resultUrl} controls autoPlay loop className="max-h-[520px] w-full bg-black" />
+          <div className="flex gap-2 p-3">
+            <a href={resultUrl} download className="flex flex-1 items-center justify-center gap-2 rounded-full bg-primary py-2.5 text-sm font-bold text-on-primary"><Download size={16} /> Download</a>
+            <button type="button" onClick={() => { setStatus("idle"); setResultUrl(null); }} className="flex-1 rounded-full bg-surface-container-high py-2.5 text-sm font-bold text-on-surface">Make another</button>
+          </div>
+        </section>
       )}
 
       {status === "generating" ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-4 text-on-surface-variant">
-          <RefreshCw className="animate-spin text-primary" size={30} />
-          <p className="text-sm font-medium">Animating with AI… this can take a minute or two.</p>
-          <p className="text-xs">You can leave this page — your video will appear in your FurBin when it's ready.</p>
-        </div>
+        <section className="flex flex-col items-center justify-center gap-4 py-20 text-on-surface-variant">
+          <RefreshCw className="animate-spin text-primary" size={32} />
+          <p className="font-bold">Generating the complete 8-second scene and sound…</p>
+          <p className="text-xs">The job is registered, so it continues safely if you leave this page.</p>
+        </section>
       ) : (
-        <>
-          {/* 1. Pick an image */}
-          <h2 className="text-sm font-bold text-on-surface mb-2">1. Choose an image</h2>
-          {images.length === 0 ? (
-            <div className="rounded-xl border border-outline-variant/40 p-6 text-center text-sm text-on-surface-variant mb-6">
-              You don't have any images yet. Create an avatar or memory first, then come back to animate it.
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,.9fr)]">
+          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-6">
+            <div>
+              <h2 className="text-sm font-black text-on-surface">1. Choose your pet image</h2>
+              {images.length === 0 ? <p className="mt-3 rounded-xl border border-outline-variant/40 p-5 text-sm text-on-surface-variant">Create a pet portrait first, then return here to animate it.</p> : (
+                <div className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4">{images.map((creation) => (
+                  <button key={creation.id} type="button" onClick={() => setSelectedId(creation.id)} className={`relative aspect-square overflow-hidden rounded-xl border-2 ${selectedId === creation.id ? "border-primary ring-2 ring-primary/30" : "border-transparent"}`}>
+                    <img src={creation.image_url as string} alt={creation.name || creation.place_label || "Creation"} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                  </button>
+                ))}</div>
+              )}
             </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5 mb-6">
-              {images.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all ${selectedId === c.id ? "border-primary ring-2 ring-primary/30" : "border-transparent hover:border-primary/40"}`}
-                >
-                  <img src={c.image_url as string} alt={c.name || c.place_label || "Creation"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </button>
-              ))}
-            </div>
-          )}
 
-          {/* 2. Motion */}
-          <h2 className="text-sm font-bold text-on-surface mb-2">2. How should it move?</h2>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {MOTION_PRESETS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => { setPresetValue(p.value); setCustomPrompt(""); }}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${presetValue === p.value && !customPrompt ? "bg-primary text-on-primary border-primary" : "bg-surface-container-high text-on-surface border-outline-variant/40 hover:border-primary/50"}`}
-              >
-                {p.emoji} {p.label}
+            <div>
+              <label htmlFor="ai-video-template" className="text-sm font-black text-on-surface">2. Choose an 8-second story</label>
+              <select id="ai-video-template" value={script.id} onChange={(event) => selectTemplate(event.target.value)} className="mt-2 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-3 text-sm text-on-surface">
+                {AI_VIDEO_SCRIPTS.map((template) => <option key={template.id} value={template.id}>{template.title} · {template.genre}</option>)}
+              </select>
+            </div>
+
+            <div className="grid gap-3">
+              {field("Setting", "setting")}
+              {field("Characters and identity", "characters")}
+              {field("Motions", "motions")}
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-bold text-on-surface">Four timed stage directions</legend>
+                {script.stageDirections.map((direction, index) => (
+                  <input key={index} value={direction} onChange={(event) => updateStageDirection(index, event.target.value)} className="w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" aria-label={`Stage direction ${index + 1}`} />
+                ))}
+              </fieldset>
+              {field("Lighting", "lighting")}
+              {field("Color and filter", "filter")}
+              {field("Camera direction", "camera")}
+            </div>
+          </section>
+
+          <aside className="space-y-5">
+            <section className="rounded-3xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
+              <div className="flex items-center gap-2"><Mic2 size={18} className="text-primary" /><h2 className="text-sm font-black text-on-surface">3. Add sound and a short voice line</h2></div>
+              <p className="mt-2 text-xs text-on-surface-variant">The finished video includes native scene sound. Add one optional spoken line; preview it here with the configured Pawsome3D voice service.</p>
+              <textarea value={script.voiceText} onChange={(event) => { setScript((current) => ({ ...current, voiceText: event.target.value.slice(0, 160) })); setVoiceAudio(null); setVoiceStatus("idle"); }} rows={3} placeholder="Optional: One short line your pet says…" className="mt-3 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" />
+              <div className="mt-1 text-right text-[11px] text-on-surface-variant">{script.voiceText.length}/160</div>
+              <button type="button" onClick={() => void previewVoice()} disabled={!script.voiceText.trim() || voiceStatus === "loading"} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/35 px-3 py-2 text-sm font-bold text-primary disabled:opacity-40">
+                {voiceStatus === "loading" ? <RefreshCw className="animate-spin" size={15} /> : <Play size={15} />} Preview voice
               </button>
-            ))}
-          </div>
-          <textarea
-            value={customPrompt}
-            onChange={(e) => setCustomPrompt(e.target.value)}
-            placeholder="…or describe it yourself: 'running across a sunny beach, tail wagging'"
-            rows={2}
-            className="w-full px-4 py-3 rounded-xl bg-surface border border-outline-variant/50 text-on-surface text-sm mb-4"
-          />
+              {voiceAudio && <audio className="mt-3 w-full" src={voiceAudio} controls autoPlay />}
+            </section>
 
-          {/* 3. Options */}
-          <div className="flex flex-wrap items-center gap-3 mb-6">
-            <button onClick={() => setAddSound((s) => !s)} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border ${addSound ? "bg-primary/10 border-primary/40 text-primary" : "bg-surface-container-high border-outline-variant/40 text-on-surface-variant"}`}>
-              {addSound ? <Music size={16} /> : <Music2 size={16} />} {addSound ? "Sound on" : "Sound off"}
-            </button>
-            <div className="flex rounded-xl overflow-hidden border border-outline-variant/40">
-              <button onClick={() => setAspect("16:9")} className={`px-3 py-2 text-sm font-medium ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>Landscape</button>
-              <button onClick={() => setAspect("9:16")} className={`px-3 py-2 text-sm font-medium ${aspect === "9:16" ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>Portrait</button>
-            </div>
-          </div>
-
-          {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
-
-          <button
-            onClick={generate}
-            disabled={!selected}
-            className="w-full py-4 rounded-full bg-primary text-on-primary font-extrabold flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
-          >
-            <Wand2 size={18} /> {canAfford ? `Create Animation · ${cost} PupCoins` : `Get PupCoins to animate (${cost})`}
-          </button>
-
-          {/* Advanced workspace contained under the Video Creator entry point. */}
-          <button onClick={onOpenPro} className="w-full mt-3 py-2.5 rounded-full text-sm text-on-surface-variant hover:text-primary flex items-center justify-center gap-2">
-            <Wrench size={15} /> Open 3D Animation Builder
-          </button>
-          <p className="text-[11px] text-center text-on-surface-variant mt-1 flex items-center justify-center gap-1">
-            <Sparkles size={11} /> Pose rigged models, add scenes, lights &amp; multiple pets
-          </p>
-        </>
+            <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-5">
+              <h2 className="text-sm font-black text-on-surface">4. Frame and generate</h2>
+              <div className="mt-3 flex overflow-hidden rounded-xl border border-outline-variant/40">
+                <button type="button" onClick={() => setAspect("9:16")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "9:16" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Portrait</button>
+                <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
+              </div>
+              <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Exactly 8 seconds · four directed beats · native sound · identity protection</div>
+              {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+              <button type="button" onClick={() => void generate()} disabled={!selected} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 font-extrabold text-on-primary disabled:opacity-50">
+                <Wand2 size={18} /> {canAfford ? `Generate Video · ${cost} PupCoins` : `Get PupCoins (${cost})`}
+              </button>
+            </section>
+          </aside>
+        </div>
       )}
-    </div>
+    </main>
   );
 }

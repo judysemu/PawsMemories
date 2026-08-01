@@ -34,6 +34,7 @@ interface ServerItemDto {
   versions?: FurBinItem["versions"];
   derivatives?: FurBinItem["derivatives"];
   showcase?: FurBinShowcase;
+  feedbackDecision?: "keep" | "toss";
 }
 
 interface ServerShowcaseDto extends Omit<FurBinShowcase, never> {}
@@ -90,6 +91,7 @@ function mapItem(item: ServerItemDto): FurBinItem {
     versions: Array.isArray(item.versions) ? item.versions : [],
     derivatives: Array.isArray(item.derivatives) ? item.derivatives : [],
     showcase: item.showcase,
+    feedbackDecision: item.feedbackDecision,
   };
 }
 
@@ -140,6 +142,17 @@ export function createHttpFurBinV5Api(): FurBinV5Api {
         "Could not refresh this item.",
       );
       return mapItem(item);
+    },
+
+    async submitFeedback(itemUuid, input) {
+      return parseResponse<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }>(
+        await authedFetch(`/api/fur-bin/items/${encodeURIComponent(itemUuid)}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+        "Could not save your model feedback.",
+      );
     },
 
     async listCollections(): Promise<FurBinCollection[]> {

@@ -42,7 +42,6 @@ const PrintShopScreen = lazy(() => import("./components/PrintShopScreen"));
 const WagsAdminPanel = lazy(() => import("./components/WagsAdminPanel"));
 const PetHealthScreen = lazy(() => import("./components/PetHealthScreen"));
 const WagsInboxScreen = lazy(() => import("./components/WagsInboxScreen"));
-const AnimatorScreen = lazy(() => import("./animator/components/AnimatorScreen"));
 import WarehouseMode from "./components/WarehouseMode";
 import { MOBILE_NAV, SIDEBAR_NAV, SHELL_ICON_NAV } from "./shellNavigation";
 import { syncSeoMetadata } from "./seo";
@@ -102,8 +101,8 @@ function screenFromPath(pathname: string): Screen | null {
   // Retire the unsupported paid concierge surface until its payment and
   // fulfillment routes exist. Old bookmarks land on a working keepsake flow.
   if (normalized === "/request-memory") return Screen.PAWPRINTS;
-  // Retire bookmarked create-wizard steps. Signed-in customers must enter the
-  // customer-gated model lifecycle instead of bypassing its approval stages.
+  // Retire bookmarked create-wizard steps. Signed-in customers enter the
+  // tracked model lifecycle so every generated asset is registered.
   if (normalized.startsWith("/create/")) return Screen.CREATE;
   // Retired marketplace surfaces fall through to the safe Shop landing page.
   if (normalized === "/marketplace" || normalized === "/admin/marketplace") return Screen.STORE;
@@ -218,10 +217,6 @@ export default function App() {
     return routed && PUBLIC_SCREENS.has(routed) ? routed : Screen.DASHBOARD;
   });
   const [incompleteUser, setIncompleteUser] = useState<PublicUser | null>(null);
-  const [animatorAssetId, setAnimatorAssetId] = useState<string | null>(null);
-  // Video Creator is the Animate landing screen; the full 3D builder is its
-  // advanced workspace, opened from within that parent module.
-  const [animatorMode, setAnimatorMode] = useState<"simple" | "pro">("simple");
   const [userProfile, setUserProfile] = useState<UserProfile>(EMPTY_PROFILE);
 
   const [showOrderSuccessModal, setShowOrderSuccessModal] = useState(false);
@@ -244,8 +239,6 @@ export default function App() {
   };
 
   const openAnimationStudio = () => {
-    setAnimatorAssetId(null);
-    setAnimatorMode("simple");
     setCurrentScreen(Screen.ANIMATOR);
   };
 
@@ -1078,17 +1071,13 @@ export default function App() {
 
 
             {currentScreen === Screen.ANIMATOR && (
-              userProfile.isAdmin ? (
-                <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
-                  <AnimatorScreen initialAssetId={null} onClose={() => setCurrentScreen(Screen.CREATE)} />
-                </Suspense>
-              ) : (
-                <UnderConstructionLock
-                  featureName="Animation Studio"
-                  featureDescription="Bring your 3D pet model to life with motion, video, and cinematic scenes — coming soon."
-                  onGoToCreate={() => setCurrentScreen(Screen.CREATE)}
-                />
-              )
+              <AnimationStudio
+                creations={creations}
+                userProfile={userProfile}
+                onOpenCreditStore={() => setShowCreditStore(true)}
+                onClose={() => setCurrentScreen(Screen.CREATE)}
+                onCreationsChanged={refreshCreations}
+              />
             )}
 
 

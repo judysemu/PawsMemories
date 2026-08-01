@@ -63,6 +63,7 @@ export interface FurBinItem {
   versions: FurBinVersion[];
   derivatives: FurBinDerivative[];
   showcase?: FurBinShowcase;
+  feedbackDecision?: "keep" | "toss";
 }
 
 export interface FurBinCollection {
@@ -116,6 +117,7 @@ export interface FurBinV5Api {
   readonly capabilities: FurBinClientCapabilities;
   searchItems(filters: LibraryFilters): Promise<LibraryPage>;
   getItem(itemUuid: string): Promise<FurBinItem>;
+  submitFeedback(itemUuid: string, input: { decision: "keep" } | { decision: "toss"; subject: string; message: string }): Promise<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }>;
   listCollections(): Promise<FurBinCollection[]>;
   createCollection(input: { name: string; description?: string }): Promise<FurBinCollection>;
   addItemToCollection(collectionUuid: string, itemUuid: string): Promise<void>;

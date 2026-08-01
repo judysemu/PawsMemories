@@ -233,9 +233,6 @@ export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
-  const [operatorQueue, setOperatorQueue] = useState<OrderView[] | null>(null);
-  const [operatorSelection, setOperatorSelection] = useState<OrderView | null>(null);
-  const [operatorPreviewUrl, setOperatorPreviewUrl] = useState<string | null>(null);
   const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(true);
@@ -270,14 +267,12 @@ export default function PetModelStudio() {
     Promise.all([
       authedFetch("/api/pet-glb/product"),
       authedFetch("/api/pet-glb/orders?limit=12"),
-      authedFetch("/api/pet-glb/operator/queue"),
     ])
-      .then(async ([productResponse, ordersResponse, operatorResponse]) => {
+      .then(async ([productResponse, ordersResponse]) => {
         const productBody = await productResponse.json();
         if (!productResponse.ok) throw new Error(productBody?.message || "Model generator is unavailable.");
         setProduct(productBody);
         if (ordersResponse.ok) setRecentOrders(await ordersResponse.json());
-        if (operatorResponse.ok) setOperatorQueue(await operatorResponse.json());
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Model generator is unavailable."));
   }, []);
@@ -606,46 +601,16 @@ export default function PetModelStudio() {
     }
   };
 
-  const inspectOperatorOrder = (candidate: OrderView) => {
-    setOperatorSelection(candidate);
-    setOperatorPreviewUrl(null);
-    call(`/api/pet-glb/operator/orders/${candidate.order.orderUuid}/preview`)
-      .then((body) => setOperatorPreviewUrl(body.url))
-      .catch(() => {});
-  };
-
-  const releaseOperatorOrder = () => {
-    const candidate = operatorSelection;
-    const versionId = candidate?.order.finalCustomerVersionId;
-    if (!candidate || !versionId) return;
-    call(`/api/pet-glb/operator/orders/${candidate.order.orderUuid}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        versionId,
-        note: "Exact customer-approved version inspected and released.",
-      }),
-    })
-      .then(() => {
-        setOperatorQueue((current) => current?.filter(
-          (item) => item.order.orderUuid !== candidate.order.orderUuid,
-        ) ?? null);
-        setOperatorSelection(null);
-        setOperatorPreviewUrl(null);
-      })
-      .catch(() => {});
-  };
-
   if (!product && !error) return <div className="p-6 text-sm opacity-70">Loading model generator…</div>;
   if (!product) return <div className="p-6 text-sm text-red-500">{error}</div>;
 
   const stage = view?.currentStage;
   const primaryReferenceReady = Boolean(references.frontUrl?.trim());
   const validationPasses = stage?.validationReport?.operatorReady !== false;
-  const canApprove = stage?.state === "awaiting_customer_approval"
+  const canApprove = stage?.stage === "reference"
+    && stage?.state === "awaiting_customer_approval"
     && Boolean(stage.artifactSha256)
-    && validationPasses
-    && (stage.stage !== "rig_check" || stage.capabilityReport?.riggable === true);
+    && validationPasses;
   const selectedStages: StageKind[] = [
     "reference",
     "base",
@@ -900,74 +865,6 @@ export default function PetModelStudio() {
                 ))}
               </div>
             )}
-            {operatorQueue !== null && (
-              <div className="space-y-2 border-t border-white/15 pt-4">
-                <h2 className="text-sm font-semibold">Operator release queue</h2>
-                {operatorQueue.length === 0 ? (
-                  <p className="text-xs opacity-60">No customer-approved models are waiting.</p>
-                ) : operatorQueue.map((item) => (
-                  <button
-                    key={item.order.orderUuid}
-                    type="button"
-                    onClick={() => inspectOperatorOrder(item)}
-                    className="flex w-full items-center justify-between rounded-xl border border-amber-300/20 px-3 py-2 text-left text-xs"
-                  >
-                    <span>{item.order.orderUuid.slice(0, 8)} · {item.order.meshProfile === "smart_mesh" ? "SmartMesh" : "HD"}</span>
-                    <span className="opacity-60">Inspect</span>
-                  </button>
-                ))}
-                {operatorSelection && (
-                  <div className="space-y-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-3">
-                    <div className="text-xs">
-                      Exact version <strong>{operatorSelection.order.finalCustomerVersionId}</strong>
-                      {operatorSelection.currentStage?.validationReport?.triangleCount !== undefined
-                        ? ` · ${operatorSelection.currentStage.validationReport.triangleCount.toLocaleString()} triangles`
-                        : ""}
-                    </div>
-                    {operatorSelection.order.referenceManifest && (
-                      <div className="grid grid-cols-5 gap-1">
-                        {REFERENCE_FIELDS.map(([key, label]) => (
-                          <img
-                            key={key}
-                            src={operatorSelection.order.referenceManifest?.[key]}
-                            alt={`${label} operator reference`}
-                            className="aspect-square w-full rounded-md object-cover"
-                          />
-                        ))}
-                      </div>
-                    )}
-                    <div className="text-xs opacity-70">
-                      {operatorSelection.order.subjectProfile} · maximum charged {operatorSelection.quote.total} PupCoins
-                    </div>
-                    {operatorSelection.currentStage?.validationReport?.checks.map((check) => (
-                      <div key={check.id} className="flex gap-2 text-xs">
-                        <span className={check.passed === true ? "text-emerald-300" : "text-red-300"}>
-                          {check.passed === true ? "✓" : "×"}
-                        </span>
-                        <span>{check.detail}</span>
-                      </div>
-                    ))}
-                    {operatorPreviewUrl ? (
-                      <PetModelViewer
-                        src={operatorPreviewUrl}
-                        alt="Operator final-version preview"
-                        className="h-64 w-full overflow-hidden rounded-xl"
-                      />
-                    ) : (
-                      <p className="text-xs opacity-60">Loading the private final version…</p>
-                    )}
-                    <button
-                      type="button"
-                      onClick={releaseOperatorOrder}
-                      disabled={busy || !operatorPreviewUrl || !operatorSelection.order.finalCustomerVersionId}
-                      className="w-full rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40"
-                    >
-                      Approve exact version & release
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </aside>
         </div>
       ) : (
@@ -987,12 +884,12 @@ export default function PetModelStudio() {
             ) : (
               <div className="flex min-h-[480px] items-center justify-center p-8 text-center">
                 <div className="max-w-md space-y-3">
-                  <div className="text-lg font-medium">{stage ? STAGE_LABELS[stage.stage] : "Final review"}</div>
+                  <div className="text-lg font-medium">{stage ? STAGE_LABELS[stage.stage] : "Saved to Fur Bin"}</div>
                   <p className="text-sm opacity-65">
                     {stage?.state === "processing" || stage?.state === "queued"
                       ? `This stage is running${view.progress !== undefined ? ` · ${view.progress}%` : ""}.`
                       : stage?.assetVersionId
-                        ? "The GLB is stored privately. Load its short-lived preview when you are ready to inspect it."
+                        ? "The GLB is registered and stored in your Fur Bin. Load a preview here or choose Keep it/Toss it in Fur Bin."
                         : "Complete the current controls to continue."}
                   </p>
                   {stage?.assetVersionId && (
@@ -1021,7 +918,7 @@ export default function PetModelStudio() {
               })}
               <li className="flex items-center gap-3 text-sm">
                 <span className={`h-3 w-3 rounded-full ${view.order.state === "approved" || view.order.state === "delivered" ? "bg-emerald-400" : "bg-white/20"}`} />
-                <span className="opacity-65">Final quality review</span>
+                <span className="opacity-65">Saved to Fur Bin</span>
               </li>
             </ol>
 
@@ -1096,7 +993,7 @@ export default function PetModelStudio() {
                   </button>
                 )}
 
-                {stage.state === "awaiting_customer_approval" && (
+                {stage.stage === "reference" && stage.state === "awaiting_customer_approval" && (
                   <div className="space-y-2 border-t border-white/10 pt-3">
                     <textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value.slice(0, 500))}
                       className="min-h-20 w-full rounded-xl border border-white/15 bg-black/20 p-2 text-xs"
@@ -1204,7 +1101,7 @@ export default function PetModelStudio() {
 
             {view.order.state === "awaiting_human_review" && (
               <div className="rounded-3xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm">
-                Your exact approved GLB is in final quality review. No later version can be substituted.
+                This is a legacy order state. Refresh the order to register the generated GLB in Fur Bin.
               </div>
             )}
 

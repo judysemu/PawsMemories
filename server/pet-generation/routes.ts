@@ -67,8 +67,9 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     res.json({
       sku: "CUSTOM_RIGGED_PET_GLB_V1",
       name: "Custom 3D Model",
-      deliverables: ["customer-approved GLB", "measured mesh report", "secure private download"],
-      operatorApprovalRequired: true,
+      deliverables: ["Fur Bin GLB", "measured mesh report", "secure private download"],
+      customerModelApprovalRequired: false,
+      operatorApprovalRequired: false,
       prices: {
         base: PET_GLB_STAGE_PRICES.BASE,
         texture: PET_GLB_STAGE_PRICES.TEXTURE,
@@ -102,7 +103,8 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
           "Include clear views of distinctive markings.",
           "Measurements improve scale confidence.",
           "Hidden anatomy and exact dimensions cannot be reliably inferred from photographs alone.",
-          "Every model is reviewed by an operator before delivery.",
+          "Generated GLB versions are saved automatically in your Fur Bin.",
+          "Use Keep it or Toss it in Fur Bin to send feedback after generation.",
         ],
       },
     });
@@ -179,13 +181,14 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     } catch (err) { fail(res, err); }
   });
 
-  // The former /generate endpoint crossed every customer gate. Keep a stable,
-  // non-mutating error for stale clients instead of silently starting work.
+  // The former /generate endpoint bypassed reference approval. Reference
+  // approval remains the single customer decision before the selected model
+  // stages run automatically.
   router.post("/orders/:orderUuid/generate", writeLimiter, async (req, res) => {
     if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
     res.status(409).json({
       error: "GATED_FLOW_REQUIRED",
-      message: "Save and approve references before starting the base model.",
+      message: "Save and approve the generated reference set before starting the automatic model build.",
     });
   });
 

@@ -9,6 +9,7 @@ import {
   ExternalLink,
   FolderPlus,
   History,
+  Heart,
   ImageOff,
   Library,
   Loader2,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tag,
+  Trash2,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -84,7 +86,17 @@ function Preview({ item, className = "" }: { item: FurBinItem; className?: strin
   );
 }
 
-function ItemCard({ item, onOpen }: { item: FurBinItem; onOpen: (item: FurBinItem) => void }) {
+function ItemCard({
+  item,
+  onOpen,
+  onKeep,
+  onToss,
+}: {
+  item: FurBinItem;
+  onOpen: (item: FurBinItem) => void;
+  onKeep: (item: FurBinItem) => void;
+  onToss: (item: FurBinItem) => void;
+}) {
   return (
     <article className="furbin-v5-card">
       <button type="button" className="furbin-v5-card-open" onClick={() => onOpen(item)} aria-label={`Open ${item.title}`}>
@@ -100,6 +112,13 @@ function ItemCard({ item, onOpen }: { item: FurBinItem; onOpen: (item: FurBinIte
           <span className="furbin-v5-card-action">View details <ChevronRight aria-hidden="true" size={16} /></span>
         </span>
       </button>
+      <div className="furbin-v5-feedback-callout">
+        <strong>How is it?</strong>
+        <div>
+          <button type="button" className={item.feedbackDecision === "keep" ? "is-selected" : ""} onClick={() => onKeep(item)}><Heart aria-hidden="true" size={14} /> Keep it</button>
+          <button type="button" className={item.feedbackDecision === "toss" ? "is-selected is-toss" : ""} onClick={() => onToss(item)}><Trash2 aria-hidden="true" size={14} /> Toss it</button>
+        </div>
+      </div>
     </article>
   );
 }
@@ -370,6 +389,11 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
   const [publicUuid, setPublicUuid] = useState("");
   const [publicShowcase, setPublicShowcase] = useState<FurBinShowcase | null>(null);
   const [publicLoading, setPublicLoading] = useState(false);
+  const [feedbackItem, setFeedbackItem] = useState<FurBinItem | null>(null);
+  const [feedbackSubject, setFeedbackSubject] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
   const libraryRequestGateRef = useRef(createLatestLibraryRequestGate());
 
   const load = async (nextFilters = filters) => {
@@ -433,6 +457,49 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
     const normalized = normalizeLibraryFilters(next);
     setFilters(normalized);
     void load(normalized);
+  };
+
+  const markFeedback = (itemUuid: string, decision: "keep" | "toss") => {
+    setItems((current) => current.map((item) => item.itemUuid === itemUuid ? { ...item, feedbackDecision: decision } : item));
+    setSelected((current) => current?.itemUuid === itemUuid ? { ...current, feedbackDecision: decision } : current);
+  };
+
+  const keepItem = async (item: FurBinItem) => {
+    setFeedbackError("");
+    try {
+      await api.submitFeedback(item.itemUuid, { decision: "keep" });
+      markFeedback(item.itemUuid, "keep");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
+
+  const openTossForm = (item: FurBinItem) => {
+    setFeedbackItem(item);
+    setFeedbackSubject(`Please review ${item.title}`);
+    setFeedbackMessage("");
+    setFeedbackError("");
+  };
+
+  const submitTossFeedback = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!feedbackItem) return;
+    setFeedbackBusy(true);
+    setFeedbackError("");
+    try {
+      const result = await api.submitFeedback(feedbackItem.itemUuid, {
+        decision: "toss",
+        subject: feedbackSubject.trim(),
+        message: feedbackMessage.trim(),
+      });
+      markFeedback(feedbackItem.itemUuid, "toss");
+      setFeedbackItem(null);
+      setError(result.emailSent ? "" : "Your feedback was saved for the admin, but email delivery is waiting for mail configuration.");
+    } catch (cause) {
+      setFeedbackError(errorMessage(cause));
+    } finally {
+      setFeedbackBusy(false);
+    }
   };
 
   const hasFilters = Boolean(filters.query || filters.tag || filters.collectionUuid || filters.hasRig || filters.hasFacial || filters.hasAnimations);
@@ -513,7 +580,7 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
             <div className="furbin-v5-loading" role="status"><Loader2 aria-hidden="true" className="furbin-v5-spin" /><span>Opening your private library…</span></div>
           ) : items.length ? (
             <section className="furbin-v5-grid" aria-label="Private model library">
-              {items.map((item) => <ItemCard key={item.itemUuid} item={item} onOpen={openItem} />)}
+              {items.map((item) => <ItemCard key={item.itemUuid} item={item} onOpen={openItem} onKeep={(target) => void keepItem(target)} onToss={openTossForm} />)}
             </section>
           ) : <EmptyState filtered={hasFilters} />}
           {totalPages > 1 && (
@@ -566,6 +633,23 @@ export function FurBinV5Experience({ api = defaultApi }: FurBinV5ExperienceProps
         setSelected(updated);
         setItems((current) => mergeItem(current, updated));
       }} />}
+      {feedbackItem && (
+        <div className="furbin-v5-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !feedbackBusy && setFeedbackItem(null)}>
+          <form className="furbin-v5-feedback-form" role="dialog" aria-modal="true" aria-labelledby="furbin-feedback-title" onSubmit={submitTossFeedback}>
+            <button type="button" className="furbin-v5-icon-button furbin-v5-feedback-close" onClick={() => setFeedbackItem(null)} disabled={feedbackBusy} aria-label="Close feedback form"><X aria-hidden="true" /></button>
+            <p className="furbin-v5-eyebrow">Toss it · feedback to Pawsome3D</p>
+            <h2 id="furbin-feedback-title">What should we improve?</h2>
+            <p>Your account, order, asset ID, model version, provider job, and file hash are attached automatically. Do not paste private account details.</p>
+            <label>Subject<input required minLength={3} maxLength={200} value={feedbackSubject} onChange={(event) => setFeedbackSubject(event.target.value)} /></label>
+            <label>Details<textarea required minLength={10} maxLength={4000} rows={7} value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} placeholder="Tell us what looks wrong and what you expected." /></label>
+            {feedbackError && <p className="furbin-v5-message is-error" role="alert">{feedbackError}</p>}
+            <div className="furbin-v5-feedback-actions">
+              <button type="button" className="furbin-v5-secondary" onClick={() => setFeedbackItem(null)} disabled={feedbackBusy}>Cancel</button>
+              <button type="submit" className="furbin-v5-danger" disabled={feedbackBusy || feedbackSubject.trim().length < 3 || feedbackMessage.trim().length < 10}>{feedbackBusy ? "Sending…" : "Send to admin"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   );
 }

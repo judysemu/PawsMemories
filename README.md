@@ -6,16 +6,16 @@ Live site: https://pawsome3d.com  (formerly mypets.cc)
 
 ## Features
 
-- **Customer-gated 3D models** — five approved reference views → an untextured base GLB → optional texture → optional 35-PupCoin body/skeletal rig. Every artifact is mirrored into private storage, validated, and shown for approval before the next paid stage starts. Customers can choose HD or measured low-triangle SmartMesh output. Facial blendshapes are a separate, currently deferred capability and do not disable the body rig.
+- **Tracked 3D models delivered to Fur Bin** — after the customer approves the generated reference set, the base GLB, optional texture, and optional body rig run through durable paid stages without another private-review stop. Every persisted version is registered in Fur Bin, including failed validation outcomes, so ownership and provider lineage remain traceable. Fur Bin asks “How is it?” with **Keep it** or **Toss it**; Toss sends the administrator the customer, order, job, asset, version, and hash context automatically.
 - **One-photo model entry** — the builder accepts one genuine PNG, JPEG, or WebP source at any practical aspect ratio; additional angles are optional. Image bytes must match the declared file type. The generator creates the five approval views, and the customer must approve them (or deliberately enable auto-approval) before the paid base mesh begins.
-- **Fur Bin showcase** — a default-off private model library and public-derivative showcase with immutable versions, measured capability badges, moderation, and rollback.
+- **Fur Bin showcase** — an enabled private model library and public-derivative showcase with immutable versions, measured capability badges, feedback, moderation, and rollback.
 - **Scaled building lab** — calibrated text/image proposals, low-cost visual Shell and higher-cost IFC/BIM choices, and verification before and after construction. The durable v2 release path remains disabled until live worker/UI acceptance.
 - **AR virtual pet (WebXR / ARCore)** — place your avatar on real surfaces on Android Chrome; plane + mesh detection, drift‑free `XRAnchor` placement, and footprint center‑of‑gravity grounding so the pet plants on its feet. iOS falls back to the 8th Wall engine. The implementation lives under `src/three/ar/`, `src/brain/`, and the guarded pet-simulator routes.
 - **Store** — merch (3D prints, plush, accessories) with your Albums folded in as a tab.
 - **Community** — local info (nearby parks, weather, pet‑recall news), a live pet inspiration board (dog.ceo + dogapi.dog) with user‑uploaded memories, and a coming‑soon roadmap.
 - **Credits** — server‑backed ledger with earn/spend history, persisted daily bonus, per‑day‑capped share rewards, and Stripe credit‑pack purchases (webhook + redirect‑confirm double safety net).
 - **Profile** — avatar thumbnail uploader + a personal photo library; photos uploaded in the avatar builder persist here automatically.
-- **Animation Studio Tooling** — A separate multi-actor Three.js studio with layered animation, blend spaces, emote scheduling, Theatre camera control, project persistence, Director scripts, IK, recording, and live ElevenLabs/Rhubarb lip-sync preview.
+- **8-second AI Video Studio** — customer-facing guided AI video generation, not a manual timeline animator. Scripts specify the setting, characters, motion, four timed stage directions, lighting, filter, camera, native sound, and an optional short voice line with ElevenLabs preview.
 - **Randy AI** — Gemini-powered pet guide with a server-owned action registry and constrained navigation responses.
 
 ## Current model-generator release
@@ -189,7 +189,10 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `BLENDER_WORKER_URL` | URL to the separate blender microservice (e.g. `https://pawsmemories.onrender.com/render`) |
 | `WORKER_SHARED_SECRET` | Secret key for blender-worker auth |
 | `MODEL_BUILD_V3_ENABLED` / `RIG_PIPELINE_V4_ENABLED` | Default-off durable model and measured rig rollout flags |
-| `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Default-off Fur Bin API and build-time UI flags |
+| `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Fur Bin API and build-time UI flags; enabled for generated GLB delivery |
+| `PET_GLB_BODY_RIG_ENABLED` | Emergency rollback switch for the paid Pet GLB body-rig stage; defaults on and is independent of legacy `PETSIM_RIG_*` caps |
+| `MODEL_FEEDBACK_EMAIL` / `RESEND_API_KEY` / `MAIL_FROM` | Destination and sender configuration for Toss-it GLB feedback |
+| `AI_VIDEO_MODEL` | Eight-second AI video provider model; default `veo-3.1-fast-generate-preview` |
 | `STATIONERY_V2_ENABLED` | Enable only with the Stationery render worker, database, shipping-recipient UI, Printful/Slant3D credentials, variant map, and webhook secrets configured. The v2 path creates and submits provider orders, then reconciles signed callbacks. |
 | `STATIONERY_RENDER_WORKER_URL` / `STATIONERY_RENDER_WORKER_SECRET` | HTTPS render-worker endpoint and HMAC secret for dispatch and trusted completion callbacks |
 | `PRINTFUL_API_KEY` / `PRINTFUL_STORE_ID` / `PRINTFUL_STATIONERY_VARIANT_MAP` | Printful API credentials and JSON mapping from Stationery SKUs to numeric Printful variants |

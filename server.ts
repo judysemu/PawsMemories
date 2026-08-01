@@ -42,6 +42,7 @@ import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
+import { AiVideoScriptSchema, compileEightSecondPrompt } from "./server/ai-video/scripts";
 import { isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
 import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
@@ -6474,9 +6475,19 @@ async function startServer() {
   app.post("/api/create-video", requireAuth, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
     try {
-      const { creationId, motionPrompt } = req.body || {};
+      const { creationId } = req.body || {};
       const aspectRatio = normalizeVideoAspectRatio(req.body?.aspectRatio);
       if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
+      const scriptResult = AiVideoScriptSchema.safeParse(req.body?.script);
+      if (!scriptResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Choose a complete 8-second script with setting, characters, motion, stage directions, lighting, filter, and camera direction.",
+        });
+      }
+      const script = scriptResult.data;
+      const compiledPrompt = compileEightSecondPrompt(script);
+      const providerModel = process.env.AI_VIDEO_MODEL || "veo-3.1-fast-generate-preview";
 
       const userPhone = req.user!.phone;
       const isAdmin = await isUserAdmin(userPhone);
@@ -6534,12 +6545,13 @@ async function startServer() {
 
       // 5. Start Veo operation
       const op = await ai.models.generateVideos({
-        model: "veo-3.1-fast-generate-preview",
-        prompt: motionPrompt || "Gentle breeze, subtle motion, cinematic lighting",
+        model: providerModel,
+        prompt: compiledPrompt,
         image: { imageBytes, mimeType },
-        // The Gemini Developer API rejects generateAudio for Veo requests.
-        // Audio behavior is therefore left to the model default.
-        config: { aspectRatio },
+        // Veo 3 generates native sound. Its public API does not accept the old
+        // generateAudio flag, so sound and the optional short voice line are
+        // directed through the structured prompt.
+        config: { aspectRatio, durationSeconds: 8, numberOfVideos: 1 },
       });
 
       const operationName = (op as any).name || (op as any).operation?.name;
@@ -6555,6 +6567,22 @@ async function startServer() {
         operation_name: operationName,
       });
       creditReservationId = null; // durable job now owns any refund decision
+
+      await getPool().query(
+        `INSERT INTO ai_video_requests
+          (job_id, template_id, script_json, compiled_prompt, duration_seconds,
+           aspect_ratio, generate_audio, voice_text, voice_id, provider, provider_model)
+         VALUES (?, ?, ?, ?, 8, ?, TRUE, ?, NULL, 'veo', ?)`,
+        [
+          jobId,
+          script.templateId || null,
+          JSON.stringify(script),
+          compiledPrompt,
+          aspectRatio,
+          script.voiceText || null,
+          providerModel,
+        ],
+      );
 
       res.status(202).json({ success: true, jobId, status: "queued" });
     } catch (err: any) {

@@ -4,6 +4,14 @@
 **Scope:** everything after G2. G0–G2 are complete; this specifies the remaining build-out.
 **Governing decision:** Gate A / Path 1 (`docs/decisions/2026-07-27-first-sale-provider-path.md`)
 
+> **Current release update — 2026-07-31:** this historical specification's
+> mandatory customer/operator GLB review stops are superseded. The customer
+> approves the generated reference set once; validated persisted GLB stages then
+> advance automatically and every model version is registered in Fur Bin. Fur
+> Bin Keep/Toss feedback replaces the private release gate. Validation,
+> ownership, provider-handle, credit/refund, and immutable-version evidence stay
+> mandatory.
+
 ---
 
 ## 0. Verification method and status

@@ -122,6 +122,7 @@ export interface FurBinItemPublic {
   showcase?: ShowcaseRecordPublic;
   signedViewUrl?: string; // Short-lived signed URL for model view
   coverUrl?: string;
+  feedbackDecision?: "keep" | "toss";
   createdAt: string;
   updatedAt: string;
 }

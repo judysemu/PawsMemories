@@ -36,7 +36,7 @@ export function legacyCreationIsRepresented(
 }
 
 export default function FurBinScreen(props: FurBinScreenProps) {
-  if (import.meta.env.VITE_FUR_BIN_V5_ENABLED === "true") {
+  if (import.meta.env.VITE_FUR_BIN_V5_ENABLED !== "false") {
     return <React.Suspense fallback={<div className="flex min-h-[50vh] items-center justify-center text-on-surface-variant"><Loader2 className="animate-spin" aria-label="Loading Fur Bin" /></div>}><FurBinV5Experience /></React.Suspense>;
   }
 

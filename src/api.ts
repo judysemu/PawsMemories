@@ -1,5 +1,6 @@
 import { PublicUser, Creation, Album, LocationParams, Avatar, PhotoRequest, RequestType, AvatarNeeds, BehaviorAction, PlacedObject, VoiceCloneAsset } from "./types";
 import type { VisemeTrack } from "./animator/viseme/visemeRules";
+import { DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "./aiVideoScripts";
 
 /**
  * Lightweight API client that manages the session token and auth flow.
@@ -541,14 +542,18 @@ export async function updateCreationOrder(id: number, sortOrder: number): Promis
 
 export async function createVideo(
   creationId: number,
-  motionPrompt?: string,
+  script: (AiVideoScriptTemplate & { voiceText?: string }) | string,
   generateAudio: boolean = true,
-  aspectRatio: "16:9" | "9:16" = "16:9"
+  aspectRatio: "16:9" | "9:16" = "9:16"
 ): Promise<{ jobId: number }> {
+  const normalizedScript = typeof script === "string"
+    ? { ...DEFAULT_AI_VIDEO_SCRIPT, motions: script, voiceText: "" }
+    : script;
+  const { id: templateId, ...scriptFields } = normalizedScript;
   const res = await authedFetch("/api/create-video", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ creationId, motionPrompt, generateAudio, aspectRatio }),
+    body: JSON.stringify({ creationId, script: { ...scriptFields, templateId }, generateAudio, aspectRatio }),
   });
   if (!res.ok) throw new Error(await parseError(res, "Failed to start video generation."));
   return await res.json();

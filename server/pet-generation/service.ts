@@ -141,7 +141,7 @@ export class PetGlbService {
           && claimed.validationReport
           && claimed.validationReportSha256
         ) {
-          await this.stages.recoverPersistedModelStage(claimed.orderId, claimed.id, leaseOwner);
+          const recovered = await this.stages.recoverPersistedModelStage(claimed.orderId, claimed.id, leaseOwner);
           await this.stages.recordRecoveryEvidence({
             orderId: claimed.orderId,
             attemptId: claimed.id,
@@ -150,6 +150,16 @@ export class PetGlbService {
             providerHandlePresent: Boolean(claimed.providerJobId),
             evidence: { stage: claimed.stage, priorState: claimed.state, artifactPresent: true },
           });
+          if (recovered.validationReport?.operatorReady) {
+            await this.advanceCompletedStage(order.orderUuid, order.ownerPhone, order, recovered);
+          } else {
+            await this.stages.failAndRefund(
+              order.id,
+              recovered.id,
+              order.ownerPhone,
+              "VALIDATION_BLOCKED",
+            );
+          }
           result.resumed += 1;
           continue;
         }
@@ -320,13 +330,17 @@ export class PetGlbService {
         && attempt.validationReport
         && attempt.validationReportSha256
       ) {
-        await this.stages.recoverPersistedModelStage(order.id, attempt.id);
+        const recovered = await this.stages.recoverPersistedModelStage(order.id, attempt.id);
         await this.stages.recordRecoveryEvidence({
           orderId: order.id, attemptId: attempt.id, decision: "resumable",
           reasonCode: "PERSISTED_ARTIFACT_RECOVERED", providerHandlePresent: Boolean(attempt.providerJobId),
           evidence: { stage: attempt.stage, state: attempt.state, artifactPresent: true },
         });
-        return this.buildView((await this.orders.findByUuid(orderUuid))!);
+        if (!recovered.validationReport?.operatorReady) {
+          await this.stages.failAndRefund(order.id, recovered.id, ownerPhone, "VALIDATION_BLOCKED");
+          return this.buildView((await this.orders.findByUuid(orderUuid))!);
+        }
+        return this.advanceCompletedStage(orderUuid, ownerPhone, order, recovered);
       }
       attempt = await this.stages.resumeProviderRecovery(order.id, attempt.id);
       await this.stages.recordRecoveryEvidence({
@@ -334,6 +348,17 @@ export class PetGlbService {
         reasonCode: "DURABLE_PROVIDER_HANDLE", providerHandlePresent: true,
         evidence: { stage: attempt.stage, state: "recovery_required", resumedState: attempt.state },
       });
+    }
+    if (attempt.state === "awaiting_customer_approval" && attempt.stage !== "reference") {
+      if (attempt.stage === "rig_check" && !attempt.capabilityReport?.riggable) {
+        await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "RIG_NOT_SUPPORTED");
+        return this.buildView((await this.orders.findByUuid(orderUuid))!);
+      }
+      if (attempt.stage !== "rig_check" && !attempt.validationReport?.operatorReady) {
+        await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "VALIDATION_BLOCKED");
+        return this.buildView((await this.orders.findByUuid(orderUuid))!);
+      }
+      return this.advanceCompletedStage(orderUuid, ownerPhone, order, attempt);
     }
     let completionClaimed = false;
     if (attempt.state === "persisting") {
@@ -369,6 +394,7 @@ export class PetGlbService {
     }
 
     if (attempt.stage === "rig_check") {
+      let rigCheckFinalized = false;
       try {
         const expected = rigTypeForSubject(order.subjectProfile);
         const capability = job.capability || { riggable: false, rigType: null };
@@ -382,16 +408,25 @@ export class PetGlbService {
           verified,
           canonicalHash(verified),
         );
+        rigCheckFinalized = true;
+        const completed = await this.stages.findById(attempt.id);
+        if (!completed) throw new PetGenerationError("STAGE_NOT_FOUND", "Completed rig check was not found");
+        if (!verified.riggable) {
+          await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "RIG_NOT_SUPPORTED");
+          return this.buildView((await this.orders.findByUuid(orderUuid))!);
+        }
+        return this.advanceCompletedStage(orderUuid, ownerPhone, order, completed);
       } catch (error) {
-        await this.stages.markRecoveryRequired({
-          orderId: order.id,
-          attemptId: attempt.id,
-          providerJobId: attempt.providerJobId,
-          failureCode: "RIG_CHECK_FINALIZE_FAILED",
-        });
+        if (!rigCheckFinalized) {
+          await this.stages.markRecoveryRequired({
+            orderId: order.id,
+            attemptId: attempt.id,
+            providerJobId: attempt.providerJobId,
+            failureCode: "RIG_CHECK_FINALIZE_FAILED",
+          });
+        }
         throw error;
       }
-      return this.buildView((await this.orders.findByUuid(orderUuid))!);
     }
 
     let persisted: {
@@ -401,6 +436,7 @@ export class PetGlbService {
       report: ValidationReport;
       reportSha256: string;
     } | null = null;
+    let stageFinalized = false;
     try {
       const artifacts = await provider.fetchArtifacts(attempt.providerJobId);
       const report = validatePetGlbStage(artifacts.glb.data, {
@@ -445,8 +481,16 @@ export class PetGlbService {
         report,
         reportSha256,
       });
+      stageFinalized = true;
+      const completed = await this.stages.findById(attempt.id);
+      if (!completed) throw new PetGenerationError("STAGE_NOT_FOUND", "Completed model stage was not found");
+      if (!report.operatorReady) {
+        await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "VALIDATION_BLOCKED");
+        return this.buildView((await this.orders.findByUuid(orderUuid))!);
+      }
+      return this.advanceCompletedStage(orderUuid, ownerPhone, order, completed);
     } catch (error) {
-      if (persisted) {
+      if (persisted && !stageFinalized) {
         await this.stages.markPersistedRecovery({
           orderId: order.id,
           attemptId: attempt.id,
@@ -457,7 +501,7 @@ export class PetGlbService {
           report: persisted.report,
           reportSha256: persisted.reportSha256,
         });
-      } else {
+      } else if (!persisted) {
         await this.stages.failAndRefund(
           order.id,
           attempt.id,
@@ -467,7 +511,6 @@ export class PetGlbService {
       }
       throw error;
     }
-    return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
 
   async previewCurrentStage(
@@ -640,6 +683,45 @@ export class PetGlbService {
     if (current === "texture") return order.includeRig ? "rig_check" : null;
     if (current === "rig_check") return "rig";
     return null;
+  }
+
+  private async advanceCompletedStage(
+    orderUuid: string,
+    ownerPhone: string,
+    order: PetGlbOrder,
+    current: PetGlbStageAttempt,
+  ): Promise<PetGlbOrderView> {
+    const nextStage = this.nextStage(order, current.stage);
+    if ((nextStage === "rig_check" || nextStage === "rig") && !rigGenerationAvailability().available) {
+      throw new PetGenerationError(
+        "RIG_GENERATION_DISABLED",
+        rigGenerationAvailability().reason || "Rig generation is unavailable",
+      );
+    }
+    const nextInputHash = nextStage
+      ? canonicalHash({
+          orderUuid,
+          nextStage,
+          sourceAttemptUuid: current.attemptUuid,
+          sourceArtifactSha256: current.artifactSha256,
+          meshProfile: order.meshProfile,
+          subjectProfile: order.subjectProfile,
+          textureQuality: order.textureQuality,
+          styleDirection: order.styleDirection,
+        })
+      : null;
+    const advanced = await this.stages.autoAdvanceCompletedStage({
+      orderId: order.id,
+      ownerPhone,
+      attemptId: current.id,
+      nextStage,
+      nextInputHash,
+      nextPriceCredits: nextStage ? stagePrice(nextStage) : 0,
+    });
+    if (advanced.next) {
+      await this.startQueuedStage(orderUuid, ownerPhone, advanced.next);
+    }
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
 
   private async buildView(
