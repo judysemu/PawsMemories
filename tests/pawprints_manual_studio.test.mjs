@@ -10,7 +10,7 @@ const pawprintsRoute = server.slice(routeStart, routeEnd);
 
 test("Pawprints Studio is a click-through manual editor with twelve variations", () => {
   assert.match(studio, /How will you celebrate your pet\?/);
-  assert.match(studio, /Choose your famous portrait/);
+  assert.match(studio, /Choose a portrait title/);
   assert.match(studio, /Choose a variation/);
   assert.match(studio, /"classic"[\s\S]*"overlay"[\s\S]*"split"[\s\S]*"frame"/);
   assert.match(studio, /"story"[\s\S]*"filmstrip"[\s\S]*"circles"[\s\S]*"mosaic"/);
@@ -19,13 +19,14 @@ test("Pawprints Studio is a click-through manual editor with twelve variations",
   assert.match(studio, /renderPawprint/);
 });
 
-test("Pawprints saves a selected rendered canvas and never asks an LLM to write copy", () => {
+test("Pawprints keeps user copy manual while Historic mode may generate portrait art", () => {
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   assert.match(pawprintsRoute, /renderedImage/);
   assert.match(pawprintsRoute, /limitInputPixels: 16_000_000/);
   assert.match(pawprintsRoute, /sharp\(sourceBuffer, sharpInputOptions\)/);
   assert.match(pawprintsRoute, /\.webp\(\{ quality: 92/);
-  assert.doesNotMatch(pawprintsRoute, /generateContent/);
+  assert.match(pawprintsRoute, /category === "historic_portraits"/);
+  assert.match(pawprintsRoute, /generateImageWithFallback/);
   assert.doesNotMatch(pawprintsRoute, /generatedText/);
 });
 

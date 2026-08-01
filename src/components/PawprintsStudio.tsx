@@ -557,7 +557,15 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
       const response = await authedFetch("/api/pawprints/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ category, layoutId: template.layoutId, fields, customName: title.trim(), customMessage: message.trim(), renderedImage }),
+        body: JSON.stringify({
+          category,
+          layoutId: template.layoutId,
+          fields,
+          customName: title.trim(),
+          customMessage: message.trim(),
+          renderedImage,
+          photoBase64: category === "historic_portraits" ? photos[0]?.dataUrl : undefined,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "The Pawprint could not be saved.");
@@ -623,17 +631,42 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     </main>
   );
 
-  // Step 2: add the pet photo after choosing digital or physical.
+  // Step 2: choose one title from a compact click-through control. The master
+  // image shows the visual range without turning the page into twenty cards.
+  if (!template) return (
+    <main className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
+      <button onClick={() => { setIntent(""); setCategory(""); }} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Keepsake type</button>
+      <p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p>
+      <h1 className="mt-2 text-3xl font-black text-on-surface">Choose a portrait title</h1>
+      <p className="mt-2 max-w-2xl text-on-surface-variant">Choose the role first. On the next screen, add the pet photo that the portrait should preserve.</p>
+      <img src="/collections/historic-pawprints/historic-pawprints-20-v1.webp" alt="Twenty Historic Pawprint portrait examples" className="mt-6 w-full rounded-3xl border border-outline-variant/30 shadow-lg" />
+      <label htmlFor="historic-role-select" className="mt-6 block text-sm font-black text-on-surface">Portrait title</label>
+      <select
+        id="historic-role-select"
+        defaultValue=""
+        onChange={(event) => {
+          const chosen = categoryTemplates.find((item) => item.layoutId === event.target.value);
+          if (chosen) chooseTemplate(chosen);
+        }}
+        className="mt-2 min-h-14 w-full rounded-2xl border border-outline-variant bg-surface px-4 font-bold text-on-surface"
+      >
+        <option value="" disabled>Select a title…</option>
+        {categoryTemplates.map((item) => <option key={item.layoutId} value={item.layoutId}>{item.name}</option>)}
+      </select>
+    </main>
+  );
+
+  // Step 3: add the pet photo after choosing the portrait title.
   if (!photosConfirmed) return (
     <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
-      <button onClick={() => { setIntent(""); setCategory(""); }} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Keepsake type</button>
+      <button onClick={() => setTemplate(null)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Portrait title</button>
       {!userProfile.email && (
         <section className="mb-12 overflow-hidden rounded-3xl bg-primary/5 p-8 text-center sm:p-16">
           <h1 className="text-4xl font-black text-on-surface">Personalized Pawprints Pet Art</h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-on-surface-variant">Create digital and printable pet keepsakes with your photos, message, and chosen occasion. Sign in to save and print your designs.</p>
         </section>
       )}
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p><h1 className="mt-2 text-3xl font-black text-on-surface">Choose your pet's photo</h1><p className="mt-2 text-on-surface-variant">A clear photo facing the camera gives your famous portrait the best likeness.</p></div>
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">{template.name}</p><h1 className="mt-2 text-3xl font-black text-on-surface">Choose your pet's photo</h1><p className="mt-2 text-on-surface-variant">A clear photo facing the camera gives the image generator the best chance of preserving your pet's face, markings, and expression.</p></div>
       <button type="button" onClick={() => photoInput.current?.click()} className="min-h-64 w-full overflow-hidden rounded-3xl border-2 border-dashed border-outline-variant bg-surface-container-low transition hover:border-primary">
         <span className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
           <ImagePlus size={40} className="text-primary" />
@@ -656,16 +689,6 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
       <button type="button" onClick={() => setPhotosConfirmed(true)} disabled={photos.length === 0} className="mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-6 font-black text-on-primary disabled:opacity-40 sm:w-auto">
         Continue <ArrowRight size={18} />
       </button>
-    </main>
-  );
-
-  if (!template) return (
-    <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8">
-      <button onClick={() => setPhotosConfirmed(false)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Photo</button>
-      <h1 className="text-3xl font-black">Choose your famous portrait</h1><p className="mt-2 text-on-surface-variant">Pick the story that feels most like your pet. You can personalize the title and message next.</p>
-      <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {categoryTemplates.map((item, index) => <button key={item.layoutId} onClick={() => chooseTemplate(item)} className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface text-left transition hover:border-primary/50 hover:shadow-lg"><div className="aspect-[16/9] p-6" style={{ background: CATEGORY_META[category]?.colors[index % 2 ? 1 : 0], color: CATEGORY_META[category]?.colors[2] }}><span className="text-5xl opacity-50">{CATEGORY_META[category]?.symbol}</span></div><div className="p-5"><strong className="text-base">{item.name}</strong><span className="mt-1 block text-xs capitalize text-on-surface-variant">{item.tone} · {VARIATIONS.length} variations</span></div></button>)}
-      </div>
     </main>
   );
 

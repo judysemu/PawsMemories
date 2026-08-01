@@ -3148,20 +3148,48 @@ async function startServer() {
         }
       }
 
-      // Pawprints is a manual stationery editor. The browser composites the
-      // user's exact text and photo, then submits the selected variation. No LLM
-      // writes or rewrites user copy and no animation payload enters this path.
-      // renderedPng remains accepted for older deployed clients during rollout.
-      const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
-      const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
-      if (!renderedMatch) {
-        if (creditReservationId) {
-          await refundReservedCredits(creditReservationId);
-          creditReservationId = null;
+      let sourceBuffer: Buffer;
+      if (category === "historic_portraits") {
+        const identityImage = String(req.body?.photoBase64 || "");
+        if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(identityImage)) {
+          if (creditReservationId) {
+            await refundReservedCredits(creditReservationId);
+            creditReservationId = null;
+          }
+          return res.status(400).json({ error: "Choose the pet photo to use in this historic portrait." });
         }
-        return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
+        const identity = splitDataUrl(identityImage);
+        const historicPrompt = [
+          "The uploaded image is the identity reference for the customer's pet.",
+          "Preserve the exact species, face, eye color, ear shape, muzzle, coat length, coat pattern, markings, proportions, and expression.",
+          template.imagePromptTemplate,
+          "Create one finished vertical 4:5 portrait with the pet facing the viewer.",
+          "Do not include captions, names, logos, watermarks, signatures, human faces, human hands, random text, extra limbs, or floating paws.",
+        ].join(" ");
+        const generated = await generateImageWithFallback(
+          [{ inlineData: { data: identity.data, mimeType: identity.mimeType } }, { text: historicPrompt }],
+          "historic-pawprint-reference",
+          req.user!.phone,
+          undefined,
+          "4:5",
+        );
+        const generatedMatch = generated && /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(generated);
+        if (!generatedMatch) throw new Error("Historic portrait generation returned no image.");
+        sourceBuffer = Buffer.from(generatedMatch[2], "base64");
+      } else {
+        // Standard Pawprints remain a manual stationery editor. The browser
+        // composites the user's exact text and photo before submitting it.
+        const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
+        const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
+        if (!renderedMatch) {
+          if (creditReservationId) {
+            await refundReservedCredits(creditReservationId);
+            creditReservationId = null;
+          }
+          return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
+        }
+        sourceBuffer = Buffer.from(renderedMatch[2], "base64");
       }
-      const sourceBuffer = Buffer.from(renderedMatch[2], "base64");
       if (sourceBuffer.length < 1_000 || sourceBuffer.length > 15 * 1024 * 1024) {
         throw new Error("Rendered Pawprint size is invalid.");
       }
@@ -4000,7 +4028,8 @@ async function startServer() {
     parts: any[],
     label: string,
     userPhone: string,
-    errRef?: { code?: number | string; message?: string; quota?: boolean }
+    errRef?: { code?: number | string; message?: string; quota?: boolean },
+    aspectRatio: "1:1" | "4:5" = "1:1",
   ): Promise<string | null> {
     for (const model of IMAGE_MODELS) {
       try {
@@ -4015,7 +4044,7 @@ async function startServer() {
           // All current Nano Banana models honour imageConfig.aspectRatio.
           config: {
             responseModalities: ["IMAGE", "TEXT"],
-            imageConfig: { aspectRatio: "1:1" },
+            imageConfig: { aspectRatio },
           },
         });
         const cand: any = response.candidates?.[0];

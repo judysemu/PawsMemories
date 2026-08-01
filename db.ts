@@ -3714,7 +3714,7 @@ export interface PawprintTemplate {
   fieldSchema: { key: string; type: "text" | "image" | "name" | "message"; label: string; maxLength?: number }[];
   imagePromptTemplate: string;
   sourceUrl?: string;
-  sourceLicense?: "CC0-1.0";
+  sourceLicense?: "CC0-1.0" | "owned-generated";
   sourceName?: string;
 }
 

@@ -16,14 +16,16 @@ test("wardrobe exposes exactly 15 uniquely selectable meter-scale CC0 items", ()
   }
 });
 
-test("every Pawprints category has four free-source templates", () => {
+test("Pawprints templates have either a free source or owned generated art", () => {
   const categories = getPawprintCategories();
   const templates = getPawprintTemplatesSync();
   for (const category of categories) {
     const matching = templates.filter((template) => template.category === category);
     assert.ok(matching.length >= 4, `${category} should have at least four templates`);
     assert.equal(new Set(matching.map((template) => template.layoutId)).size, matching.length);
-    assert.ok(matching.every((template) => template.sourceLicense === "CC0-1.0"));
-    assert.ok(matching.every((template) => template.sourceUrl?.startsWith("https://")));
+    assert.ok(matching.every((template) => ["CC0-1.0", "owned-generated"].includes(template.sourceLicense)));
+    assert.ok(matching.every((template) => template.sourceLicense === "owned-generated"
+      ? template.sourceUrl?.startsWith("/collections/")
+      : template.sourceUrl?.startsWith("https://")));
   }
 });
