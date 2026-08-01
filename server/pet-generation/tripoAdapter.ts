@@ -54,7 +54,7 @@ export interface TripoTaskPoll {
  */
 export interface TripoAnimationOps {
   /** animate_rig (UniRig quadruped) on the base model task → rig task handle. */
-  startRig(baseModelTaskHandle: string): Promise<string>;
+  startRig(baseModelTaskHandle: string, rigType?: "biped" | "quadruped"): Promise<string>;
   /** animate_retarget preset:idle|walk on the rig task → retarget task handle. */
   startRetarget(
     rigTaskHandle: string,
@@ -65,7 +65,7 @@ export interface TripoAnimationOps {
 }
 
 const defaultAnimationOps: TripoAnimationOps = {
-  startRig: (h) => startRig(h, { avatarType: "dog" }),
+  startRig: (h, rigType = "quadruped") => startRig(h, { rigType }),
   startRetarget: (h, a) => startRetarget(h, a),
   pollTask: (h) => pollTripoTask(h),
 };
@@ -172,11 +172,13 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
   async createRigJob(sourceJobId: string, subjectProfile: SubjectProfile): Promise<GenerationJob> {
     const source = await this.requireRecord(sourceJobId);
     const rigType = rigTypeForSubject(subjectProfile);
-    const taskHandle = await startRig(source.providerTaskHandle, {
-      rigType,
-      modelVersion: process.env.TRIPO_RIG_MODEL_VERSION || "v2.5-20260210",
-    });
-    return this.persistChainedJob(source, taskHandle, "rig", { subjectProfile, rigType });
+    const taskHandle = await this.ops.startRig(source.providerTaskHandle, rigType);
+    const job = await this.persistChainedJob(source, taskHandle, "rig", { subjectProfile, rigType, animations: ["idle", "walk"] });
+    // A purchased rig is also the source for Tripo's native idle and walk
+    // presets. Persisting this handle lets ordinary staged polling continue
+    // through rig → idle → walk without another customer approval screen.
+    await this.store.update(job.id, { rigTaskHandle: taskHandle });
+    return job;
   }
 
   async getJob(jobId: string): Promise<GenerationJob> {
@@ -187,7 +189,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       return { id: jobId, status: "cancelled", reason: "CANCELLED_BY_CALLER" };
     }
 
-    if (this.animate) return this.advanceAnimatedJob(jobId, record);
+    if (this.animate || record.rigTaskHandle) return this.advanceAnimatedJob(jobId, record);
 
     const poll: ModelBuildPollResult = await this.provider.poll(
       record.providerTaskHandle,
@@ -289,7 +291,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       );
     }
 
-    if (this.animate) return this.fetchAnimatedArtifacts(record, jobId);
+    if (this.animate || record.rigTaskHandle) return this.fetchAnimatedArtifacts(record, jobId);
     if (record.stage === "rig_check") {
       throw new PetGenerationError("NO_ARTIFACT", "A rig capability check does not produce a GLB");
     }

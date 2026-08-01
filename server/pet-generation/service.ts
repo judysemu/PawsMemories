@@ -26,7 +26,6 @@ import {
   type ExactStageApproval,
   type PetGlbStageAttempt,
 } from "./stageRepository";
-import { CREDIT_PRICES } from "../../src/pricing";
 
 export interface PetGlbServiceDeps {
   getPool: () => mysql.Pool;
@@ -555,11 +554,7 @@ export class PetGlbService {
     if (!current || current.attemptUuid !== input.attemptUuid) {
       throw new PetGenerationError("STALE_STAGE", "Retry does not match the current stage");
     }
-    // Each customer-gated stage gets two free correction attempts. A third
-    // attempt is an explicit full-price regeneration of that same stage.
-    const retryPrice = current.attemptNumber <= 2
-      ? CREDIT_PRICES.FIRST_REGENERATION
-      : stagePrice(current.stage);
+    const retryPrice = stagePrice(current.stage);
     const retry = await this.stages.queueRetry({
       orderId: order.id,
       ownerPhone,
@@ -575,6 +570,68 @@ export class PetGlbService {
     });
     await this.startQueuedStage(orderUuid, ownerPhone, retry);
     return this.buildView((await this.orders.findByUuid(orderUuid))!);
+  }
+
+  async retryFullOrder(
+    sourceOrderUuid: string,
+    ownerPhone: string,
+    idempotencyKey: string,
+  ): Promise<PetGlbOrderView> {
+    const source = await this.requireOwned(sourceOrderUuid, ownerPhone);
+    if (source.ownerPhone !== ownerPhone) {
+      throw new PetGenerationError("FORBIDDEN", "A retry must be created by the model owner");
+    }
+    if (!source.referenceManifest) {
+      throw new PetGenerationError("REFERENCES_MISSING", "The original pet photos are not available for this retry");
+    }
+    let retry = await this.orders.createConfiguredRetry(
+      ownerPhone,
+      CUSTOM_RIGGED_PET_GLB_V1,
+      {
+        meshProfile: source.meshProfile,
+        subjectProfile: source.subjectProfile,
+        includeTexture: source.includeTexture,
+        includeRig: source.includeRig,
+        textureQuality: source.textureQuality,
+        styleDirection: source.styleDirection,
+      },
+      source.id,
+      idempotencyKey,
+    );
+
+    if (retry.state === "awaiting_references") {
+      try {
+        await this.submitReferenceManifest(
+          retry.orderUuid,
+          ownerPhone,
+          source.referenceManifest as unknown as PetModelGenerationInput,
+        );
+      } catch (error) {
+        // A concurrent replay can save the same references first. Reload and
+        // continue from the exact persisted stage instead of creating a second order.
+        if (!(error instanceof PetGenerationError) || error.code !== "ILLEGAL_TRANSITION") throw error;
+      }
+      retry = (await this.orders.findByUuid(retry.orderUuid))!;
+    }
+
+    const current = await this.stages.findCurrent(retry.id);
+    if (current?.stage === "reference" && current.state === "awaiting_customer_approval" && current.artifactSha256) {
+      return this.approveCustomerStage(retry.orderUuid, ownerPhone, {
+        idempotencyKey,
+        attemptUuid: current.attemptUuid,
+        artifactSha256: current.artifactSha256,
+        assetVersionId: null,
+        reportSha256: null,
+        approvalHash: canonicalHash({
+          orderUuid: retry.orderUuid,
+          sourceOrderUuid,
+          retryOf: sourceOrderUuid,
+          attemptUuid: current.attemptUuid,
+          artifactSha256: current.artifactSha256,
+        }),
+      });
+    }
+    return this.buildView(retry);
   }
 
   private provider() {
@@ -644,7 +701,7 @@ export class PetGlbService {
         ? error
         : new PetGenerationError(
             "PROVIDER_START_FAILED",
-            "The model provider rejected the approved references. The base-stage PupCoins were refunded.",
+            "The model provider could not start from those references. Open the order to choose the next step.",
           );
     }
   }

@@ -86,6 +86,45 @@ test("animated pipeline advances base→rig→idle→walk and merges idle+walk",
   assert.deepStrictEqual(names, ["idle", "walk"]);
 });
 
+test("a separately purchased staged rig continues through idle and walk without another approval", async () => {
+  const idleGlb = await makeRiggedGlb("tripo_idle", "spine", "translation");
+  const walkGlb = await makeRiggedGlb("tripo_walk", "front_leg.L", "rotation");
+  const rigCalls = [];
+  const fakeProvider = {
+    async start() { return { providerTaskHandle: "tripo:textured-source", provider: "tripo", model: "v2.5" }; },
+    async poll() { return { done: true, progress: 100 }; },
+    async download(url) { return url.includes("idle") ? idleGlb : walkGlb; },
+  };
+  const fakeOps = {
+    async startRig(handle, rigType) { rigCalls.push({ handle, rigType }); return "tripo:rig-stage"; },
+    async startRetarget(_handle, animation) {
+      return animation === "preset:idle" ? "tripo:idle-stage" : "tripo:walk-stage";
+    },
+    async pollTask(handle) {
+      if (handle === "tripo:idle-stage") return { done: true, glbUrl: "http://tripo/idle.glb" };
+      if (handle === "tripo:walk-stage") return { done: true, glbUrl: "http://tripo/walk.glb" };
+      return { done: true, glbUrl: "http://tripo/rig.glb" };
+    },
+  };
+  const adapter = new TripoPetGenerationAdapter(
+    fakeProvider,
+    new InMemoryJobStore(),
+    "v2.5",
+    { animate: false, animationOps: fakeOps },
+  );
+  const source = await adapter.createBaseJob(REFS);
+  const rig = await adapter.createRigJob(source.id, "pet");
+  assert.deepStrictEqual(rigCalls, [{ handle: "tripo:textured-source", rigType: "quadruped" }]);
+
+  let status;
+  for (let poll = 0; poll < 4; poll += 1) status = await adapter.getJob(rig.id);
+  assert.equal(status.status, "completed");
+  const artifacts = await adapter.fetchArtifacts(rig.id);
+  assert.deepStrictEqual(artifacts.metadata.animations, ["idle", "walk"]);
+  const merged = await io.readBinary(new Uint8Array(artifacts.glb.data));
+  assert.deepStrictEqual(merged.getRoot().listAnimations().map((clip) => clip.getName()).sort(), ["idle", "walk"]);
+});
+
 test("a failed Tripo stage surfaces as a failed job, no leak", async () => {
   const fakeProvider = {
     async start() { return { providerTaskHandle: "tripo:base1", provider: "tripo", model: "v2.5" }; },

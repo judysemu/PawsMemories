@@ -25,18 +25,12 @@ export const RegisterFurBinItemRequestSchema = z.object({
 
 export type RegisterFurBinItemRequest = z.infer<typeof RegisterFurBinItemRequestSchema>;
 
-export const SubmitFurBinFeedbackRequestSchema = z.discriminatedUnion("decision", [
-  z.object({
-    decision: z.literal("keep"),
-  }).strict(),
-  z.object({
-    decision: z.literal("toss"),
-    subject: z.string().trim().min(3).max(200),
-    message: z.string().trim().min(10).max(4000),
-  }).strict(),
-]);
+export const SubmitFurBinDefectReportSchema = z.object({
+  subject: z.string().trim().min(3).max(200),
+  message: z.string().trim().min(10).max(4000),
+}).strict();
 
-export type SubmitFurBinFeedbackRequest = z.infer<typeof SubmitFurBinFeedbackRequestSchema>;
+export type SubmitFurBinDefectReport = z.infer<typeof SubmitFurBinDefectReportSchema>;
 
 // ── Create Collection Request ──────────────────────────────────────────────
 export const CreateCollectionRequestSchema = z.object({

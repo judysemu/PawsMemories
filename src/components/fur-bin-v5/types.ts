@@ -46,6 +46,7 @@ export interface FurBinShowcase {
 
 export interface FurBinItem {
   itemUuid: string;
+  assetUuid?: string;
   title: string;
   description: string | null;
   tags: string[];
@@ -63,7 +64,8 @@ export interface FurBinItem {
   versions: FurBinVersion[];
   derivatives: FurBinDerivative[];
   showcase?: FurBinShowcase;
-  feedbackDecision?: "keep" | "toss";
+  sourceOrderUuid?: string;
+  retryPriceCredits?: number;
 }
 
 export interface FurBinCollection {
@@ -117,7 +119,9 @@ export interface FurBinV5Api {
   readonly capabilities: FurBinClientCapabilities;
   searchItems(filters: LibraryFilters): Promise<LibraryPage>;
   getItem(itemUuid: string): Promise<FurBinItem>;
-  submitFeedback(itemUuid: string, input: { decision: "keep" } | { decision: "toss"; subject: string; message: string }): Promise<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }>;
+  deleteItem(itemUuid: string): Promise<{ itemUuid: string; status: "deleted" }>;
+  submitDefectReport(itemUuid: string, input: { subject: string; message: string }): Promise<{ emailSent: boolean; reportUuid: string }>;
+  retryFullOrder(orderUuid: string, idempotencyKey: string): Promise<{ orderUuid: string }>;
   listCollections(): Promise<FurBinCollection[]>;
   createCollection(input: { name: string; description?: string }): Promise<FurBinCollection>;
   addItemToCollection(collectionUuid: string, itemUuid: string): Promise<void>;

@@ -16,9 +16,9 @@ test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () 
   // WAGS_INBOX is a content destination (like Fur Bin), not a creation studio.
   assert.deepEqual(SIDEBAR_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
-    Screen.FURBIN,
     Screen.PAWPRINTS,
     Screen.ANIMATOR,
+    Screen.FURBIN,
     Screen.WAGS_INBOX,
   ]);
   // MOBILE_NAV is NOT "sidebar + Profile". Profile and Voice Test both have a
@@ -27,8 +27,8 @@ test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () 
   // button the row rendered six items into a five-column grid.
   assert.deepEqual(MOBILE_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
-    Screen.FURBIN,
     Screen.PAWPRINTS,
+    Screen.FURBIN,
     Screen.WAGS_INBOX,
   ]);
   assert.ok(!SIDEBAR_NAV.some(({ screen }) => screen === Screen.MODELS || screen === Screen.PAWLISHER));

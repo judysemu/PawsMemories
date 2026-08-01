@@ -70,6 +70,17 @@ export async function findFurBinItemByUuidForUpdate(
   return rows[0] ? parseItemRecord(rows[0]) : null;
 }
 
+export async function findFurBinItemByUuidForUpdateAnyStatus(
+  conn: mysql.PoolConnection,
+  itemUuid: string,
+): Promise<FurBinItemRecord | null> {
+  const [rows]: any = await conn.query(
+    "SELECT * FROM fur_bin_items WHERE item_uuid = ? FOR UPDATE",
+    [itemUuid],
+  );
+  return rows[0] ? parseItemRecord(rows[0]) : null;
+}
+
 export async function findFurBinItemByOwnerAndAsset(
   pool: mysql.Pool | mysql.PoolConnection,
   ownerId: string,
@@ -180,13 +191,17 @@ export async function archiveFurBinItem(conn: mysql.PoolConnection, itemId: numb
   await conn.query("UPDATE fur_bin_items SET status = 'archived' WHERE id = ? AND status = 'active'", [itemId]);
 }
 
+export async function deleteFurBinItem(conn: mysql.PoolConnection, itemId: number): Promise<void> {
+  await conn.query("UPDATE fur_bin_items SET status = 'deleted' WHERE id = ? AND status != 'deleted'", [itemId]);
+}
+
 export async function insertFurBinVersionEvent(
   conn: mysql.PoolConnection,
   data: {
     eventUuid: string;
     itemId: number;
     actorId: string;
-    eventType: "registered" | "current_changed" | "rollback" | "archived" | "restored";
+    eventType: "registered" | "current_changed" | "rollback" | "archived" | "restored" | "deleted";
     fromVersionId?: number | null;
     toVersionId?: number | null;
     evidenceHash: string;

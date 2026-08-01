@@ -1308,7 +1308,7 @@ export class PetGlbStageRepository {
         input.assetId,
         input.assetVersionId,
         title,
-        "Generated GLB versions are saved automatically. Keep it or send feedback from Fur Bin.",
+        "Your generated model, textures, rig, and saved versions are tracked automatically in Fur Bin.",
         JSON.stringify(["pet-glb", input.stage, "generated"]),
         input.stage === "rig" ? 1 : 0,
         input.stage === "rig" ? 1 : 0,

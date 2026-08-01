@@ -10,7 +10,7 @@ const types = read("src/components/fur-bin-v5/types.ts");
 const styles = read("src/components/fur-bin-v5/furBinV5.css");
 
 test("Fur Bin V5 is dark-launched without replacing the legacy false path", () => {
-  assert.match(screen, /VITE_FUR_BIN_V5_ENABLED\s*===\s*["']true["']/);
+  assert.match(screen, /VITE_FUR_BIN_V5_ENABLED\s*!==\s*["']false["']/);
   assert.match(screen, /React\.lazy\(\(\)\s*=>\s*import\(["']\.\/fur-bin-v5["']\)\)/);
   assert.match(screen, /fetchModelLibrary\(\)/, "legacy library behavior must remain in the component");
   assert.match(screen, /fetchModelPrintOrders\(\)/, "legacy print-order behavior must remain in the component");
@@ -26,14 +26,11 @@ test("Fur Bin V5 exposes an injected API and never exposes internal storage or n
   assert.match(client, /\/api\/fur-bin\/showcase/);
 });
 
-test("private source and public derivative are visibly distinct and separately submitted", () => {
-  assert.match(experience, /Private source/);
-  assert.match(experience, /Public derivative/);
-  assert.match(experience, /separate public derivative/i);
-  assert.match(experience, /disabled=\{!api\.capabilities\.separatePublicDerivative\}/);
-  assert.match(client, /separatePublicDerivative:\s*true/);
-  assert.match(types, /publicDerivativeUuid/);
-  assert.match(types, /publicDerivativeVersionNumber/);
+test("Fur Bin remains private and does not expose the public showcase workflow", () => {
+  assert.match(experience, /private home for every 3D pet/);
+  assert.doesNotMatch(experience, /Public showcase/);
+  assert.doesNotMatch(experience, /Submit for moderation/);
+  assert.doesNotMatch(experience, /Keep it|Toss it/);
 });
 
 test("responsive and accessible contracts include safe gutters, reduced motion, dialogs, and static fallback", () => {
@@ -46,21 +43,21 @@ test("responsive and accessible contracts include safe gutters, reduced motion, 
   assert.match(experience, /aria-modal="true"/);
   assert.match(experience, /event\.key === "Escape"/);
   assert.match(experience, /role="search"/);
-  assert.match(experience, /non-WebGL|does not require WebGL/);
-  assert.doesNotMatch(experience, /PetModelViewer|<Canvas|useGLTF|from ["']three/);
+  assert.match(experience, /PetModelViewer/);
+  assert.match(experience, /coverUrl/);
 });
 
 test("library states and required product controls are present", () => {
   for (const contract of [
-    "Opening your private library",
-    "No models match those filters",
+    "Opening your Fur Bin",
+    "No creations match those filters",
     "Try again",
     "Version history",
     "Make current",
-    "Refresh link",
-    "Archive item",
+    "Refresh viewer",
+    "Delete",
     "New collection",
-    "Submit for moderation",
-    "Unpublish",
+    "Retry full build",
+    "Send a message",
   ]) assert.match(experience, new RegExp(contract));
 });

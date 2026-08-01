@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 46;
+export const CURRENT_SCHEMA_VERSION = 47;
 
 export interface Migration {
   version: number;
@@ -2312,6 +2312,27 @@ export const MIGRATIONS: Migration[] = [
         KEY idx_ai_video_provider (provider, created_at),
         CONSTRAINT fk_ai_video_job FOREIGN KEY (job_id) REFERENCES generation_jobs(id) ON DELETE RESTRICT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 47,
+    name: "fur_bin_private_actions_and_full_retry",
+    statements: [
+      `ALTER TABLE fur_bin_feedback MODIFY COLUMN decision ENUM('keep','toss','defect') NOT NULL`,
+      `ALTER TABLE fur_bin_version_events MODIFY COLUMN event_type ENUM('registered','current_changed','rollback','archived','restored','deleted') NOT NULL`,
+
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_orders' AND COLUMN_NAME='retry_source_order_id'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_orders ADD COLUMN retry_source_order_id BIGINT NULL AFTER style_direction','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_orders' AND COLUMN_NAME='retry_idempotency_key'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pet_glb_orders ADD COLUMN retry_idempotency_key CHAR(36) NULL AFTER retry_source_order_id','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_orders' AND INDEX_NAME='uniq_pet_glb_retry_owner_key'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE pet_glb_orders ADD UNIQUE KEY uniq_pet_glb_retry_owner_key (owner_phone, retry_idempotency_key)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_orders' AND INDEX_NAME='idx_pet_glb_retry_source'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE pet_glb_orders ADD KEY idx_pet_glb_retry_source (retry_source_order_id, created_at)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },
 ];

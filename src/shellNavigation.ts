@@ -58,9 +58,9 @@ export const SHELL_ICON_NAV: ShellIconNavItem[] = [
 
 export const SIDEBAR_NAV: ShellNavigationItem[] = [
   { id: "home", label: "Home", screen: Screen.DASHBOARD, materialIcon: "home" },
-  { id: "fur-bin", label: "Fur Bin©️", screen: Screen.FURBIN, materialIcon: "inventory_2" },
   { id: "pawprints", label: "Pawprints", screen: Screen.PAWPRINTS, materialIcon: "auto_stories" },
-  { id: "animate", label: "Fur Reels", screen: Screen.ANIMATOR, materialIcon: "movie_creation" },
+  { id: "animate", label: "Fur Reels", screen: Screen.ANIMATOR, materialIcon: "movie_creation", imageSrc: "/brand/fur-reels-icon.png" },
+  { id: "fur-bin", label: "Fur Bin©️", screen: Screen.FURBIN, materialIcon: "inventory_2" },
   { id: "wags-inbox", label: "Wags", screen: Screen.WAGS_INBOX, materialIcon: "redeem" },
   // 2026-07-30: "Scaled BIM" removed from the left panel per owner request —
   // BIM modeling has been split into its own project (see memory:

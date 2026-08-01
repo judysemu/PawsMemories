@@ -59,6 +59,10 @@ export const StageRetrySchema = z.object({
   attemptUuid: z.string().uuid(),
 }).strict();
 
+export const FullOrderRetrySchema = z.object({
+  idempotencyKey: z.string().uuid(),
+}).strict();
+
 export function canonicalHash(value: unknown): string {
   return crypto
     .createHash("sha256")
@@ -92,7 +96,7 @@ export function meshProfilePolicy(profile: MeshProfile): MeshProfilePolicy {
     return {
       profile,
       modelVersion: process.env.TRIPO_SMARTMESH_MODEL_VERSION || "P1-20260311",
-      faceLimit: boundedEnvInt("PET_GLB_SMARTMESH_FACE_LIMIT", 8_000, 48, 20_000),
+      faceLimit: boundedEnvInt("PET_GLB_SMARTMESH_FACE_LIMIT", 7_000, 48, 20_000),
       maxTriangles: boundedEnvInt("PET_GLB_SMARTMESH_MAX_TRIANGLES", 10_000, 500, 20_000),
       // P1 is inherently low-poly and rejects smart_low_poly.
       smartLowPoly: false,

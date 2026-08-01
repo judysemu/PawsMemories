@@ -104,6 +104,7 @@ export interface ModerationHistoryRecord {
 
 export interface FurBinItemPublic {
   itemUuid: string;
+  assetUuid?: string;
   title: string;
   description: string | null;
   tags: string[];
@@ -122,7 +123,8 @@ export interface FurBinItemPublic {
   showcase?: ShowcaseRecordPublic;
   signedViewUrl?: string; // Short-lived signed URL for model view
   coverUrl?: string;
-  feedbackDecision?: "keep" | "toss";
+  sourceOrderUuid?: string;
+  retryPriceCredits?: number;
   createdAt: string;
   updatedAt: string;
 }

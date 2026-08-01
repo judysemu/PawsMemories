@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, beforeEach, afterEach } from "node:test";
 
 process.env.TRIPO_API_KEY = "test-key";
-const { startRig, startRetarget, pollTripoTask, isTripoInsufficientCredit, TripoError } = await import("../tripo.ts");
+const { startRig, startRetarget, pollTripoTask, selectTripoGlbUrl, isTripoInsufficientCredit, TripoError } = await import("../tripo.ts");
 
 let captured;
 const realFetch = global.fetch;
@@ -55,6 +55,14 @@ test("pollTripoTask returns glbUrl on success", async () => {
   const r = await pollTripoTask("tripo:rig123");
   assert.equal(r.done, true);
   assert.equal(r.glbUrl, "https://cdn/rigged.glb");
+});
+
+test("texture-bearing PBR output wins over an untextured generic model URL", () => {
+  assert.equal(selectTripoGlbUrl({
+    model: "https://cdn/base.glb",
+    pbr_model: "https://cdn/textured-pbr.glb",
+    base_model: "https://cdn/textured-base.glb",
+  }), "https://cdn/textured-pbr.glb");
 });
 
 test("pollTripoTask reports failure status", async () => {

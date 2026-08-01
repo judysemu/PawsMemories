@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 /**
  * model-viewer is a reviewed, lockfile-pinned application dependency. It is
@@ -79,12 +79,44 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
   const [ready, setReady] = useState(
     typeof window !== "undefined" && !!(window as any).customElements?.get("model-viewer")
   );
+  const [loadFailed, setLoadFailed] = useState(false);
+  const viewerRef = useRef<HTMLElement | null>(null);
   const [lowPower] = useState(() => isLowPowerDevice());
 
   // Explicit prop wins; otherwise fall back to poster-only on mobile. Without a
   // poster there is nothing to show, so we still mount the viewer rather than
   // render an empty box.
   const useThumbnail = thumbnail ?? (lowPower && !!poster);
+
+  useEffect(() => {
+    let active = true;
+    ensureModelViewer().then(() => {
+      if (active) setReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!ready || !viewer) return;
+    // React may assign custom-element properties without reflecting them back
+    // to attributes. model-viewer begins its fetch from the `src` attribute,
+    // so reflect it explicitly and keep signed URL refreshes deterministic.
+    viewer.setAttribute("src", src);
+    if (poster) viewer.setAttribute("poster", poster);
+    else viewer.removeAttribute("poster");
+    setLoadFailed(false);
+    const failed = () => setLoadFailed(true);
+    const loaded = () => setLoadFailed(false);
+    viewer.addEventListener("error", failed);
+    viewer.addEventListener("load", loaded);
+    return () => {
+      viewer.removeEventListener("error", failed);
+      viewer.removeEventListener("load", loaded);
+    };
+  }, [poster, ready, src]);
 
   if (useThumbnail) {
     return poster ? (
@@ -105,15 +137,9 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
     );
   }
 
-  useEffect(() => {
-    let active = true;
-    ensureModelViewer().then(() => {
-      if (active) setReady(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  if (loadFailed && poster) {
+    return <img src={poster} alt={alt} className={className} style={{ width: "100%", height: "100%", objectFit: "contain", background: "transparent" }} />;
+  }
 
   if (!ready) {
     return (
@@ -128,12 +154,14 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
   return (
     // @ts-expect-error - Custom web component loaded on demand
     <model-viewer
+      ref={viewerRef}
       src={src}
       poster={poster}
       alt={alt}
       camera-controls={true}
       auto-rotate={autoRotate ? true : undefined}
       camera-orbit={FRONT_ORBIT}
+      interaction-prompt="none"
       animation-name={animationName}
       animation-crossfade-duration={animationCrossfade !== undefined ? animationCrossfade : 300}
       autoplay={false}

@@ -750,7 +750,9 @@ export default function App() {
                     onClick={() => item.screen === Screen.ANIMATOR ? openAnimationStudio() : setCurrentScreen(item.screen)}
                     className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all ${currentScreen === item.screen ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:bg-secondary-container/50 dark:hover:bg-surface-variant/30"}`}
                   >
-                    <NavIcon size={20} strokeWidth={1.9} aria-hidden="true" />
+                    {item.imageSrc
+                      ? <img src={item.imageSrc} alt="" aria-hidden="true" className={`h-6 w-6 shrink-0 object-contain ${currentScreen === item.screen ? "invert" : "dark:invert"}`} />
+                      : <NavIcon size={20} strokeWidth={1.9} aria-hidden="true" />}
                     <span className="min-w-0 truncate font-medium">{item.label}</span>
                   </button>
                 );

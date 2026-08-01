@@ -137,7 +137,7 @@ test("SmartMesh and HD produce different real provider geometry contracts", asyn
   assert.equal(calls[0].geometry.modelVersion, "v3.1-20260211");
   assert.equal(calls[0].geometry.faceLimit, 100_000);
   assert.equal(calls[1].geometry.modelVersion, "P1-20260311");
-  assert.equal(calls[1].geometry.faceLimit, 8_000);
+  assert.equal(calls[1].geometry.faceLimit, 7_000);
   assert.ok(calls[1].geometry.faceLimit < calls[0].geometry.faceLimit);
 });
 
@@ -218,7 +218,7 @@ test("model studio requires four source photos and generates approval views", ()
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  assert.equal(CURRENT_SCHEMA_VERSION, 45);
+  assert.equal(CURRENT_SCHEMA_VERSION, 47);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);
@@ -278,15 +278,12 @@ test("provider and persisted-artifact recovery paths are implemented, not docume
   assert.match(service, /startedJobId/);
 });
 
-test("an operator can inspect and release the exact customer-approved version from the real studio", () => {
+test("an operator can inspect and release the exact customer-approved version through the protected backend", () => {
   const service = fs.readFileSync("server/pet-generation/service.ts", "utf8");
   const routes = fs.readFileSync("server/pet-generation/routes.ts", "utf8");
-  const studio = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
   assert.match(service, /operatorPreview/);
   assert.match(service, /order\.finalCustomerVersionId/);
   assert.match(routes, /operator\/orders\/:orderUuid\/preview/);
-  assert.match(studio, /Operator release queue/);
-  assert.match(studio, /Approve exact version & release/);
 });
 
 test("the primary signed-in Create route opens the gated studio and retires wizard sub-routes", () => {
@@ -298,10 +295,19 @@ test("the primary signed-in Create route opens the gated studio and retires wiza
   );
 });
 
-test("PETSIM_RIG_GLOBAL_DAILY_CAP=0 makes rig generation unavailable before charge and provider dispatch", () => {
+test("the legacy PETSIM rig cap cannot silently close the separately priced pet GLB body-rig product", () => {
   const envWithCap0 = { ...process.env, PETSIM_RIG_GLOBAL_DAILY_CAP: "0" };
   const availability = rigGenerationAvailability(envWithCap0);
+  assert.equal(availability.available, true);
+  assert.equal(availability.requestCap, null);
+  assert.equal(availability.reason, null);
+});
+
+test("PET_GLB_BODY_RIG_ENABLED=false explicitly closes the pet GLB rig product", () => {
+  const availability = rigGenerationAvailability({
+    ...process.env,
+    PET_GLB_BODY_RIG_ENABLED: "false",
+  });
   assert.equal(availability.available, false);
-  assert.equal(availability.requestCap, 0);
-  assert.match(availability.reason, /temporarily closed/);
+  assert.match(availability.reason, /disabled/);
 });

@@ -14,6 +14,7 @@ import {
 
 interface ServerItemDto {
   itemUuid: string;
+  assetUuid?: string;
   title: string;
   description: string | null;
   tags: string[];
@@ -34,7 +35,8 @@ interface ServerItemDto {
   versions?: FurBinItem["versions"];
   derivatives?: FurBinItem["derivatives"];
   showcase?: FurBinShowcase;
-  feedbackDecision?: "keep" | "toss";
+  sourceOrderUuid?: string;
+  retryPriceCredits?: number;
 }
 
 interface ServerShowcaseDto extends Omit<FurBinShowcase, never> {}
@@ -74,6 +76,7 @@ function measuredBadges(item: ServerItemDto): MeasuredBadge[] {
 function mapItem(item: ServerItemDto): FurBinItem {
   return {
     itemUuid: item.itemUuid,
+    assetUuid: item.assetUuid,
     title: item.title,
     description: item.description,
     tags: Array.isArray(item.tags) ? item.tags : [],
@@ -91,7 +94,8 @@ function mapItem(item: ServerItemDto): FurBinItem {
     versions: Array.isArray(item.versions) ? item.versions : [],
     derivatives: Array.isArray(item.derivatives) ? item.derivatives : [],
     showcase: item.showcase,
-    feedbackDecision: item.feedbackDecision,
+    sourceOrderUuid: item.sourceOrderUuid,
+    retryPriceCredits: item.retryPriceCredits,
   };
 }
 
@@ -144,15 +148,36 @@ export function createHttpFurBinV5Api(): FurBinV5Api {
       return mapItem(item);
     },
 
-    async submitFeedback(itemUuid, input) {
-      return parseResponse<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }>(
-        await authedFetch(`/api/fur-bin/items/${encodeURIComponent(itemUuid)}/feedback`, {
+    async deleteItem(itemUuid) {
+      return parseResponse<{ itemUuid: string; status: "deleted" }>(
+        await authedFetch(`/api/fur-bin/items/${encodeURIComponent(itemUuid)}`, {
+          method: "DELETE",
+        }),
+        "Could not delete this item.",
+      );
+    },
+
+    async submitDefectReport(itemUuid, input) {
+      return parseResponse<{ emailSent: boolean; reportUuid: string }>(
+        await authedFetch(`/api/fur-bin/items/${encodeURIComponent(itemUuid)}/defect-report`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(input),
         }),
-        "Could not save your model feedback.",
+        "Could not send your message.",
       );
+    },
+
+    async retryFullOrder(orderUuid, idempotencyKey) {
+      const result = await parseResponse<{ order: { orderUuid: string } }>(
+        await authedFetch(`/api/pet-glb/orders/${encodeURIComponent(orderUuid)}/retry-full`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idempotencyKey }),
+        }),
+        "Could not start the full-price retry.",
+      );
+      return { orderUuid: result.order.orderUuid };
     },
 
     async listCollections(): Promise<FurBinCollection[]> {

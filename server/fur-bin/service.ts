@@ -13,11 +13,13 @@ import {
   findFurBinItemByUuid,
   findFurBinItemById,
   findFurBinItemByUuidForUpdate,
+  findFurBinItemByUuidForUpdateAnyStatus,
   findFurBinItemByOwnerAndAsset,
   sumAssetVersionStorageBytes,
   searchFurBinItems,
   updateItemVersionPointer,
   archiveFurBinItem,
+  deleteFurBinItem,
   insertFurBinVersionEvent,
   findFurBinVersions,
   findFurBinDerivatives,
@@ -46,7 +48,8 @@ import {
 } from "../assets/repository";
 import { generateSignedUrlForVersion } from "../assets/access";
 import { sendMail } from "../mail";
-import type { SubmitFurBinFeedbackRequest } from "./schemas";
+import type { SubmitFurBinDefectReport } from "./schemas";
+import { petGlbTotalCost } from "../../src/pricing";
 
 export class FurBinError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -134,20 +137,22 @@ export class FurBinService {
     }
   }
 
-  async submitFeedback(
+  async submitDefectReport(
     ownerId: string,
     itemUuid: string,
-    input: SubmitFurBinFeedbackRequest,
-  ): Promise<{ decision: "keep" | "toss"; emailSent: boolean; feedbackUuid: string }> {
+    input: SubmitFurBinDefectReport,
+  ): Promise<{ emailSent: boolean; reportUuid: string }> {
     assertFurBinV5Enabled();
     const pool = this.getPoolFn();
     const conn = await pool.getConnection();
-    const feedbackUuid = crypto.randomUUID();
-    let feedbackId = 0;
+    const reportUuid = crypto.randomUUID();
+    let reportId = 0;
     let context: Record<string, unknown> = {};
     try {
       await conn.beginTransaction();
-      const item = await findFurBinItemByUuidForUpdate(conn, itemUuid);
+      // A defect message is offered after deletion, so this lookup must retain
+      // the soft-deleted row. The underlying asset/version is never removed.
+      const item = await findFurBinItemByUuidForUpdateAnyStatus(conn, itemUuid);
       if (!item) throw new FurBinError("Fur Bin item not found", "NOT_FOUND");
       if (item.owner_id !== ownerId) throw new FurBinError("Not authorized", "FORBIDDEN");
       const [assetRows] = await conn.query(
@@ -172,12 +177,7 @@ export class FurBinService {
       );
       const order = (orderRows as any[])[0] || null;
       context = {
-        user: {
-          phone: String(user.phone || ownerId),
-          email: user.email || null,
-          fullName: user.full_name || null,
-          city: user.city || null,
-        },
+        user: { phone: String(user.phone || ownerId), email: user.email || null, fullName: user.full_name || null, city: user.city || null },
         furBin: { itemUuid, itemTitle: item.title, itemStatus: item.status },
         asset: {
           assetUuid: asset.asset_uuid || null,
@@ -195,38 +195,21 @@ export class FurBinService {
           createdAt: order.created_at,
         } : null,
       };
-      const emailStatus = input.decision === "toss" ? "pending" : "not_required";
       const [insert] = await conn.query(
         `INSERT INTO fur_bin_feedback
            (feedback_uuid, item_id, owner_id, asset_id, asset_version_id,
             pet_glb_order_uuid, decision, subject, message, context_json, email_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          feedbackUuid,
-          item.id,
-          ownerId,
-          item.asset_id,
-          item.current_version_id,
-          order?.order_uuid || null,
-          input.decision,
-          input.decision === "toss" ? input.subject : null,
-          input.decision === "toss" ? input.message : null,
-          JSON.stringify(context),
-          emailStatus,
-        ],
+         VALUES (?, ?, ?, ?, ?, ?, 'defect', ?, ?, ?, 'pending')`,
+        [reportUuid, item.id, ownerId, item.asset_id, item.current_version_id, order?.order_uuid || null, input.subject, input.message, JSON.stringify(context)],
       );
-      feedbackId = Number((insert as any).insertId);
+      reportId = Number((insert as any).insertId);
       await conn.commit();
     } catch (error: any) {
       await conn.rollback().catch(() => {});
       if (error instanceof FurBinError) throw error;
-      throw new FurBinError(`Could not save model feedback: ${error.message}`, "FEEDBACK_FAILED");
+      throw new FurBinError(`Could not save defect report: ${error.message}`, "FEEDBACK_FAILED");
     } finally {
       conn.release();
-    }
-
-    if (input.decision === "keep") {
-      return { decision: input.decision, emailSent: false, feedbackUuid };
     }
 
     const adminEmail = process.env.MODEL_FEEDBACK_EMAIL || process.env.ADMIN_EMAIL || "rob@stelar.host";
@@ -236,29 +219,23 @@ export class FurBinService {
     const order = context.order as Record<string, unknown> | null;
     const emailSent = await sendMail({
       to: adminEmail,
-      subject: `[Pawsome3D model feedback] ${input.subject}`,
+      subject: `[Pawsome3D model defect] ${input.subject}`,
       replyTo: typeof user.email === "string" ? user.email : undefined,
       html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.55">
-<h2>Customer tossed a generated GLB</h2>
+<h2>Customer reported a generated-model defect</h2>
 <p><strong>Subject:</strong> ${safe(input.subject)}</p>
 <p><strong>Message:</strong><br>${escapeHtml(input.message).replace(/\n/g, "<br>")}</p>
 <h3>Customer</h3>
 <ul><li>Name: ${safe(user.fullName)}</li><li>Email: ${safe(user.email)}</li><li>Phone: ${safe(user.phone)}</li><li>City: ${safe(user.city)}</li></ul>
 <h3>Asset and order</h3>
-<ul><li>Fur Bin item: ${safe(itemUuid)}</li><li>Asset: ${safe(asset.assetUuid)}</li><li>Version: ${safe(asset.versionNumber)}</li><li>SHA-256: ${safe(asset.sha256)}</li><li>Order: ${safe(order?.orderUuid)}</li><li>Order state: ${safe(order?.state)}</li><li>Provider job: ${safe(order?.generationJobId)}</li><li>Feedback record: ${safe(feedbackUuid)}</li></ul>
+<ul><li>Fur Bin item: ${safe(itemUuid)}</li><li>Asset: ${safe(asset.assetUuid)}</li><li>Version: ${safe(asset.versionNumber)}</li><li>SHA-256: ${safe(asset.sha256)}</li><li>Order: ${safe(order?.orderUuid)}</li><li>Order state: ${safe(order?.state)}</li><li>Provider job: ${safe(order?.generationJobId)}</li><li>Report record: ${safe(reportUuid)}</li></ul>
 </div>`,
     });
     await pool.query(
-      `UPDATE fur_bin_feedback
-          SET email_status = ?, email_error = ?
-        WHERE id = ?`,
-      [
-        emailSent ? "sent" : (process.env.RESEND_API_KEY && process.env.MAIL_FROM ? "failed" : "unconfigured"),
-        emailSent ? null : "Admin email was not accepted by the configured mail service",
-        feedbackId,
-      ],
+      `UPDATE fur_bin_feedback SET email_status = ?, email_error = ? WHERE id = ?`,
+      [emailSent ? "sent" : (process.env.RESEND_API_KEY && process.env.MAIL_FROM ? "failed" : "unconfigured"), emailSent ? null : "Admin email was not accepted by the configured mail service", reportId],
     );
-    return { decision: input.decision, emailSent, feedbackUuid };
+    return { emailSent, reportUuid };
   }
 
   // ── 2. Search & View Private Library ──────────────────────────────────────
@@ -390,6 +367,42 @@ export class FurBinService {
       await conn.rollback();
       if (err instanceof FurBinError) throw err;
       throw new FurBinError(`Archive failed: ${err.message}`, "ARCHIVE_FAILED");
+    } finally {
+      conn.release();
+    }
+  }
+
+  async deleteItem(ownerId: string, itemUuid: string): Promise<{ itemUuid: string; status: "deleted" }> {
+    assertFurBinV5Enabled();
+    const conn = await this.getPoolFn().getConnection();
+    try {
+      await conn.beginTransaction();
+      const item = await findFurBinItemByUuidForUpdateAnyStatus(conn, itemUuid);
+      if (!item) throw new FurBinError("Item not found", "NOT_FOUND");
+      if (item.owner_id !== ownerId) throw new FurBinError("Not authorized", "FORBIDDEN");
+      if (item.status !== "deleted") {
+        await deleteFurBinItem(conn, item.id);
+        await insertFurBinVersionEvent(conn, {
+          eventUuid: crypto.randomUUID(),
+          itemId: item.id,
+          actorId: ownerId,
+          eventType: "deleted",
+          fromVersionId: item.current_version_id,
+          toVersionId: item.current_version_id,
+          evidenceHash: auditEvidenceHash("fur-bin-version", {
+            itemUuid,
+            eventType: "deleted",
+            versionId: item.current_version_id,
+            storageRetained: true,
+          }),
+        });
+      }
+      await conn.commit();
+      return { itemUuid, status: "deleted" };
+    } catch (err: any) {
+      await conn.rollback();
+      if (err instanceof FurBinError) throw err;
+      throw new FurBinError(`Delete failed: ${err.message}`, "DELETE_FAILED");
     } finally {
       conn.release();
     }
@@ -736,6 +749,7 @@ export class FurBinService {
   private async formatItemPublic(pool: mysql.Pool, ownerId: string, item: any): Promise<FurBinItemPublic> {
     let signedViewUrl: string | undefined;
     let currentVersionNumber: number | undefined;
+    let assetUuid: string | undefined;
     let evidence: any | null = null;
 
     if (item.current_version_id) {
@@ -747,6 +761,7 @@ export class FurBinService {
             throw new FurBinError("Item asset lineage is invalid", "INVALID_ASSET");
           }
           signedViewUrl = (await this.signUrl(asset, version, ownerId, false)) || undefined;
+          assetUuid = asset.asset_uuid;
           currentVersionNumber = version.version_number;
           evidence = await findMeasuredCapabilityEvidence(pool, ownerId, asset.id, version.id);
         }
@@ -763,14 +778,27 @@ export class FurBinService {
     const hasRig = badges.find((badge) => badge.id === "rig")?.state === "verified";
     const hasFacial = badges.find((badge) => badge.id === "facial")?.state === "verified";
     const hasAnimations = badges.find((badge) => badge.id === "animation")?.state === "verified";
-    const [feedbackRows] = await pool.query(
-      "SELECT decision FROM fur_bin_feedback WHERE item_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1",
-      [item.id, ownerId],
+    const [orderRows] = await pool.query(
+      `SELECT order_uuid, reference_manifest_json, include_texture, include_rig
+         FROM pet_glb_orders
+        WHERE owner_phone = ? AND asset_id = ?
+        ORDER BY id DESC LIMIT 1`,
+      [ownerId, item.asset_id],
     );
-    const feedbackDecision = (feedbackRows as any[])[0]?.decision as "keep" | "toss" | undefined;
+    const sourceOrder = (orderRows as any[])[0] || null;
+    const manifest = sourceOrder
+      ? (typeof sourceOrder.reference_manifest_json === "string"
+          ? JSON.parse(sourceOrder.reference_manifest_json || "{}")
+          : sourceOrder.reference_manifest_json || {})
+      : {};
+    const coverUrl = typeof manifest.frontUrl === "string" ? manifest.frontUrl : undefined;
+    const retryPriceCredits = sourceOrder
+      ? petGlbTotalCost({ texture: Boolean(sourceOrder.include_texture), rig: Boolean(sourceOrder.include_rig) })
+      : undefined;
 
     return {
       itemUuid: item.item_uuid,
+      assetUuid,
       title: item.title,
       description: item.description,
       tags: item.tags_json,
@@ -804,7 +832,9 @@ export class FurBinService {
       })),
       showcase,
       signedViewUrl,
-      feedbackDecision,
+      coverUrl,
+      sourceOrderUuid: sourceOrder?.order_uuid || undefined,
+      retryPriceCredits,
       createdAt: new Date(item.created_at).toISOString(),
       updatedAt: new Date(item.updated_at).toISOString(),
     };

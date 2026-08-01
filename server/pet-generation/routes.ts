@@ -9,6 +9,7 @@ import {
   canonicalHash,
   CreatePetGlbOrderSchema,
   FACIAL_RIG_POLICY,
+  FullOrderRetrySchema,
   meshProfilePolicy,
   ReferenceManifestSchema,
   rigGenerationAvailability,
@@ -104,7 +105,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
           "Measurements improve scale confidence.",
           "Hidden anatomy and exact dimensions cannot be reliably inferred from photographs alone.",
           "Generated GLB versions are saved automatically in your Fur Bin.",
-          "Use Keep it or Toss it in Fur Bin to send feedback after generation.",
+          "Use Retry full build or Delete from Fur Bin after generation.",
         ],
       },
     });
@@ -163,6 +164,16 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
       res.json(await service.getOrderView(req.params.orderUuid, phone));
+    } catch (err) { fail(res, err); }
+  });
+
+  router.post("/orders/:orderUuid/retry-full", writeLimiter, async (req, res) => {
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const parsed = FullOrderRetrySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "INVALID_RETRY" });
+    try {
+      res.status(201).json(await service.retryFullOrder(req.params.orderUuid, phone, parsed.data.idempotencyKey));
     } catch (err) { fail(res, err); }
   });
 

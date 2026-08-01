@@ -8,7 +8,7 @@ import { FurBinService, FurBinError } from "./service";
 import {
   SearchFurBinRequestSchema,
   RegisterFurBinItemRequestSchema,
-  SubmitFurBinFeedbackRequestSchema,
+  SubmitFurBinDefectReportSchema,
   CreateCollectionRequestSchema,
   AddCollectionItemRequestSchema,
   PublishShowcaseRequestSchema,
@@ -121,11 +121,19 @@ export function createFurBinRouter(
     }
   });
 
-  router.post("/items/:uuid/feedback", requireAuth, async (req: Request, res: Response) => {
+  router.delete("/items/:uuid", requireAuth, async (req: Request, res: Response) => {
     try {
-      const body = SubmitFurBinFeedbackRequestSchema.parse(req.body);
-      const result = await service.submitFeedback(ownerId(req), req.params.uuid, body);
-      res.status(body.decision === "toss" && !result.emailSent ? 202 : 201).json(result);
+      res.json(await service.deleteItem(ownerId(req), req.params.uuid));
+    } catch (err: any) {
+      handleError(res, err);
+    }
+  });
+
+  router.post("/items/:uuid/defect-report", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const body = SubmitFurBinDefectReportSchema.parse(req.body);
+      const result = await service.submitDefectReport(ownerId(req), req.params.uuid, body);
+      res.status(result.emailSent ? 201 : 202).json(result);
     } catch (err: any) {
       handleError(res, err);
     }
@@ -232,6 +240,8 @@ function handleError(res: Response, err: any): void {
       INVALID_LINEAGE: 422,
       INVALID_STATE: 409,
       ADMIN_REQUIRED: 403,
+      FEEDBACK_FAILED: 500,
+      DELETE_FAILED: 500,
     };
     res.status(statusMap[err.code] || 400).json({ error: err.message, code: err.code });
     return;

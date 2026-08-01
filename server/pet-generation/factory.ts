@@ -53,8 +53,9 @@ export function createProviderForSku(
       new TripoModelBuildAdapter(),
       options.store ?? new InMemoryJobStore(),
       binding.providerVersion,
-      // This paid product is customer-gated. Automatic chaining would skip
-      // paid approvals, so every provider task is started explicitly.
+      // Reference approval starts the paid build. Base and texture remain
+      // explicit stages; the purchased body-rig stage internally completes
+      // Tripo's idle/walk presets without another customer gate.
       { animate: false },
     );
   }

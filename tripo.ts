@@ -429,6 +429,16 @@ export interface TripoPollResult {
 /** Poll any Tripo task (generation, rig, or retarget) for its GLB output. */
 export const pollTripoTask = pollImageTo3D;
 
+export function selectTripoGlbUrl(output: Record<string, unknown>): string | undefined {
+  // Texture tasks may return both their untouched source under `model` and
+  // their baked material result under `pbr_model`. Always retain the richest
+  // artifact so a successful texture stage cannot quietly save the blank mesh.
+  for (const candidate of [output.pbr_model, output.model, output.model_url, output.base_model]) {
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
 export async function pollImageTo3D(operationName: string): Promise<TripoPollResult> {
   const taskId = tripoTaskId(operationName);
   const res = await fetch(`${TRIPO_BASE}/task/${encodeURIComponent(taskId)}`, {
@@ -495,7 +505,7 @@ export async function pollImageTo3D(operationName: string): Promise<TripoPollRes
       };
     }
     // Try multiple possible field names for the GLB download URL
-    const glbUrl = output.model || output.model_url || output.pbr_model || output.base_model;
+    const glbUrl = selectTripoGlbUrl(output);
     console.log(`[Tripo] Task ${taskId} reached success`);
     if (!glbUrl) {
       return {

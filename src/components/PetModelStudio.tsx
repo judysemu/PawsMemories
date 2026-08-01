@@ -233,14 +233,14 @@ export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
-  const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
+  const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(true);
-  const [includeRig, setIncludeRig] = useState(false);
+  const [includeRig, setIncludeRig] = useState(true);
   const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
-  const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("multi");
+  const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("image");
   const [collarSizeClass, setCollarSizeClass] = useState<CollarSizeClass>("medium_dog");
   const [neckCircumferenceMm, setNeckCircumferenceMm] = useState(400);
   const [collarWidthMm, setCollarWidthMm] = useState(25);
@@ -272,7 +272,15 @@ export default function PetModelStudio() {
         const productBody = await productResponse.json();
         if (!productResponse.ok) throw new Error(productBody?.message || "Model generator is unavailable.");
         setProduct(productBody);
-        if (ordersResponse.ok) setRecentOrders(await ordersResponse.json());
+        if (ordersResponse.ok) {
+          const orders = await ordersResponse.json() as OrderView[];
+          setRecentOrders(orders);
+          const requestedOrder = new URLSearchParams(window.location.search).get("order");
+          const requestedView = requestedOrder
+            ? orders.find((candidate) => candidate.order.orderUuid === requestedOrder)
+            : undefined;
+          if (requestedView) setView(requestedView);
+        }
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Model generator is unavailable."));
   }, []);
@@ -880,7 +888,7 @@ export default function PetModelStudio() {
                 ))}
               </div>
             ) : previewUrl ? (
-              <PetModelViewer src={previewUrl} alt={`${stage ? STAGE_LABELS[stage.stage] : "Model"} preview`} className="h-[520px] w-full" />
+              <PetModelViewer src={previewUrl} poster={view.order.referenceManifest?.frontUrl || undefined} alt={`${stage ? STAGE_LABELS[stage.stage] : "Model"} preview`} autoRotate={false} className="h-[520px] w-full" />
             ) : (
               <div className="flex min-h-[480px] items-center justify-center p-8 text-center">
                 <div className="max-w-md space-y-3">
@@ -889,7 +897,7 @@ export default function PetModelStudio() {
                     {stage?.state === "processing" || stage?.state === "queued"
                       ? `This stage is running${view.progress !== undefined ? ` · ${view.progress}%` : ""}.`
                       : stage?.assetVersionId
-                        ? "The GLB is registered and stored in your Fur Bin. Load a preview here or choose Keep it/Toss it in Fur Bin."
+                        ? "Your textured model is registered and stored in Fur Bin. Load the secure preview here or open it from your library."
                         : "Complete the current controls to continue."}
                   </p>
                   {stage?.assetVersionId && (
@@ -1008,9 +1016,7 @@ export default function PetModelStudio() {
                 {stage.state === "rejected" && stage.stage !== "reference" && (
                   <button onClick={retry} disabled={busy} className="w-full rounded-2xl bg-cyan-500 px-4 py-2.5 font-semibold text-slate-950">
                     Retry {STAGE_LABELS[stage.stage]}
-                    {stage.attemptNumber < 3
-                      ? ` · ${stage.attemptNumber === 1 ? "first" : "second"} retry free`
-                      : ` · ${stage.stage === "base" ? view.quote.base : stage.stage === "texture" ? view.quote.texture : view.quote.rig} PupCoins`}
+                    {` · ${stage.stage === "base" ? view.quote.base : stage.stage === "texture" ? view.quote.texture : view.quote.rig} PupCoins`}
                   </button>
                 )}
               </div>

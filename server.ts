@@ -5897,8 +5897,10 @@ async function startServer() {
          FROM pet_glb_orders p
          INNER JOIN assets a ON a.id = p.asset_id
          INNER JOIN asset_versions av ON av.id = p.approved_version_id
+         LEFT JOIN fur_bin_items fbi ON fbi.owner_id = p.owner_phone AND fbi.asset_id = a.id
          WHERE p.owner_phone = ? AND p.approved_version_id IS NOT NULL
-           AND p.state IN ('approved', 'delivered')`,
+           AND p.state IN ('approved', 'delivered')
+           AND (fbi.id IS NULL OR fbi.status != 'deleted')`,
         [phone],
       ) as any;
       const petModels = await Promise.all((petGlbRows || []).map(async (row: any) => {

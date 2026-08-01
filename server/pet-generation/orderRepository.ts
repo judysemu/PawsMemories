@@ -204,6 +204,66 @@ export class PetGlbOrderRepository {
     return created;
   }
 
+  async createConfiguredRetry(
+    ownerPhone: string,
+    sku: string,
+    configuration: PetGlbOrderConfiguration,
+    sourceOrderId: number,
+    idempotencyKey: string,
+  ): Promise<PetGlbOrder> {
+    const pool = this.getPool();
+    const existing = await this.findRetryByKey(ownerPhone, idempotencyKey);
+    if (existing) return existing;
+    const orderUuid = crypto.randomUUID();
+    try {
+      await pool.query(
+        `INSERT INTO pet_glb_orders
+           (order_uuid, owner_phone, sku, state, credits_reserved, credits_disposition,
+            mesh_profile, subject_profile, include_texture, include_rig, texture_quality, style_direction,
+            retry_source_order_id, retry_idempotency_key)
+         VALUES (?, ?, ?, 'awaiting_references', 0, 'none', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orderUuid,
+          ownerPhone,
+          sku,
+          configuration.meshProfile,
+          configuration.subjectProfile,
+          configuration.includeTexture ? 1 : 0,
+          configuration.includeRig ? 1 : 0,
+          configuration.textureQuality,
+          configuration.styleDirection,
+          sourceOrderId,
+          idempotencyKey,
+        ],
+      );
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_ENTRY") {
+        const duplicate = await this.findRetryByKey(ownerPhone, idempotencyKey);
+        if (duplicate) return duplicate;
+      }
+      throw error;
+    }
+    const created = await this.findByUuid(orderUuid);
+    if (!created) throw new PetGenerationError("ORDER_CREATE_FAILED", "Retry order insert did not persist");
+    await this.writeEvent(pool, created.id, null, "awaiting_references", {
+      actorType: "customer",
+      actorId: ownerPhone,
+      reason: "full_price_retry_created",
+    });
+    return created;
+  }
+
+  async findRetryByKey(ownerPhone: string, idempotencyKey: string): Promise<PetGlbOrder | undefined> {
+    const [rows] = await this.getPool().query(
+      `SELECT * FROM pet_glb_orders
+        WHERE owner_phone = ? AND retry_idempotency_key = ?
+        LIMIT 1`,
+      [ownerPhone, idempotencyKey],
+    );
+    const arr = rows as any[];
+    return arr.length ? mapRow(arr[0]) : undefined;
+  }
+
   async findByUuid(orderUuid: string): Promise<PetGlbOrder | undefined> {
     const [rows] = await this.getPool().query(
       `SELECT * FROM pet_glb_orders WHERE order_uuid = ? LIMIT 1`,
