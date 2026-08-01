@@ -21,6 +21,7 @@ import {
   claimAchievementReward,
   claimDailyStreakReward,
 } from "./server/rewards";
+import { HISTORIC_DIGITAL_TEMPLATES } from "./shared/historicPawprintTemplates";
 
 /** Internal row key for the seeded admin account (not a phone number). */
 const ADMIN_KEY = process.env.ADMIN_KEY || process.env.ADMIN_PHONE || "";
@@ -3719,7 +3720,7 @@ export interface PawprintTemplate {
 
 const PAWPRINT_CATEGORIES = [
   "grieving_loss", "new_puppy", "veterinarian", "holiday_birthday",
-  "environment", "postcard_travel", "get_well", "miss_you", "pet_business",
+  "environment", "postcard_travel", "get_well", "miss_you", "pet_business", "historic_portraits",
 ];
 
 const CURATED_PAWPRINT_TEMPLATES: PawprintTemplate[] = [
@@ -3788,6 +3789,7 @@ const generatedTemplates: PawprintTemplate[] = PAWPRINT_CATEGORIES.flatMap((cate
 
 const curatedKeys = new Set(CURATED_PAWPRINT_TEMPLATES.map((template) => `${template.category}:${template.layoutId}`));
 const PAWPRINT_TEMPLATES: PawprintTemplate[] = [
+  ...HISTORIC_DIGITAL_TEMPLATES,
   ...CURATED_PAWPRINT_TEMPLATES.map((template) => ({ ...CC0_CARD_SOURCE, ...template })),
   ...generatedTemplates.filter((template) => !curatedKeys.has(`${template.category}:${template.layoutId}`)),
 ];

@@ -5,6 +5,7 @@ import { authedFetch } from "../api";
 import { CREDIT_PRICES } from "../pricing";
 import { MAX_PAWPRINT_PHOTOS, planPawprintCollage, type PawprintLayoutId } from "../pawprints/collageEngine";
 import { renderPhotosWebGL2 } from "../pawprints/gpuCompositor";
+import { HISTORIC_PHYSICAL_TEMPLATE_IDS } from "../../shared/historicPawprintTemplates.ts";
 
 interface PawprintsStudioProps {
   userProfile: UserProfile;
@@ -109,6 +110,7 @@ const VARIATIONS: Array<{ id: Variation; label: string }> = [
 ];
 
 const CATEGORY_META: Record<string, { label: string; symbol: string; colors: [string, string, string] }> = {
+  historic_portraits: { label: "Historic Pawprints", symbol: "👑", colors: ["#efe3c4", "#9f6b4f", "#30243b"] },
   grieving_loss: { label: "Grieving Loss", symbol: "🕊️", colors: ["#e8e8e4", "#6b7280", "#25313c"] },
   new_puppy: { label: "New Puppy", symbol: "🐶", colors: ["#fff0d8", "#e69a52", "#58321d"] },
   veterinarian: { label: "Veterinarian", symbol: "🩺", colors: ["#dff5ef", "#4f9c8b", "#173f3a"] },
@@ -487,7 +489,12 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     }).catch(() => { setPrintProducts([]); setPrintAvailable(false); });
   }, []);
 
-  const categoryTemplates = useMemo(() => templates.filter((item) => item.category === category), [templates, category]);
+  const categoryTemplates = useMemo(() => {
+    const historic = templates.filter((item) => item.category === "historic_portraits");
+    if (intent !== "digital-printed") return historic;
+    const physicalIds = new Set<string>(HISTORIC_PHYSICAL_TEMPLATE_IDS);
+    return historic.filter((item) => physicalIds.has(item.layoutId));
+  }, [templates, intent]);
 
   // Products actually usable for the Digital + Printed flow: server-owned
   // (orderable) AND close enough in aspect to the fixed Pawprint canvas that
@@ -597,17 +604,36 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
 
   const selectedPrintProduct = printableProducts.find((item) => item.code === printProductCode);
 
-  // Step 1: photo first. Everything downstream (occasion, layout, print
-  // format) is chosen around the photo, not the other way around.
+  // Step 1: choose the keepsake first, in plain customer language.
+  if (!intent) return (
+    <main className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p><h1 className="mt-2 text-3xl font-black text-on-surface">How will you celebrate your pet?</h1><p className="mt-2 text-on-surface-variant">Choose a portrait you can share online, or a physical keepsake delivered to your door.</p></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <button type="button" onClick={() => { setIntent("digital"); setCategory("historic_portraits"); }} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition hover:-translate-y-1 hover:border-primary/60">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><Sparkles size={30} /></span>
+          <strong className="mt-4 block text-xl font-black">Historic Pawprint Pet Digital</strong>
+          <span className="mt-2 block text-sm leading-relaxed text-on-surface-variant">Turn your photo into a famous portrait to save, download, share, or email.</span>
+        </button>
+        <button type="button" onClick={() => { if (digitalPrintedAvailable) { setIntent("digital-printed"); setCategory("historic_portraits"); } }} disabled={!digitalPrintedAvailable} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition enabled:hover:-translate-y-1 enabled:hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-55">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><Printer size={30} /></span>
+          <strong className="mt-4 block text-xl font-black">Pawprint Pet Physical</strong>
+          <span className="mt-2 block text-sm leading-relaxed text-on-surface-variant">{digitalPrintedAvailable ? "Create a historic pet portrait and order it as a lasting printed keepsake." : "Physical ordering will appear here as soon as the configured print size is available."}</span>
+        </button>
+      </div>
+    </main>
+  );
+
+  // Step 2: add the pet photo after choosing digital or physical.
   if (!photosConfirmed) return (
     <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
+      <button onClick={() => { setIntent(""); setCategory(""); }} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Keepsake type</button>
       {!userProfile.email && (
         <section className="mb-12 overflow-hidden rounded-3xl bg-primary/5 p-8 text-center sm:p-16">
           <h1 className="text-4xl font-black text-on-surface">Personalized Pawprints Pet Art</h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-on-surface-variant">Create digital and printable pet keepsakes with your photos, message, and chosen occasion. Sign in to save and print your designs.</p>
         </section>
       )}
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">Add your photo</h1><p className="mt-2 text-on-surface-variant">Upload or choose the photo you want to feature. You can add a few more once you're in the editor.</p></div>
+      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p><h1 className="mt-2 text-3xl font-black text-on-surface">Choose your pet's photo</h1><p className="mt-2 text-on-surface-variant">A clear photo facing the camera gives your famous portrait the best likeness.</p></div>
       <button type="button" onClick={() => photoInput.current?.click()} className="min-h-64 w-full overflow-hidden rounded-3xl border-2 border-dashed border-outline-variant bg-surface-container-low transition hover:border-primary">
         <span className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
           <ImagePlus size={40} className="text-primary" />
@@ -633,42 +659,10 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     </main>
   );
 
-  // Step 2: two stylized paw buttons — digital-only, or digital + printed.
-  // The printed option is only offered when a real, orderable Printful
-  // product exists that matches the Pawprint's fixed canvas aspect ratio.
-  if (!intent) return (
-    <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
-      <button onClick={() => setPhotosConfirmed(false)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Photo</button>
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">How do you want your Pawprint?</h1><p className="mt-2 text-on-surface-variant">Choose a digital-only keepsake, or add a physical print shipped to your door.</p></div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <button type="button" onClick={() => setIntent("digital")} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition hover:-translate-y-1 hover:border-primary/60">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><PawPrint size={30} /></span>
-          <strong className="mt-4 block text-xl font-black">Digital Only</strong>
-          <span className="mt-1 block text-sm text-on-surface-variant">Save, download, and email a finished Pawprint. No shipping.</span>
-        </button>
-        <button type="button" onClick={() => { if (digitalPrintedAvailable) setIntent("digital-printed"); }} disabled={!digitalPrintedAvailable} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition enabled:hover:-translate-y-1 enabled:hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><PawPrint size={30} /></span>
-          <strong className="mt-4 block text-xl font-black">Digital + Printed</strong>
-          <span className="mt-1 block text-sm text-on-surface-variant">{digitalPrintedAvailable ? "Get the digital file plus a physical print shipped to your door." : "Physical printing isn't set up for this design's size yet — digital only for now."}</span>
-        </button>
-      </div>
-    </main>
-  );
-
-  if (!category) return (
-    <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8">
-      <button onClick={() => setIntent("")} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Digital or Printed</button>
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Pawprints Studio</p><h1 className="mt-2 text-3xl font-black text-on-surface">What are you creating?</h1><p className="mt-2 text-on-surface-variant">Choose an occasion, then add your exact words.</p></div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {categories.map((item) => { const meta = CATEGORY_META[item]; return <button key={item} onClick={() => setCategory(item)} className="relative aspect-[4/5] overflow-hidden rounded-3xl border border-outline-variant/40 p-4 text-left transition hover:-translate-y-1 hover:border-primary/50" style={{ background: meta?.colors[0] }}><span className="text-6xl opacity-70">{meta?.symbol || "🐾"}</span><span className="absolute inset-x-4 bottom-4 text-base font-black" style={{ color: meta?.colors[2] }}>{meta?.label || item}</span></button>; })}
-      </div>
-    </main>
-  );
-
   if (!template) return (
     <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8">
-      <button onClick={() => setCategory("")} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Occasions</button>
-      <h1 className="text-3xl font-black">Choose a starting layout</h1><p className="mt-2 text-on-surface-variant">Everything remains editable, with {VARIATIONS.length} responsive variations in the next step.</p>
+      <button onClick={() => setPhotosConfirmed(false)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Photo</button>
+      <h1 className="text-3xl font-black">Choose your famous portrait</h1><p className="mt-2 text-on-surface-variant">Pick the story that feels most like your pet. You can personalize the title and message next.</p>
       <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {categoryTemplates.map((item, index) => <button key={item.layoutId} onClick={() => chooseTemplate(item)} className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface text-left transition hover:border-primary/50 hover:shadow-lg"><div className="aspect-[16/9] p-6" style={{ background: CATEGORY_META[category]?.colors[index % 2 ? 1 : 0], color: CATEGORY_META[category]?.colors[2] }}><span className="text-5xl opacity-50">{CATEGORY_META[category]?.symbol}</span></div><div className="p-5"><strong className="text-base">{item.name}</strong><span className="mt-1 block text-xs capitalize text-on-surface-variant">{item.tone} · {VARIATIONS.length} variations</span></div></button>)}
       </div>

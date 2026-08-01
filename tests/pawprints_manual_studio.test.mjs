@@ -9,8 +9,8 @@ const routeEnd = server.indexOf('app.post("/api/streak/claim"', routeStart);
 const pawprintsRoute = server.slice(routeStart, routeEnd);
 
 test("Pawprints Studio is a click-through manual editor with twelve variations", () => {
-  assert.match(studio, /What are you creating\?/);
-  assert.match(studio, /Choose a starting layout/);
+  assert.match(studio, /How will you celebrate your pet\?/);
+  assert.match(studio, /Choose your famous portrait/);
   assert.match(studio, /Choose a variation/);
   assert.match(studio, /"classic"[\s\S]*"overlay"[\s\S]*"split"[\s\S]*"frame"/);
   assert.match(studio, /"story"[\s\S]*"filmstrip"[\s\S]*"circles"[\s\S]*"mosaic"/);
