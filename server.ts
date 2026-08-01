@@ -36,7 +36,6 @@ import { modelBuildsRouter, modelBuildService } from "./server/model-builds/rout
 import { spatialGeneratorRouter, startSpatialGeneratorScheduler } from "./server/spatial-generator/routes";
 import { createPetGenerationRouter, createPetGlbWebhookHandler } from "./server/pet-generation/routes";
 import { buildPetGlbDeps } from "./server/pet-generation/wiring";
-import { isPetGlbEnabled } from "./server/pet-generation/featureFlag";
 import { PetGlbService } from "./server/pet-generation/service";
 import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
@@ -1046,10 +1045,8 @@ async function startServer() {
   app.use("/api/fur-bin", createFurBinRouter(getPool, { isAdmin: isUserAdmin }));
 
   // ── Paid pet GLB (CUSTOM_RIGGED_PET_GLB_V1) ────────────────────────────────
-  // Default-off via PET_GLB_ENABLED. Deps are built lazily so nothing
-  // DB-touching is constructed at import time (this repo has crashed on boot
-  // under DB_DISABLED=1 from eager singletons before).
-  if (isPetGlbEnabled()) {
+  // The production pet builder is always mounted. Deps are still built lazily
+  // here so DB-disabled tooling does not construct eager singletons.
     const petGlbDeps = await buildPetGlbDeps(getPool, isUserAdmin);
     app.use("/api/pet-glb", requireAuth, createPetGenerationRouter(petGlbDeps));
     // Stripe is not a user — the webhook mounts outside requireAuth and needs
@@ -1078,7 +1075,6 @@ async function startServer() {
     void sweepPetGlbRecovery();
     setInterval(() => void sweepPetGlbRecovery(), 60 * 1000).unref();
     console.log("[pet-glb] mounted at /api/pet-glb");
-  }
   if (isModelBuildV3Enabled()) {
     void modelBuildService.recoverStaleBuilds().catch((error) => {
       console.error("[model-build recovery] Startup recovery failed:", error.message);
@@ -4190,7 +4186,7 @@ async function startServer() {
       // enabled. Reject stale legacy clients before any Gemini image request;
       // the old route could otherwise fan one click into 4-6 Pro image calls
       // and only discover the migration after that provider spend.
-      if (isPetGlbEnabled() || isModelBuildV3Enabled()) {
+      {
         return res.status(410).json({
           error: "Legacy avatar creation has moved to the customer-gated Create flow.",
           code: "LEGACY_AVATAR_DISABLED",

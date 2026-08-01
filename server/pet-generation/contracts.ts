@@ -143,13 +143,10 @@ export function rigGenerationAvailability(env: Record<string, string | undefined
   // CUSTOM_RIGGED_PET_GLB_V1 has its own priced stage plus durable debit,
   // provider-handle, and refund evidence. PETSIM_RIG_* belongs to the legacy
   // pet simulator and must not silently close this body-rig product.
-  const available = env.PET_GLB_BODY_RIG_ENABLED !== "false";
   return {
-    available,
+    available: true,
     requestCap: null,
     costCapMicroUsd: null,
-    reason: available
-      ? null
-      : "Animation-ready body rigging is disabled by PET_GLB_BODY_RIG_ENABLED=false.",
+    reason: null,
   } as const;
 }

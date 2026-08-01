@@ -257,13 +257,23 @@ export class PetGlbService {
       textureQuality: order.textureQuality,
       styleDirection: order.styleDirection,
     });
-    await this.stages.saveReferenceManifest(
+    const reference = await this.stages.saveReferenceManifest(
       order.id,
       ownerPhone,
       { ...manifest } as Record<string, string>,
       inputHash,
     );
-    return this.buildView((await this.orders.findByUuid(orderUuid))!);
+    // Reference submission is the customer's instruction to build. The former
+    // customer approval pause is retired: bind the exact saved manifest and
+    // atomically queue the first paid stage in the same request.
+    return this.approveCustomerStage(orderUuid, ownerPhone, {
+      idempotencyKey: `auto-reference:${reference.attemptUuid}`,
+      attemptUuid: reference.attemptUuid,
+      artifactSha256: inputHash,
+      assetVersionId: null,
+      reportSha256: null,
+      approvalHash: canonicalHash({ orderUuid, attemptUuid: reference.attemptUuid, inputHash }),
+    });
   }
 
   async approveCustomerStage(

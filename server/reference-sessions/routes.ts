@@ -3,7 +3,6 @@ import rateLimit from "express-rate-limit";
 import type mysql from "mysql2/promise";
 import { getPool, isUserAdmin } from "../../db";
 import type { AuthedRequest } from "../../auth";
-import { assertMultiviewApprovalEnabled } from "./featureFlag";
 import {
   CreateSessionSchema,
   StartAttemptSchema,
@@ -31,25 +30,11 @@ export function createReferenceSessionsRouter(
   const checkAdmin = options.isAdmin || isUserAdmin;
   const generationLimiter = rateLimit({
     windowMs: 60_000,
-    max: 1,
+    max: 5,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => getRequestUserPhone(req) || "missing-auth",
     message: { success: false, error: "Too many reference generation requests. Try again shortly.", code: "RATE_LIMITED" },
-  });
-
-  // Feature flag check on all router routes
-  router.use((_req, res, next) => {
-    try {
-      assertMultiviewApprovalEnabled();
-      next();
-    } catch (err: any) {
-      return res.status(403).json({
-        success: false,
-        error: err.message,
-        code: "FEATURE_DISABLED",
-      });
-    }
   });
 
   /**
@@ -107,11 +92,7 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
-        ? 403
-        : error instanceof ReferenceSessionError && ["CONCURRENT_ATTEMPT_CAP", "MINUTE_ATTEMPT_CAP", "DAILY_ATTEMPT_CAP"].includes(error.code)
-          ? 429
-          : 422;
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
       return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });
@@ -138,11 +119,7 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
-        ? 403
-        : error instanceof ReferenceSessionError && ["CONCURRENT_ATTEMPT_CAP", "MINUTE_ATTEMPT_CAP", "DAILY_ATTEMPT_CAP"].includes(error.code)
-          ? 429
-          : 422;
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
       return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });

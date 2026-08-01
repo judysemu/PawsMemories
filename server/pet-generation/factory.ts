@@ -1,5 +1,4 @@
 import { TripoModelBuildAdapter } from "../model-builds/provider";
-import { assertPetGlbEnabled } from "./featureFlag";
 import { skuRegistry, registerDefaultSkus, type SkuRegistry } from "./skuRegistry";
 import { TripoPetGenerationAdapter } from "./tripoAdapter";
 import { StubPetGenerationProvider } from "./stubProvider";
@@ -26,8 +25,6 @@ export function createProviderForSku(
   sku: string,
   options: { store?: ProviderJobStore; registry?: SkuRegistry } = {},
 ): PetModelGenerationProvider {
-  assertPetGlbEnabled();
-
   const registry = options.registry ?? skuRegistry;
   if (registry === skuRegistry && !defaultsRegistered) {
     registerDefaultSkus(registry);

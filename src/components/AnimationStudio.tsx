@@ -127,13 +127,19 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   );
 
   return (
-    <main className="mx-auto w-full max-w-[1500px] px-4 pb-28 pt-4 animate-fade-in lg:h-[calc(100dvh-5rem)] lg:overflow-hidden" aria-labelledby="ai-video-title">
-      <header className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3"><Film size={23} className="text-primary" /><h1 id="ai-video-title" className="text-2xl font-black text-on-surface">Fur Reels</h1></div>
-          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">This guided video generation studio directs an eight-second AI video with your pet, including motion, lighting, camera, native sound, and an optional short voice line. <strong>{cost} PupCoins</strong> per reel.</p>
+    <main data-creative-dashboard="true" className="h-[calc(100dvh-4rem)] w-full overflow-hidden bg-background p-2 text-on-background sm:p-3" aria-labelledby="ai-video-title">
+      <header className="mx-auto mb-2 grid max-w-[1720px] shrink-0 gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
+        <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-outline-variant/25 bg-surface/90 px-4 py-2 shadow-sm">
+          <Film size={22} className="shrink-0 text-primary" />
+          <div className="min-w-0"><h1 id="ai-video-title" className="truncate text-lg font-black text-on-surface">Fur Reels</h1><p className="truncate text-xs text-on-surface-variant">Direct an eight-second pet story with picture, motion, sound, and voice.</p></div>
+          <button type="button" onClick={onClose} className="ml-auto rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
         </div>
-        <button type="button" onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
+        <dl className="grid min-w-0 grid-cols-4 gap-2">
+          <div className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-primary/70">Length</dt><dd className="text-sm font-black text-primary">8 seconds</dd></div>
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Story</dt><dd className="truncate text-sm font-black">{script.title}</dd></div>
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Frame</dt><dd className="text-sm font-black">{aspect}</dd></div>
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Price</dt><dd className="text-sm font-black">{cost} PupCoins</dd></div>
+        </dl>
       </header>
 
       {status === "done" && resultUrl && (
@@ -153,8 +159,8 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
           <p className="text-xs">The job is registered, so it continues safely if you leave this page.</p>
         </section>
       ) : (
-        <div className="grid gap-4 lg:h-[calc(100%-5.5rem)] lg:grid-cols-[minmax(220px,.72fr)_minmax(0,1.35fr)_minmax(280px,.9fr)]">
-          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 lg:overflow-y-auto">
+        <div className="mx-auto grid h-[calc(100%-4.75rem)] min-h-0 max-w-[1720px] gap-2 lg:grid-cols-[280px_minmax(0,1fr)_300px] xl:grid-cols-[300px_minmax(0,1fr)_330px]">
+          <section data-dashboard-region="left" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
             <div>
               <h2 className="text-sm font-black text-on-surface">Your uploads</h2>
               <p className="mt-1 text-xs text-on-surface-variant">Choose the portrait you want to bring to life.</p>
@@ -172,7 +178,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
             </div>
           </section>
 
-          <section className="space-y-5 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-6 lg:overflow-y-auto">
+          <section data-dashboard-region="center" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface-container-lowest p-4 shadow-sm [scrollbar-width:thin] sm:p-5">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
               <h2 className="text-sm font-black text-on-surface">What works best</h2>
               <ul className="mt-2 space-y-1 text-xs leading-relaxed text-on-surface-variant"><li>• One main pet and one clear action</li><li>• Four simple two-second beats</li><li>• Slow movement and one smooth camera move</li><li>• Consistent setting, lighting, and pet identity</li></ul>
@@ -201,7 +207,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
             </div>
           </section>
 
-          <aside className="space-y-5 lg:overflow-y-auto lg:pr-1">
+          <aside data-dashboard-region="right" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
             <section className="rounded-3xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
               <div className="flex items-center gap-2"><Mic2 size={18} className="text-primary" /><h2 className="text-sm font-black text-on-surface">3. Add sound and a short voice line</h2></div>
               <p className="mt-2 text-xs text-on-surface-variant">The finished video includes native scene sound. Add one optional spoken line; preview it here with the configured Pawsome3D voice service.</p>

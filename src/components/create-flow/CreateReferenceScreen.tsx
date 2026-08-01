@@ -7,7 +7,6 @@ import {
   createReferenceSession,
   startReferenceAttempt,
   retryReferenceAttempt,
-  approveReferenceManifest,
   cancelReferenceSession,
   replaceReferenceSource,
 } from "../../api";
@@ -43,8 +42,6 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
   const [manifestHash, setManifestHash] = useState<string | null>(null);
   const [retryNotes, setRetryNotes] = useState<string>("");
   const [zoomedView, setZoomedView] = useState<ViewItem | null>(null);
-  const [isApproved, setIsApproved] = useState(false);
-  const multiviewEnabled = import.meta.env.VITE_MULTIVIEW_APPROVAL_ENABLED === "true";
   const automaticStartRef = useRef(false);
 
   const viewLabels: Record<string, string> = {
@@ -119,24 +116,10 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
     }
   };
 
-  const handleMultiviewApprove = async () => {
+  const continueToCustomize = () => {
     if (!multiviewSessionUuid || !manifestHash) return;
-    setIsGenerating(true);
-    setError(null);
-    try {
-      const result = await approveReferenceManifest(multiviewSessionUuid, manifestHash);
-      setIsApproved(true);
-      setState((s) => ({
-        ...s,
-        sessionId: multiviewSessionUuid,
-        candidateImageUrl: result.session.views[0]?.signedUrl || s.candidateImageUrl,
-      }));
-      onNavigate(Screen.CREATE_CUSTOMIZE);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsGenerating(false);
-    }
+    setState((s) => ({ ...s, sessionId: multiviewSessionUuid, candidateImageUrl: multiviewViews[0]?.signedUrl || s.candidateImageUrl }));
+    onNavigate(Screen.CREATE_CUSTOMIZE);
   };
 
   const generateLegacyCandidate = async () => {
@@ -184,8 +167,7 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
         : !!state.inputPhotoUrl;
     if (!state.candidateImageUrl && multiviewViews.length === 0 && !isGenerating && !error && hasInput) {
       automaticStartRef.current = true;
-      if (multiviewEnabled) void initMultiviewSession();
-      else void generateLegacyCandidate();
+      void initMultiviewSession();
     }
   }, []);
 
@@ -217,11 +199,11 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
 
       <div className="text-center mb-8">
         <h1 className="text-3xl font-black text-on-surface mb-2">
-          {multiviewViews.length > 0 ? "High-Resolution Multiview Reference Review" : "Review AI Concept"}
+          {multiviewViews.length > 0 ? "Your Pet's 5-View Reference" : "Preparing Your Pet"}
         </h1>
         <p className="text-on-surface-variant text-lg">
           {multiviewViews.length > 0
-            ? "Review the 5-view reference blueprint before approving for 3D build."
+            ? "These views are already attached to your tracked model build."
             : "We transformed your photo into a 3D-ready blueprint."}
         </p>
       </div>
@@ -231,12 +213,10 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <RefreshCw className="animate-spin text-primary mb-6" size={48} />
             <h3 className="text-xl font-bold text-on-surface mb-2">
-              {multiviewEnabled ? "Generating 5-View Reference..." : "Generating Reference Image..."}
+              Generating 5-View Reference...
             </h3>
             <p className="text-on-surface-variant">
-              {multiviewEnabled
-                ? "Synthesizing five high-resolution views and a visual consistency report."
-                : "Preparing a single reference image for your review."}
+              Synthesizing five high-resolution views and a visual consistency report.
             </p>
           </div>
         ) : error ? (
@@ -248,14 +228,12 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
             <p className="text-on-surface-variant mb-6">{error}</p>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
-                onClick={() => multiviewEnabled
-                  ? (multiviewSessionUuid ? handleMultiviewRetry() : initMultiviewSession())
-                  : generateLegacyCandidate()}
+                onClick={() => multiviewSessionUuid ? handleMultiviewRetry() : initMultiviewSession()}
                 className="px-6 py-3 bg-primary text-on-primary font-bold rounded-xl shadow-md hover:scale-105 transition-transform"
               >
                 Try Again
               </button>
-              {multiviewEnabled && multiviewSessionUuid && state.inputMode !== "text" && (
+              {multiviewSessionUuid && state.inputMode !== "text" && (
                 <label className="px-6 py-3 bg-surface-variant text-on-surface font-bold rounded-xl border border-outline-variant cursor-pointer hover:bg-surface-variant/80">
                   Replace Source Photo
                   <input
@@ -377,13 +355,13 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
             {/* Action Buttons & Pricing Disclaimer */}
             <div className="flex flex-col gap-2 pt-2 border-t border-outline-variant/30">
               <button
-                onClick={handleMultiviewApprove}
+                onClick={continueToCustomize}
                 className="w-full py-4 px-6 rounded-2xl font-black text-on-primary bg-primary shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform flex items-center justify-center gap-2 text-base"
               >
-                Approve 5-View Reference Manifest <ChevronRight size={20} />
+                Continue customizing <ChevronRight size={20} />
               </button>
               <p className="text-center text-xs text-on-surface-variant">
-                No PupCoins charged until 3D build in Phase 3. Manifest Hash: {manifestHash?.slice(0, 16)}...
+                The exact reference manifest stays attached to this pet for asset tracking.
               </p>
             </div>
           </div>
@@ -405,7 +383,7 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
                 onClick={() => onNavigate(Screen.CREATE_CUSTOMIZE)}
                 className="py-4 px-2 rounded-xl font-black text-on-primary bg-primary shadow-lg shadow-primary/25 hover:scale-[1.02] transition-transform flex justify-center items-center gap-2"
               >
-                Approve Reference and Continue <ChevronRight size={20} />
+                Continue <ChevronRight size={20} />
               </button>
             </div>
             <p className="text-center text-xs text-on-surface-variant">

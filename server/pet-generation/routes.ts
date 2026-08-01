@@ -4,7 +4,6 @@ import type mysql from "mysql2/promise";
 import type { AuthedRequest } from "../../auth";
 import { PetGlbService, type PetGlbServiceDeps } from "./service";
 import { PetGenerationError } from "./provider";
-import { assertPetGlbEnabled, PetGlbFeatureError } from "./featureFlag";
 import {
   canonicalHash,
   CreatePetGlbOrderSchema,
@@ -13,9 +12,7 @@ import {
   meshProfilePolicy,
   ReferenceManifestSchema,
   rigGenerationAvailability,
-  StageApprovalSchema,
   StageKindSchema,
-  StageRejectionSchema,
   StageRetrySchema,
 } from "./contracts";
 import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
@@ -25,9 +22,6 @@ function phoneOf(req: Request): string | null {
 }
 
 function fail(res: Response, err: unknown) {
-  if (err instanceof PetGlbFeatureError) {
-    return res.status(403).json({ error: "FEATURE_DISABLED", message: err.message });
-  }
   if (err instanceof PetGenerationError) {
     const status =
       err.code === "ORDER_NOT_FOUND" || err.code === "JOB_NOT_FOUND" ? 404 :
@@ -55,11 +49,6 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   const pollLimiter = rateLimit({
     windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false,
     message: { error: "RATE_LIMITED" },
-  });
-
-  // Flag check on every route in this router.
-  router.use((_req, res, next) => {
-    try { assertPetGlbEnabled(); next(); } catch (err) { fail(res, err); }
   });
 
   // ── Product / quote ───────────────────────────────────────────────────────
@@ -192,56 +181,30 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     } catch (err) { fail(res, err); }
   });
 
-  // The former /generate endpoint bypassed reference approval. Reference
-  // approval remains the single customer decision before the selected model
-  // stages run automatically.
+  // Reference submission now starts the purchased pipeline automatically.
+  // Keep this retired endpoint explicit so old clients do not start a second job.
   router.post("/orders/:orderUuid/generate", writeLimiter, async (req, res) => {
     if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
     res.status(409).json({
-      error: "GATED_FLOW_REQUIRED",
-      message: "Save and approve the generated reference set before starting the automatic model build.",
+      error: "ENDPOINT_RETIRED",
+      message: "Saving the generated reference set now starts the model build automatically.",
     });
   });
 
   router.post("/orders/:orderUuid/stages/:stage/approve", writeLimiter, async (req, res) => {
-    const phone = phoneOf(req);
-    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
-    const stage = StageKindSchema.safeParse(req.params.stage);
-    const parsed = StageApprovalSchema.safeParse(req.body);
-    if (!stage.success || !parsed.success) {
-      return res.status(400).json({ error: "INVALID_STAGE_APPROVAL" });
-    }
-    try {
-      const view = await service.getOrderView(req.params.orderUuid, phone);
-      if (view.currentStage?.stage !== stage.data) {
-        return res.status(409).json({ error: "STALE_STAGE" });
-      }
-      res.json(await service.approveCustomerStage(req.params.orderUuid, phone, {
-        idempotencyKey: parsed.data.idempotencyKey,
-        attemptUuid: parsed.data.attemptUuid,
-        artifactSha256: parsed.data.artifactSha256,
-        assetVersionId: parsed.data.assetVersionId ?? null,
-        reportSha256: parsed.data.reportSha256 ?? null,
-        approvalHash: canonicalHash({ orderUuid: req.params.orderUuid, stage: stage.data, ...parsed.data }),
-      }));
-    } catch (err) { fail(res, err); }
+    if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
+    res.status(410).json({
+      error: "CUSTOMER_APPROVAL_RETIRED",
+      message: "Model stages advance automatically after their integrity checks pass.",
+    });
   });
 
   router.post("/orders/:orderUuid/stages/:stage/reject", writeLimiter, async (req, res) => {
-    const phone = phoneOf(req);
-    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
-    const stage = StageKindSchema.safeParse(req.params.stage);
-    const parsed = StageRejectionSchema.safeParse(req.body);
-    if (!stage.success || !parsed.success) {
-      return res.status(400).json({ error: "INVALID_STAGE_REJECTION" });
-    }
-    try {
-      const view = await service.getOrderView(req.params.orderUuid, phone);
-      if (view.currentStage?.stage !== stage.data) {
-        return res.status(409).json({ error: "STALE_STAGE" });
-      }
-      res.json(await service.rejectCustomerStage(req.params.orderUuid, phone, parsed.data));
-    } catch (err) { fail(res, err); }
+    if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
+    res.status(410).json({
+      error: "CUSTOMER_REVIEW_RETIRED",
+      message: "Use full-price retry or delete the completed model from Fur Bin.",
+    });
   });
 
   router.post("/orders/:orderUuid/stages/:stage/retry", writeLimiter, async (req, res) => {

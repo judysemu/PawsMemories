@@ -7,7 +7,6 @@ import { getPrivateObjectBuffer } from "../../storage.private";
 import { addLineage, registerAsset } from "../assets/service";
 import { generateSignedUrlForVersion } from "../assets/access";
 import { findAssetById, findVersionById, hardDeleteUnpublishedAsset } from "../assets/repository";
-import { assertMultiviewApprovalEnabled } from "./featureFlag";
 import {
   CreateSessionSchema,
   StartAttemptSchema,
@@ -56,75 +55,6 @@ export class ReferenceSessionError extends Error {
   }
 }
 
-const REFERENCE_BUDGET_LOCK = "paws_reference_provider_budget_v1";
-const DAILY_ATTEMPT_CAP_MESSAGE = "Reference generation has reached its rolling 24-hour global safety limit.";
-
-function boundedReferenceCap(
-  environment: Readonly<Record<string, string | undefined>>,
-  name: string,
-  productionFallback: number,
-  maximum: number,
-): number {
-  const fallback = environment.NODE_ENV === "production" ? productionFallback : maximum;
-  const parsed = Number.parseInt(environment[name] || "", 10);
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : fallback;
-}
-
-export function resolveReferenceProviderBudget(
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-) {
-  return {
-    globalDailyCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 100, 200),
-    globalMinuteCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20),
-    globalConcurrentCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5),
-    dailyCapMessage: DAILY_ATTEMPT_CAP_MESSAGE,
-  };
-}
-
-async function assertReferenceProviderBudget(
-  connection: mysql.PoolConnection,
-): Promise<void> {
-  // The product allowance is enforced per reference session (initial render +
-  // up to two free retries), not across unrelated pets created the same day.
-  const { globalDailyCap, globalMinuteCap, globalConcurrentCap, dailyCapMessage } = resolveReferenceProviderBudget();
-  const [rows]: any = await connection.query(
-    `SELECT
-       COUNT(*) AS global_day_count,
-       SUM(CASE WHEN a.started_at >= NOW() - INTERVAL 1 MINUTE THEN 1 ELSE 0 END) AS global_minute_count,
-       (
-         SELECT COUNT(*)
-         FROM reference_attempts active
-         INNER JOIN reference_sessions active_session
-           ON active_session.current_attempt_id = active.id
-         WHERE active_session.state = 'generating'
-           AND active.started_at >= NOW() - INTERVAL 15 MINUTE
-       ) AS global_active_count
-     FROM reference_attempts a
-     INNER JOIN reference_sessions s ON s.id = a.session_id
-     WHERE a.started_at >= NOW() - INTERVAL 24 HOUR`,
-    [],
-  );
-  const counts = rows?.[0] || {};
-  if (Number(counts.global_active_count || 0) >= globalConcurrentCap) {
-    throw new ReferenceSessionError(
-      "Another reference set is already generating. Try again after it finishes.",
-      "CONCURRENT_ATTEMPT_CAP",
-    );
-  }
-  if (Number(counts.global_minute_count || 0) >= globalMinuteCap) {
-    throw new ReferenceSessionError(
-      "Reference generation is at its global minute safety limit. Try again shortly.",
-      "MINUTE_ATTEMPT_CAP",
-    );
-  }
-  if (Number(counts.global_day_count || 0) >= globalDailyCap) {
-    throw new ReferenceSessionError(
-      dailyCapMessage,
-      "DAILY_ATTEMPT_CAP",
-    );
-  }
-}
-
 function decodeBase64Image(value: string): Buffer {
   const normalized = value.replace(/^data:image\/(?:png|jpeg|webp);base64,/i, "").replace(/\s/g, "");
   if (!normalized || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) {
@@ -166,7 +96,6 @@ export class ReferenceSessionService {
     ownerId: string,
     input: CreateSessionInput,
   ): Promise<ReferenceSessionRecord> {
-    assertMultiviewApprovalEnabled();
     const validated = CreateSessionSchema.parse(input);
     const pool = this.getPoolFn();
     const sessionUuid = uuidv4();
@@ -240,7 +169,6 @@ export class ReferenceSessionService {
   }
 
   async replaceSourcePhoto(ownerId: string, sessionUuid: string, imageBase64: string, mimeType: string): Promise<ReferenceSessionRecord> {
-    assertMultiviewApprovalEnabled();
     const pool = this.getPoolFn();
     const imageBuffer = decodeBase64Image(imageBase64);
     const inspected = await inspectReferenceImage(imageBuffer, mimeType, 1);
@@ -283,28 +211,11 @@ export class ReferenceSessionService {
     idempotencyKey: string,
     retryNotes?: string | null,
   ): Promise<{ session: ReferenceSessionRecord; attempt: ReferenceAttemptRecord }> {
-    assertMultiviewApprovalEnabled();
     const pool = this.getPoolFn();
     const connection = await pool.getConnection();
 
     const createdObjectKeys: string[] = [];
     const createdAssetIds: number[] = [];
-    let budgetLockHeld = false;
-    let connectionDestroyed = false;
-    const releaseBudgetLock = async () => {
-      if (!budgetLockHeld) return;
-      try {
-        await connection.query("SELECT RELEASE_LOCK(?)", [REFERENCE_BUDGET_LOCK]);
-      } catch {
-        // A pooled MySQL connection can retain a named lock. Destroy the
-        // connection if release is uncertain so that a leaked lock cannot
-        // permanently stop reference generation.
-        connection.destroy();
-        connectionDestroyed = true;
-      } finally {
-        budgetLockHeld = false;
-      }
-    };
 
     try {
       await connection.beginTransaction();
@@ -315,18 +226,6 @@ export class ReferenceSessionService {
       if (session.owner_id !== ownerId) {
         throw new ReferenceSessionError("Unauthorized access to session", "UNAUTHORIZED");
       }
-
-      const [lockRows]: any = await connection.query(
-        "SELECT GET_LOCK(?, 5) AS acquired",
-        [REFERENCE_BUDGET_LOCK],
-      );
-      if (Number(lockRows?.[0]?.acquired || 0) !== 1) {
-        throw new ReferenceSessionError(
-          "Reference generation is busy. Try again shortly.",
-          "MINUTE_ATTEMPT_CAP",
-        );
-      }
-      budgetLockHeld = true;
 
       // Check idempotency
       // Use a current/locking read so this check cannot establish a stale
@@ -354,8 +253,6 @@ export class ReferenceSessionService {
         );
       }
 
-      await assertReferenceProviderBudget(connection);
-
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto
         .createHash("sha256")
@@ -379,7 +276,6 @@ export class ReferenceSessionService {
       });
 
       await connection.commit();
-      await releaseBudgetLock();
 
       // Generate reference views via provider
       let photoBuffer: Buffer | null = null;
@@ -495,13 +391,20 @@ export class ReferenceSessionService {
       await updateAttemptState(pool, attempt.id, "ready");
       await updateSessionState(pool, session.id, "ready");
 
+      // A successful five-view result is finalized immediately. There is no
+      // customer review pause; integrity and consistency evidence still bind
+      // the exact immutable manifest used by the model build.
+      const readyPublic = await this.getSessionPublic(sessionUuid, ownerId, false);
+      if (!readyPublic.manifestHash) {
+        throw new ReferenceSessionError("Generated reference manifest is incomplete.", "INCOMPLETE_MANIFEST");
+      }
+      await this.approveManifest(ownerId, sessionUuid, readyPublic.manifestHash);
       const updatedSession = (await findSessionByUuid(pool, sessionUuid))!;
       const updatedAttempt = (await findAttemptById(pool, attempt.id))!;
 
       return { session: updatedSession, attempt: updatedAttempt };
     } catch (error: any) {
-      if (!connectionDestroyed) await connection.rollback().catch(() => {});
-      await releaseBudgetLock();
+      await connection.rollback().catch(() => {});
 
       // Compensating storage cleanup for failed attempts
       for (const key of createdObjectKeys) {
@@ -530,13 +433,11 @@ export class ReferenceSessionService {
         ? error
         : new ReferenceSessionError(`Attempt generation failed: ${error.message}`, "GENERATION_FAILED");
     } finally {
-      await releaseBudgetLock();
-      if (!connectionDestroyed) connection.release();
+      connection.release();
     }
   }
 
   async cancelSession(ownerId: string, sessionUuid: string): Promise<void> {
-    assertMultiviewApprovalEnabled();
     const pool = this.getPoolFn();
     const connection = await pool.getConnection();
     try {
@@ -560,7 +461,6 @@ export class ReferenceSessionService {
     sessionUuid: string,
     manifestHash: string,
   ): Promise<SessionPublic> {
-    assertMultiviewApprovalEnabled();
     const pool = this.getPoolFn();
     const connection = await pool.getConnection();
     let manifestObjectKey: string | null = null;
