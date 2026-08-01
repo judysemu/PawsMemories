@@ -3720,7 +3720,7 @@ export interface PawprintTemplate {
 
 const PAWPRINT_CATEGORIES = [
   "grieving_loss", "new_puppy", "veterinarian", "holiday_birthday",
-  "environment", "postcard_travel", "get_well", "miss_you", "pet_business", "historic_portraits",
+  "environment", "postcard_travel", "get_well", "miss_you", "pet_business",
 ];
 
 const CURATED_PAWPRINT_TEMPLATES: PawprintTemplate[] = [
@@ -3794,7 +3794,7 @@ const PAWPRINT_TEMPLATES: PawprintTemplate[] = [
   ...generatedTemplates.filter((template) => !curatedKeys.has(`${template.category}:${template.layoutId}`)),
 ];
 
-export function getPawprintCategories(): string[] { return PAWPRINT_CATEGORIES; }
+export function getPawprintCategories(): string[] { return [...PAWPRINT_CATEGORIES, "historic_portraits"]; }
 
 export function getPawprintTemplatesSync(category?: string): PawprintTemplate[] {
   if (category) return PAWPRINT_TEMPLATES.filter(t => t.category === category);

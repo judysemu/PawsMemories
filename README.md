@@ -158,6 +158,14 @@ Test runner is the built-in `node:test` via `tsx` (not Vitest): `npm test`, or s
 `npm run test:brain`, `npm run test:pets`, `npm run test:ar`,
 `npm run test:security`, `npm run test:contracts`, and `npm run test:coverage`.
 
+## Famous Portraits, Historic Pawprints, and Fur Reels
+
+The homepage Famous Portraits collection is driven by `shared/historicalPetCatalog.ts`. The public projection removes private sports-inspiration and jersey-verification sources before records reach customer UI. Sports portraits use generalized pet-athlete roles, fictional marks, and only source-verified jersey numbers; unavailable final art is labeled honestly instead of requesting a missing image.
+
+Historic Pawprints begins with **Historic Pawprint Pet Digital** or **Pawprint Pet Physical**. Fifteen digital roles are allowlisted in `shared/historicPawprintTemplates.ts`; the physical path is limited to five approved designs and continues to submit only a server-owned Printful product code. Browsers cannot provide a Printful variant ID or price.
+
+Fur Reels is the customer-facing eight-second AI video generator. It combines a persisted source portrait, one of thirteen directed scripts, four timed beats, lighting, camera, native sound, and an optional short voice line. It is not the manual Animator. Generated video jobs retain the existing account-scoped persistence and credit-refund boundaries.
+
 ## Environment variables
 
 Set these in Hostinger (Website → Environment variables) for production, or in `.env.local` for local dev. See `.env.example` for the full list.

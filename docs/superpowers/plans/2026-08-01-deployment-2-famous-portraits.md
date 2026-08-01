@@ -8,6 +8,14 @@
 
 **Tech Stack:** React 19, TypeScript, Zod, Tailwind CSS, Node test runner, Vite, existing Stripe/Printful and AI-video APIs.
 
+## Execution status
+
+- Catalog: implemented in commit `5ba6980`.
+- Homepage: implemented in commit `40d137d`.
+- Historic Pawprints: implemented in commit `f84fe59`.
+- Fur Reels: implemented in commit `aeec53f`.
+- Release verification: Deployment 2 focused suites and TypeScript pass under Node 24.18; the production build completes. The repository-wide run reached 891 passes before being stopped in a long real-MySQL section with baseline migration failures caused by missing `generation_jobs` parent tables in isolated fixtures.
+
 ## Global Constraints
 
 - Deployment 2 ships before the functional model hotfix.
@@ -305,4 +313,3 @@ Expected: one exact `main` SHA and one archive SHA-256 are recorded in the relea
 git add README.md docs/ARCHITECTURE.md docs/superpowers/plans/2026-08-01-deployment-2-famous-portraits.md
 git commit -m "docs: document deployment 2 release"
 ```
-
