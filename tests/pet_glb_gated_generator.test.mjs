@@ -6,6 +6,7 @@ process.env.PET_GLB_ENABLED = "true";
 
 const {
   CreatePetGlbOrderSchema,
+  ReferenceSubmissionSchema,
   FACIAL_RIG_POLICY,
   meshProfilePolicy,
   rigGenerationAvailability,
@@ -59,7 +60,7 @@ function modelGlb({ triangles = 12, texture = false, rig = false } = {}) {
     ],
     meshes: [{ primitives: [primitive] }],
     accessors: [
-      { count: triangles * 3, type: "VEC3", componentType: 5126 },
+      { count: triangles * 3, type: "VEC3", componentType: 5126, min: [-0.5, 0.1, -0.25], max: [0.5, 1.1, 0.25] },
       { count: triangles * 3, type: "VEC4", componentType: 5123 },
       { count: triangles * 3, type: "VEC4", componentType: 5126 },
       { count: triangles * 3, type: "SCALAR", componentType: 5125 },
@@ -69,7 +70,13 @@ function modelGlb({ triangles = 12, texture = false, rig = false } = {}) {
       textures: [{ source: 0 }],
       images: [{ uri: "data:image/png;base64,AA==" }],
     } : {}),
-    ...(rig ? { skins: [{ joints: [1, 2] }] } : {}),
+    ...(rig ? {
+      skins: [{ joints: [1, 2] }],
+      animations: [
+        { name: "idle", samplers: [{}], channels: [{ sampler: 0, target: { node: 1, path: "rotation" } }] },
+        { name: "walk", samplers: [{}], channels: [{ sampler: 0, target: { node: 2, path: "rotation" } }] },
+      ],
+    } : {}),
   });
 }
 
@@ -94,6 +101,14 @@ test("gated product contracts reject facial rigging but allow a body rig without
 
   assert.equal(FACIAL_RIG_POLICY.available, false);
   assert.equal(FACIAL_RIG_POLICY.minimumSuccessRate, 0.75);
+});
+
+test("reference submission requires the durable session identity", () => {
+  assert.equal(ReferenceSubmissionSchema.safeParse({ references: REFS }).success, false);
+  assert.equal(ReferenceSubmissionSchema.safeParse({
+    references: REFS,
+    referenceSessionUuid: "00000000-0000-4000-8000-000000000000",
+  }).success, true);
 });
 
 test("prices are separated by stage and total is deterministic", () => {
@@ -182,6 +197,21 @@ test("stage-aware validation accepts a blank base and adds texture/rig requireme
   const rigReport = validatePetGlbStage(rigged, { stage: "rig", meshProfile: "smart_mesh" });
   assert.equal(rigReport.operatorReady, true);
   assert.equal(rigReport.checks.find((check) => check.id === "skin_weights_present").passed, true);
+  assert.equal(rigReport.checks.find((check) => check.id === "geometry_bounds").passed, true);
+  assert.equal(rigReport.checks.find((check) => check.id === "idle_clip_exists").passed, true);
+  assert.equal(rigReport.checks.find((check) => check.id === "walk_clip_exists").passed, true);
+});
+
+test("rig validation blocks missing promised animation evidence", () => {
+  const parsed = JSON.parse(modelGlb({ triangles: 8000, texture: true, rig: true }).subarray(20).toString("utf8").trim());
+  delete parsed.animations;
+  const report = validatePetGlbStage(jsonOnlyGlb(parsed), {
+    stage: "rig",
+    meshProfile: "smart_mesh",
+    requireTexture: true,
+  });
+  assert.equal(report.operatorReady, false);
+  assert.ok(report.reasonCodes.includes("ANIM_RETARGET"));
 });
 
 test("SmartMesh over-budget output is blocked by measured triangles", () => {

@@ -39,6 +39,7 @@ test("public deep links and incomplete profiles are restored before authenticate
     fs.readFile(new URL("../src/animator/components/AnimatorScreen.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(appSource, /useState<Screen>\(\(\) =>[\s\S]*screenFromPath\(window\.location\.pathname\)[\s\S]*PUBLIC_SCREENS/);
+  assert.match(appSource, /PUBLIC_SCREENS[\s\S]*Screen\.SIGN_UP/);
   assert.match(appSource, /setIncompleteUser\(user\)[\s\S]*setCurrentScreen\(Screen\.SIGN_UP\)/);
   assert.match(signUpSource, /resumeProfile[\s\S]*setStep\("profile"\)/);
   assert.match(captureSource, /Authorization.*Bearer.*getToken/s);

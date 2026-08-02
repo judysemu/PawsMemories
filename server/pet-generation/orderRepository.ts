@@ -210,6 +210,7 @@ export class PetGlbOrderRepository {
     configuration: PetGlbOrderConfiguration,
     sourceOrderId: number,
     idempotencyKey: string,
+    referenceSessionId: number | null = null,
   ): Promise<PetGlbOrder> {
     const pool = this.getPool();
     const existing = await this.findRetryByKey(ownerPhone, idempotencyKey);
@@ -220,8 +221,8 @@ export class PetGlbOrderRepository {
         `INSERT INTO pet_glb_orders
            (order_uuid, owner_phone, sku, state, credits_reserved, credits_disposition,
             mesh_profile, subject_profile, include_texture, include_rig, texture_quality, style_direction,
-            retry_source_order_id, retry_idempotency_key)
-         VALUES (?, ?, ?, 'awaiting_references', 0, 'none', ?, ?, ?, ?, ?, ?, ?, ?)`,
+            retry_source_order_id, retry_idempotency_key, reference_session_id)
+         VALUES (?, ?, ?, 'awaiting_references', 0, 'none', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderUuid,
           ownerPhone,
@@ -234,6 +235,7 @@ export class PetGlbOrderRepository {
           configuration.styleDirection,
           sourceOrderId,
           idempotencyKey,
+          referenceSessionId,
         ],
       );
     } catch (error: any) {

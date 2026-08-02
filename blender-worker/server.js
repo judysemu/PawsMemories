@@ -22,6 +22,13 @@ import {
 const execPromise = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function boundedTimeoutEnv(name, fallback, minimum = 30_000, maximum = 3_600_000) {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed)
+    ? Math.max(minimum, Math.min(maximum, parsed))
+    : fallback;
+}
+
 // =============================================================================
 // Blender TCP Bridge Client
 // =============================================================================
@@ -30,6 +37,7 @@ const BRIDGE_HOST = process.env.BLENDER_BRIDGE_HOST || "127.0.0.1";
 const BRIDGE_PORT = parseInt(process.env.BLENDER_BRIDGE_PORT || "9876", 10);
 const BRIDGE_SCRIPT_PATH = process.env.BLENDER_BRIDGE_SCRIPT || path.join(__dirname, "bridge", "tcp_server.py");
 const SHOULD_AUTOSTART_BRIDGE = process.env.BLENDER_AUTOSTART_BRIDGE !== "false";
+const BRIDGE_REQUEST_TIMEOUT_MS = boundedTimeoutEnv("BLENDER_BRIDGE_REQUEST_TIMEOUT_MS", 1_850_000);
 let bridgeProcess = null;
 
 class BlenderBridgeClient {
@@ -43,7 +51,7 @@ class BlenderBridgeClient {
    * Send a JSON-RPC request to the Blender TCP bridge and wait for the response.
    * Creates a fresh TCP connection per request (simple, reliable for async work).
    */
-  async send(method, params = {}) {
+  async send(method, params = {}, timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
       const id = ++this._requestId;
       const socket = new net.Socket();
@@ -63,8 +71,8 @@ class BlenderBridgeClient {
       };
       const timeout = setTimeout(() => {
         socket.destroy();
-        fail(new Error(`Bridge request timed out after 600s: ${method}`));
-      }, 600000);
+        fail(new Error(`Bridge request timed out after ${Math.ceil(timeoutMs / 1000)}s: ${method}`));
+      }, timeoutMs);
 
       socket.connect(this.port, this.host, () => {
         const request = JSON.stringify({ id, method, params }) + "\n";
@@ -105,8 +113,8 @@ class BlenderBridgeClient {
     });
   }
 
-  async executeCode(code) {
-    return this.send("execute_code", { code });
+  async executeCode(code, timeoutMs) {
+    return this.send("execute_code", { code }, timeoutMs);
   }
 
   async getViewport(azimuth, elevation) {
@@ -766,8 +774,14 @@ print("IMPORT_COMPLETE")
 // Returns:  { success, views: {name: base64png}, cameras, bounds, resolution }
 // =============================================================================
 const RENDER_VIEWS_SCRIPT_PATH = path.join(__dirname, "jobs", "render_views.py");
+const RENDER_VIEWS_TIMEOUT_MS = boundedTimeoutEnv("BLENDER_RENDER_VIEWS_TIMEOUT_MS", 1_800_000, 60_000);
+let renderViewsActive = false;
 
 app.post("/texture/render-views", async (req, res) => {
+  if (renderViewsActive) {
+    return res.status(429).json({ error: "A canonical-view render is already running; retry shortly" });
+  }
+  renderViewsActive = true;
   try {
     let { glb_base64, glb_url, tier, views, resolution, transparent } = req.body || {};
     if (!glb_base64 && glb_url) {
@@ -800,7 +814,8 @@ print("IMPORT_COMPLETE")
       transparent: transparent === undefined ? true : Boolean(transparent),
     });
     const renderRes = await bridge.executeCode(
-      `${renderScript}\nrun_render_views(json.loads(r'''${params}'''))\n`
+      `${renderScript}\nrun_render_views(json.loads(r'''${params}'''))\n`,
+      RENDER_VIEWS_TIMEOUT_MS,
     );
     if (!renderRes.success) throw new Error(`render-views failed: ${renderRes.error}`);
 
@@ -824,6 +839,8 @@ print("IMPORT_COMPLETE")
   } catch (err) {
     console.error("[texture/render-views] error:", err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    renderViewsActive = false;
   }
 });
 

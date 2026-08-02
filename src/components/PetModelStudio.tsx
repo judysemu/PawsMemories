@@ -257,6 +257,7 @@ export default function PetModelStudio() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [rigReviewConfirmed, setRigReviewConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -294,6 +295,7 @@ export default function PetModelStudio() {
   useEffect(() => {
     setPreviewUrl(null);
     setRejectionReason("");
+    setRigReviewConfirmed(false);
   }, [view?.currentStage?.attemptUuid]);
 
   useEffect(() => {
@@ -359,6 +361,9 @@ export default function PetModelStudio() {
     downloadRequestIdRef.current += 1;
     setDownloadUrl(null);
     setView(next);
+    if (next.order.referenceManifest) {
+      setReferences(next.order.referenceManifest);
+    }
   }, []);
 
   const applyView = useCallback((next: OrderView) => {
@@ -481,7 +486,10 @@ export default function PetModelStudio() {
       const awaitingApproval = await requestJson(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ references: generatedManifest }),
+        body: JSON.stringify({
+          references: generatedManifest,
+          referenceSessionUuid: session.sessionUuid,
+        }),
       }) as OrderView;
       setReferences(generatedManifest as Record<string, string>);
       applyView(awaitingApproval);
@@ -547,6 +555,7 @@ export default function PetModelStudio() {
         artifactSha256: stage.artifactSha256,
         assetVersionId: stage.assetVersionId,
         reportSha256: stage.validationReportSha256,
+        visualReviewConfirmed: stage.stage === "rig" ? rigReviewConfirmed : false,
       }),
     }).then((next) => {
       setGenerationMessage("Approved. Starting the next build stage…");
@@ -635,13 +644,14 @@ export default function PetModelStudio() {
 
   const stage = view?.currentStage;
   const primaryReferenceReady = Boolean(references.frontUrl?.trim());
-  const canApprove = Boolean(
+  const stageApprovable = Boolean(
     stage
     && stage.stage !== "rig_check"
     && stage.state === "awaiting_customer_approval"
     && stage.artifactSha256
-    && stage.validationReport?.operatorReady !== false,
+    && stage.validationReport?.operatorReady !== false
   );
+  const canApprove = stageApprovable && (stage?.stage !== "rig" || rigReviewConfirmed);
   const selectedStages: StageKind[] = [
     "reference",
     "base",
@@ -838,7 +848,7 @@ export default function PetModelStudio() {
 
           {error && <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-3 text-xs font-bold text-error">{error}</div>}
 
-          {canApprove && (
+          {stageApprovable && (
             <section className="space-y-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs">
               <strong className="block text-sm">
                 {stage?.stage === "reference" ? "Check all five generated views" : "Review this model before continuing"}
@@ -848,7 +858,17 @@ export default function PetModelStudio() {
                   ? "The idle animation plays here so bent limbs or a broken rig cannot be hidden by a static preview."
                   : "Approval is bound to this exact saved version before another paid stage can start."}
               </p>
-              <button type="button" onClick={approveCustomerStage} disabled={busy} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
+              {stage?.stage === "rig" && (
+                <label className="flex items-start gap-2 rounded-lg border border-primary/25 bg-surface/70 p-2 font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={rigReviewConfirmed}
+                    onChange={(event) => setRigReviewConfirmed(event.target.checked)}
+                  />
+                  <span>I checked the neutral pose and idle/walk motion from multiple angles. No limb is bent, splayed, detached, or clipping through the body.</span>
+                </label>
+              )}
+              <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
                 {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
               <button type="button" onClick={rejectCustomerStage} disabled={busy} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
@@ -888,7 +908,7 @@ export default function PetModelStudio() {
           )}
 
           <section>
-            <h2 className="text-xs font-black uppercase tracking-[0.16em] text-on-surface-variant">Your model builds</h2>
+            <h2 className="text-xs font-black uppercase tracking-[0.16em] text-on-surface-variant">Recent model orders</h2>
             <div className="mt-2 space-y-2">
               {recentOrders.map((item) => (
                 <button key={item.order.orderUuid} type="button" onClick={() => selectOrder(item)}

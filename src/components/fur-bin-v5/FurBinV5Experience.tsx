@@ -66,14 +66,14 @@ function Badge({ badge }: { badge: FurBinItem["badges"][number] }) {
 }
 
 function Preview({ item, detail = false }: { item: FurBinItem; detail?: boolean }) {
-  if (item.signedViewUrl) {
+  if (detail && item.signedViewUrl) {
     return (
       <PetModelViewer
         src={item.signedViewUrl}
         poster={item.coverUrl}
         alt={`Front-facing 3D model of ${item.title}`}
         autoRotate={false}
-        thumbnail={!detail && Boolean(item.coverUrl)}
+        thumbnail={false}
         className="furbin-v5-preview"
       />
     );
@@ -84,7 +84,7 @@ function Preview({ item, detail = false }: { item: FurBinItem; detail?: boolean 
   return (
     <div className="furbin-v5-preview furbin-v5-preview-fallback" role="img" aria-label={`${item.title}, preview unavailable`}>
       <Box aria-hidden="true" size={38} />
-      <span>Preview is still preparing</span>
+      <span>{item.signedViewUrl ? "Open to view in 3D" : "Preview is still preparing"}</span>
     </div>
   );
 }

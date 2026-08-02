@@ -47,6 +47,7 @@ import {
   findVersionByAssetAndNumber,
 } from "../assets/repository";
 import { generateSignedUrlForVersion } from "../assets/access";
+import { privateReferenceObjectKey } from "../assets/privateObjectReference";
 import { sendMail } from "../mail";
 import type { SubmitFurBinDefectReport } from "./schemas";
 import { petGlbTotalCost } from "../../src/pricing";
@@ -812,6 +813,25 @@ export class FurBinService {
         }
       }
     }
+    if (!coverUrl) {
+      const legacyObjectKey = privateReferenceObjectKey(manifest.frontUrl);
+      if (legacyObjectKey) {
+        const [legacyRows] = await pool.query(
+          `SELECT av.id AS version_id
+             FROM asset_versions av
+             JOIN assets a ON a.id = av.asset_id
+            WHERE av.object_key = ? AND a.owner_id = ?
+            ORDER BY av.id DESC LIMIT 1`,
+          [legacyObjectKey, ownerId],
+        );
+        const legacyVersionId = Number((legacyRows as any[])[0]?.version_id || 0);
+        const legacyVersion = legacyVersionId > 0 ? await findVersionById(pool, legacyVersionId) : null;
+        const legacyAsset = legacyVersion ? await findAssetById(pool, legacyVersion.asset_id) : null;
+        if (legacyVersion && legacyAsset && legacyAsset.owner_id === ownerId) {
+          coverUrl = (await this.signUrl(legacyAsset, legacyVersion, ownerId, false)) || undefined;
+        }
+      }
+    }
     coverUrl ||= durableReferenceUrl(manifest.frontUrl);
     const retryPriceCredits = sourceOrder
       ? petGlbTotalCost({ texture: Boolean(sourceOrder.include_texture), rig: Boolean(sourceOrder.include_rig) })
@@ -866,6 +886,7 @@ function durableReferenceUrl(value: unknown): string | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
   try {
     const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
     const isPresigned = url.searchParams.has("X-Amz-Signature")
       || url.searchParams.has("X-Amz-Credential")
       || url.searchParams.has("X-Amz-Expires");

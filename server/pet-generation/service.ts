@@ -43,12 +43,54 @@ export interface PetGlbServiceDeps {
   }) => Promise<{ assetId: number; versionId: number }>;
   /** Issues a short-lived authenticated download URL for an approved version. */
   signDownload: (versionId: number, ownerPhone: string, ttlSeconds: number) => Promise<string>;
+  /** Resolves durable reference-session assets into fresh, short-lived view URLs. */
+  resolveReferenceSession?: (input: {
+    ownerPhone: string;
+    ttlSeconds: number;
+    sessionUuid?: string;
+    sessionId?: number;
+  }) => Promise<{
+    sessionId: number;
+    signedManifest: PetModelGenerationInput;
+    durableManifest: PetModelGenerationInput;
+  }>;
+  /** Refreshes legacy URL manifests by resolving their owned private object keys. */
+  refreshLegacyReferenceManifest?: (
+    manifest: Record<string, string>,
+    ownerPhone: string,
+    ttlSeconds: number,
+  ) => Promise<PetModelGenerationInput | null>;
   rigProfileJoints?: string[];
   /** Deterministic recovery seam; production uses the configured provider factory. */
   providerFactory?: () => PetModelGenerationProvider;
 }
 
 export const DOWNLOAD_TTL_SECONDS = 900;
+
+const EPHEMERAL_REFERENCE_QUERY_KEYS = new Set([
+  "authorization",
+  "authorizationtoken",
+  "expires",
+  "signature",
+  "token",
+]);
+
+export function containsEphemeralReferenceUrl(
+  manifest: Record<string, string>,
+): boolean {
+  return Object.values(manifest).some((value) => {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:") return true;
+      return [...url.searchParams.keys()].some((rawKey) => {
+        const key = rawKey.toLowerCase();
+        return key.startsWith("x-amz-") || EPHEMERAL_REFERENCE_QUERY_KEYS.has(key);
+      });
+    } catch {
+      return true;
+    }
+  });
+}
 
 /** Credits quote — reuses the existing formula unchanged. Do not "refine". */
 export function quoteCredits(viewCount: number, baseCredits = 10): number {
@@ -247,10 +289,28 @@ export class PetGlbService {
     orderUuid: string,
     ownerPhone: string,
     manifest: PetModelGenerationInput,
+    referenceSessionUuid?: string,
   ): Promise<PetGlbOrderView> {
     const order = await this.requireOwned(orderUuid, ownerPhone);
+    let persistedManifest = manifest;
+    let referenceSessionId = order.referenceSessionId;
+    if (referenceSessionUuid || referenceSessionId) {
+      if (!this.deps.resolveReferenceSession) {
+        throw new PetGenerationError("REFERENCE_SESSION_UNAVAILABLE", "Reference-session resolver is unavailable");
+      }
+      const resolved = await this.deps.resolveReferenceSession({
+        ownerPhone,
+        ttlSeconds: DOWNLOAD_TTL_SECONDS,
+        sessionUuid: referenceSessionUuid,
+        sessionId: referenceSessionUuid ? undefined : referenceSessionId || undefined,
+      });
+      referenceSessionId = resolved.sessionId;
+      // The submitted signed URLs are deliberately not canonical. Persist only
+      // immutable asset/version identities and mint URLs at display/provider time.
+      persistedManifest = resolved.durableManifest;
+    }
     const inputHash = canonicalHash({
-      manifest,
+      manifest: persistedManifest,
       meshProfile: order.meshProfile,
       subjectProfile: order.subjectProfile,
       includeTexture: order.includeTexture,
@@ -261,8 +321,9 @@ export class PetGlbService {
     await this.stages.saveReferenceManifest(
       order.id,
       ownerPhone,
-      { ...manifest } as Record<string, string>,
+      { ...persistedManifest } as Record<string, string>,
       inputHash,
+      referenceSessionId,
     );
     // Saving is free. The exact manifest remains reviewable until the customer
     // approves it, which is the only operation allowed to queue the paid base.
@@ -611,6 +672,7 @@ export class PetGlbService {
       },
       source.id,
       idempotencyKey,
+      source.referenceSessionId,
     );
 
     if (retry.state === "awaiting_references") {
@@ -667,11 +729,12 @@ export class PetGlbService {
     try {
       let job;
       if (attempt.stage === "base") {
-        if (!order.referenceManifest) {
+        const references = await this.resolveOrderReferenceManifest(order);
+        if (!references) {
           throw new PetGenerationError("REFERENCES_MISSING", "Approved references are missing");
         }
         job = await provider.createBaseJob({
-          ...(order.referenceManifest as unknown as PetModelGenerationInput),
+          ...references,
           meshProfile: order.meshProfile,
           subjectProfile: order.subjectProfile,
         });
@@ -803,14 +866,47 @@ export class PetGlbService {
     const current = currentOverride === undefined
       ? await this.stages.findCurrent(order.id)
       : currentOverride;
+    const referenceManifest = await this.resolveOrderReferenceManifest(order);
     return {
-      order,
+      order: {
+        ...order,
+        // Never return the stored legacy capability URL when it could not be
+        // refreshed. A static placeholder is safer than an expired poster.
+        referenceManifest: referenceManifest
+          ? { ...referenceManifest } as Record<string, string>
+          : null,
+      },
       currentStage: current,
       progress,
       quote: productQuote(order),
       meshPolicy: meshProfilePolicy(order.meshProfile),
       facialRig: FACIAL_RIG_POLICY,
     };
+  }
+
+  private async resolveOrderReferenceManifest(
+    order: PetGlbOrder,
+  ): Promise<PetModelGenerationInput | null> {
+    if (order.referenceSessionId && this.deps.resolveReferenceSession) {
+      const resolved = await this.deps.resolveReferenceSession({
+        ownerPhone: order.ownerPhone,
+        ttlSeconds: DOWNLOAD_TTL_SECONDS,
+        sessionId: order.referenceSessionId,
+      });
+      return resolved.signedManifest;
+    }
+    if (order.referenceManifest && this.deps.refreshLegacyReferenceManifest) {
+      const refreshed = await this.deps.refreshLegacyReferenceManifest(
+        order.referenceManifest,
+        order.ownerPhone,
+        DOWNLOAD_TTL_SECONDS,
+      );
+      if (refreshed) return refreshed;
+    }
+    if (!order.referenceManifest || containsEphemeralReferenceUrl(order.referenceManifest)) {
+      return null;
+    }
+    return order.referenceManifest as unknown as PetModelGenerationInput;
   }
 
   // ── 1. Order creation + credit reservation ────────────────────────────────

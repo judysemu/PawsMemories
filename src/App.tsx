@@ -116,6 +116,7 @@ function screenFromPath(pathname: string): Screen | null {
 
 const PUBLIC_SCREENS = new Set<Screen>([
   Screen.DASHBOARD,
+  Screen.SIGN_UP,
   Screen.CREATE,
   Screen.PAWPRINTS,
   Screen.PRINT_SHOP,
@@ -266,7 +267,8 @@ export default function App() {
           applyUser(user);
           setIncompleteUser(null);
           setIsAuthed(true);
-          setCurrentScreen(screenFromPath(window.location.pathname) || Screen.DASHBOARD);
+          const restoredScreen = screenFromPath(window.location.pathname);
+          setCurrentScreen(restoredScreen === Screen.SIGN_UP ? Screen.DASHBOARD : restoredScreen || Screen.DASHBOARD);
           // Login/check-in rewards are server-side and idempotent per calendar day.
           try {
             const checkedIn = await claimDailyStreak();

@@ -64,8 +64,8 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
     desc: "Upload a photo to generate a custom 3D pet model, personalize it, and prepare for printing."
   },
   [Screen.SIGN_UP]: {
-    title: `Sign In | ${BRAND}`,
-    desc: "Sign in to Pawsome3D to create and order personalized pet models."
+    title: `Sign Up or Log In | ${BRAND}`,
+    desc: "Create a Pawsome3D account or log in to build and order personalized pet models."
   }
 };
 

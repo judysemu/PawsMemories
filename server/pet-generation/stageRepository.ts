@@ -51,6 +51,7 @@ export interface ExactStageApproval {
   assetVersionId: number | null;
   reportSha256: string | null;
   approvalHash: string;
+  visualReviewConfirmed?: boolean;
 }
 
 function parseJson<T>(value: unknown): T | null {
@@ -271,6 +272,7 @@ export class PetGlbStageRepository {
     ownerPhone: string,
     manifest: Record<string, string>,
     manifestHash: string,
+    referenceSessionId: number | null = null,
   ): Promise<PetGlbStageAttempt> {
     const conn = await this.getPool().getConnection();
     try {
@@ -295,10 +297,11 @@ export class PetGlbStageRepository {
       await conn.query(
         `UPDATE pet_glb_orders
             SET reference_manifest_json = ?, reference_manifest_hash = ?,
+                reference_session_id = COALESCE(?, reference_session_id),
                 current_stage = 'reference', current_stage_attempt_id = ?,
                 state = 'awaiting_reference_approval', updated_at = NOW()
           WHERE id = ?`,
-        [JSON.stringify(manifest), manifestHash, attempt.id, orderId],
+        [JSON.stringify(manifest), manifestHash, referenceSessionId, attempt.id, orderId],
       );
       await this.writeEvent(conn, orderId, order.state, "awaiting_reference_approval", ownerPhone, "references_saved");
       await conn.commit();
@@ -1147,6 +1150,12 @@ export class PetGlbStageRepository {
     }
     if (current.validationReport && !current.validationReport.operatorReady) {
       throw new PetGenerationError("VALIDATION_BLOCKED", "Stage validation did not pass");
+    }
+    if (current.stage === "rig" && approval.visualReviewConfirmed !== true) {
+      throw new PetGenerationError(
+        "VISUAL_REVIEW_REQUIRED",
+        "Confirm the neutral pose and idle/walk deformation review before approving the rig",
+      );
     }
     if (current.stage === "rig_check" && !current.capabilityReport?.riggable) {
       throw new PetGenerationError("RIG_NOT_SUPPORTED", "Provider pre-rig check did not confirm this model is riggable");

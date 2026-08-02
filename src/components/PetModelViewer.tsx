@@ -20,7 +20,7 @@ function ensureModelViewer(): Promise<void> {
  * grid all faced different directions. Pinning the orbit means every card
  * presents the model head-on.
  */
-const FRONT_ORBIT = "0deg 80deg 105%";
+const FRONT_ORBIT = "90deg 80deg 120%";
 
 /**
  * A phone can hold only a handful of live WebGL contexts (typically 8, fewer
@@ -86,9 +86,8 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
   const viewerRef = useRef<HTMLElement | null>(null);
   const [lowPower] = useState(() => isLowPowerDevice());
 
-  // Explicit prop wins; otherwise fall back to poster-only on mobile. Without a
-  // poster there is nothing to show, so we still mount the viewer rather than
-  // render an empty box.
+  // Explicit thumbnail mode never creates a WebGL context. When a poster is
+  // unavailable the caller gets a static accessible placeholder instead.
   const useThumbnail = thumbnail ?? (lowPower && !!poster);
 
   useEffect(() => {

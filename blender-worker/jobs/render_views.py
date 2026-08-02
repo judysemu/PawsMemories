@@ -239,18 +239,20 @@ def run_render_views(params):
         cameras = {}
         created = []
 
-        for name in view_names:
-            azimuth = _azimuth_for(name)
-            cam, direction = _make_camera("rv_cam_%s" % name, azimuth, lo, hi)
-            created.append(cam)
-            path = os.path.join(tmpdir, "render_view_%s.png" % name)
-            views[name] = _render_to_base64(cam, path)
-            cameras[name] = _camera_metadata(cam, direction, azimuth)
-
-        # Leave the scene as we found it — the caller may bake next, and a stray
-        # camera would be picked up as scene geometry by later bounds math.
-        for cam in created:
-            bpy.data.objects.remove(cam, do_unlink=True)
+        try:
+            for name in view_names:
+                azimuth = _azimuth_for(name)
+                cam, direction = _make_camera("rv_cam_%s" % name, azimuth, lo, hi)
+                created.append(cam)
+                path = os.path.join(tmpdir, "render_view_%s.png" % name)
+                views[name] = _render_to_base64(cam, path)
+                cameras[name] = _camera_metadata(cam, direction, azimuth)
+        finally:
+            # Leave the scene as we found it even when one render fails. A
+            # stray camera would shift bounds for the next request.
+            for cam in created:
+                if cam.name in bpy.data.objects:
+                    bpy.data.objects.remove(cam, do_unlink=True)
 
         print("RENDER_VIEWS_RESULT:" + json.dumps({
             "success": True,

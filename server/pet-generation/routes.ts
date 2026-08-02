@@ -10,7 +10,7 @@ import {
   FACIAL_RIG_POLICY,
   FullOrderRetrySchema,
   meshProfilePolicy,
-  ReferenceManifestSchema,
+  ReferenceSubmissionSchema,
   rigGenerationAvailability,
   StageApprovalSchema,
   StageKindSchema,
@@ -171,7 +171,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   router.post("/orders/:orderUuid/references", writeLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
-    const parsed = ReferenceManifestSchema.safeParse(req.body?.references);
+    const parsed = ReferenceSubmissionSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
         error: "INCOMPLETE_REFERENCES",
@@ -179,7 +179,12 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
       });
     }
     try {
-      res.json(await service.submitReferenceManifest(req.params.orderUuid, phone, parsed.data));
+      res.json(await service.submitReferenceManifest(
+        req.params.orderUuid,
+        phone,
+        parsed.data.references,
+        parsed.data.referenceSessionUuid,
+      ));
     } catch (err) { fail(res, err); }
   });
 
@@ -213,6 +218,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
         assetVersionId: parsed.data.assetVersionId ?? null,
         reportSha256: parsed.data.reportSha256 ?? null,
         approvalHash: canonicalHash({ orderUuid: req.params.orderUuid, stage: stage.data, ...parsed.data }),
+        visualReviewConfirmed: parsed.data.visualReviewConfirmed,
       }));
     } catch (err) { fail(res, err); }
   });

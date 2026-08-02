@@ -5,6 +5,14 @@ import { findAssetById, findVersionById } from "../assets/repository";
 import { generateSignedUrlForVersion } from "../assets/access";
 import type { PetGlbServiceDeps } from "./service";
 import type { ValidationReport } from "./validation";
+import { PetGenerationError } from "./provider";
+import {
+  findSessionById,
+  findSessionByUuid,
+  findViewsByAttemptId,
+} from "../reference-sessions/repository";
+import type { PetModelGenerationInput } from "./types";
+import { privateReferenceObjectKey } from "../assets/privateObjectReference";
 
 /**
  * Concrete wiring of PetGlbService against this repo's real subsystems:
@@ -54,6 +62,81 @@ export async function buildPetGlbDeps(
     isAdmin,
     isOperator: (phone) => isUserOperator(getPool, phone),
     rigProfileJoints,
+
+    async resolveReferenceSession({ ownerPhone, ttlSeconds, sessionUuid, sessionId }) {
+      const pool = getPool();
+      const session = sessionUuid
+        ? await findSessionByUuid(pool, sessionUuid)
+        : sessionId
+          ? await findSessionById(pool, sessionId)
+          : null;
+      if (!session || session.owner_id !== ownerPhone) {
+        throw new PetGenerationError("REFERENCE_SESSION_INVALID", "Reference session was not found for this account");
+      }
+      const attemptId = session.approved_attempt_id || session.current_attempt_id;
+      if (!attemptId) {
+        throw new PetGenerationError("REFERENCES_MISSING", "Reference session has no completed view set");
+      }
+      const views = await findViewsByAttemptId(pool, attemptId);
+      type ReferenceUrlField = "frontUrl" | "leftUrl" | "rightUrl" | "rearUrl" | "threeQuarterUrl";
+      const signed: Partial<Record<ReferenceUrlField, string>> = {};
+      const durable: Partial<Record<ReferenceUrlField, string>> = {};
+      const fieldByKind: Record<string, ReferenceUrlField> = {
+        front: "frontUrl",
+        left: "leftUrl",
+        right: "rightUrl",
+        rear: "rearUrl",
+        front_three_quarter: "threeQuarterUrl",
+      };
+      for (const view of views) {
+        const field = fieldByKind[view.view_kind];
+        if (!field) continue;
+        const version = await findVersionById(pool, view.asset_version_id);
+        const asset = version ? await findAssetById(pool, version.asset_id) : null;
+        if (!version || !asset || asset.owner_id !== ownerPhone || version.asset_id !== asset.id) {
+          throw new PetGenerationError("REFERENCE_LINEAGE_INVALID", "Reference asset lineage is invalid");
+        }
+        signed[field] = await generateSignedUrlForVersion(asset, version, ownerPhone, false, ttlSeconds);
+        durable[field] = `asset://${asset.asset_uuid}/versions/${version.version_number}`;
+      }
+      const required: ReferenceUrlField[] = [
+        "frontUrl", "leftUrl", "rightUrl", "rearUrl", "threeQuarterUrl",
+      ];
+      if (required.some((field) => typeof signed[field] !== "string" || typeof durable[field] !== "string")) {
+        throw new PetGenerationError("REFERENCES_MISSING", "Reference session does not contain all five required views");
+      }
+      return {
+        sessionId: session.id,
+        signedManifest: signed as PetModelGenerationInput,
+        durableManifest: durable as PetModelGenerationInput,
+      };
+    },
+
+    async refreshLegacyReferenceManifest(manifest, ownerPhone, ttlSeconds) {
+      type ReferenceUrlField = "frontUrl" | "leftUrl" | "rightUrl" | "rearUrl" | "threeQuarterUrl";
+      const fields: ReferenceUrlField[] = ["frontUrl", "leftUrl", "rightUrl", "rearUrl", "threeQuarterUrl"];
+      const refreshed: Partial<Record<ReferenceUrlField, string>> = {};
+      const pool = getPool();
+      for (const field of fields) {
+        const objectKey = privateReferenceObjectKey(manifest[field]);
+        if (!objectKey) return null;
+        const [rows] = await pool.query(
+          `SELECT av.id AS version_id, av.asset_id
+             FROM asset_versions av
+             JOIN assets a ON a.id = av.asset_id
+            WHERE av.object_key = ? AND a.owner_id = ?
+            ORDER BY av.id DESC LIMIT 1`,
+          [objectKey, ownerPhone],
+        );
+        const versionId = Number((rows as any[])[0]?.version_id || 0);
+        if (!versionId) return null;
+        const version = await findVersionById(pool, versionId);
+        const asset = version ? await findAssetById(pool, version.asset_id) : null;
+        if (!version || !asset || asset.owner_id !== ownerPhone) return null;
+        refreshed[field] = await generateSignedUrlForVersion(asset, version, ownerPhone, false, ttlSeconds);
+      }
+      return refreshed as PetModelGenerationInput;
+    },
 
     async persistVersion({ ownerPhone, assetId, glb, sha256, validationReport, metadata, stage }) {
       const pool = getPool();

@@ -357,12 +357,15 @@ export function validatePetGlbStage(
     const textures = Array.isArray(json.textures) ? json.textures : [];
     const images = Array.isArray(json.images) ? json.images : [];
 
+    const positionAccessors: any[] = [];
+
     for (const mesh of meshes) {
       for (const primitive of mesh.primitives || []) {
         const indexAccessor = primitive.indices !== undefined ? accessors[primitive.indices] : null;
         const positionAccessor = primitive.attributes?.POSITION !== undefined
           ? accessors[primitive.attributes.POSITION]
           : null;
+        if (positionAccessor) positionAccessors.push(positionAccessor);
         const vertexOrIndexCount = Number(indexAccessor?.count || positionAccessor?.count || 0);
         const mode = primitive.mode ?? 4;
         if (mode === 4) triangleCount += Math.floor(vertexOrIndexCount / 3);
@@ -388,6 +391,43 @@ export function validatePetGlbStage(
       measured: { triangles: triangleCount, budget: policy.maxTriangles },
     });
     if (!budgetPass) reasonCodes.push("TRIANGLE_BUDGET_EXCEEDED");
+
+    const finiteVector = (value: unknown, length: number): value is number[] =>
+      Array.isArray(value) && value.length === length && value.every((item) => Number.isFinite(item));
+    const boundedPositions = positionAccessors.filter((accessor) =>
+      finiteVector(accessor?.min, 3) && finiteVector(accessor?.max, 3));
+    const boundsLo = [0, 1, 2].map((axis) =>
+      Math.min(...boundedPositions.map((accessor) => Number(accessor.min[axis]))));
+    const boundsHi = [0, 1, 2].map((axis) =>
+      Math.max(...boundedPositions.map((accessor) => Number(accessor.max[axis]))));
+    const boundsSize = boundsHi.map((value, axis) => value - boundsLo[axis]);
+    const boundsPass = boundedPositions.length === positionAccessors.length
+      && boundedPositions.length > 0
+      && boundsSize.every((value) => Number.isFinite(value) && value > 0);
+    checks.push({
+      id: "geometry_bounds", channel: "G", critical: true, passed: boundsPass,
+      detail: boundsPass
+        ? `local bounds ${boundsSize.map((value) => value.toFixed(4)).join(" × ")} glTF units`
+        : "position accessors do not contain finite, non-zero bounds",
+      measured: boundsPass ? {
+        width: boundsSize[0], height: boundsSize[1], depth: boundsSize[2],
+      } : undefined,
+    });
+    if (!boundsPass) reasonCodes.push("BOUNDS_UNMEASURED");
+
+    let invalidTransforms = 0;
+    for (const node of nodes) {
+      if (node.translation !== undefined && !finiteVector(node.translation, 3)) invalidTransforms++;
+      if (node.rotation !== undefined && !finiteVector(node.rotation, 4)) invalidTransforms++;
+      if (node.scale !== undefined && !finiteVector(node.scale, 3)) invalidTransforms++;
+      if (node.matrix !== undefined && !finiteVector(node.matrix, 16)) invalidTransforms++;
+    }
+    checks.push({
+      id: "finite_transforms", channel: "X", critical: true, passed: invalidTransforms === 0,
+      detail: invalidTransforms === 0 ? `${nodes.length} node transform(s) are finite` : `${invalidTransforms} invalid node transform(s)`,
+      measured: { nodes: nodes.length, invalidTransforms },
+    });
+    if (invalidTransforms) reasonCodes.push("INVALID_TRANSFORM");
 
     const buffers = Array.isArray(json.buffers) ? json.buffers : [];
     const externalBuffers = buffers.filter((buffer: any) =>
@@ -455,6 +495,35 @@ export function validatePetGlbStage(
 
       if (!skinPass) reasonCodes.push("RIG_HIERARCHY");
       if (!weightsPass) reasonCodes.push("RIG_WEIGHTS");
+
+      const animations = Array.isArray(json.animations) ? json.animations : [];
+      const animationNames = animations.map((animation: any) => String(animation?.name || "").toLowerCase());
+      const idlePass = animationNames.some((name: string) => name.includes("idle"));
+      const walkPass = animationNames.some((name: string) => name.includes("walk"));
+      checks.push({
+        id: "idle_clip_exists", channel: "A", critical: true, passed: idlePass,
+        detail: idlePass ? "idle clip present" : "idle clip missing",
+      });
+      checks.push({
+        id: "walk_clip_exists", channel: "A", critical: true, passed: walkPass,
+        detail: walkPass ? "walk clip present" : "walk clip missing",
+      });
+      let animationChannels = 0;
+      let invalidAnimationTargets = 0;
+      for (const animation of animations) {
+        for (const channel of animation?.channels || []) {
+          animationChannels++;
+          const targetNode = channel?.target?.node;
+          if (!Number.isInteger(targetNode) || !nodes[targetNode]) invalidAnimationTargets++;
+        }
+      }
+      const animationTargetsPass = animationChannels > 0 && invalidAnimationTargets === 0;
+      checks.push({
+        id: "animation_targets_resolve", channel: "A", critical: true, passed: animationTargetsPass,
+        detail: `${animationChannels - invalidAnimationTargets}/${animationChannels} animation channel target(s) resolve`,
+        measured: { animationChannels, invalidAnimationTargets },
+      });
+      if (!idlePass || !walkPass || !animationTargetsPass) reasonCodes.push("ANIM_RETARGET");
     }
   } else {
     for (const id of ["scene_exists", "mesh_exists", "triangle_budget", "buffers_self_contained"]) {

@@ -54,6 +54,21 @@ TCP_PORT = int(os.environ.get("BLENDER_BRIDGE_PORT", "9876"))
 CHECKPOINT_DIR = "/tmp/blender_checkpoints"
 VIEWPORT_DIR = "/tmp/blender_viewports"
 REQUEST_QUEUE = queue.Queue()
+BLENDER_VERSION = bpy.app.version_string
+BRIDGE_SCENE_OBJECT_COUNT = len(bpy.context.scene.objects)
+
+
+def _bounded_env_int(name, fallback, minimum, maximum):
+    try:
+        value = int(os.environ.get(name, str(fallback)))
+    except (TypeError, ValueError):
+        value = fallback
+    return max(minimum, min(maximum, value))
+
+
+BRIDGE_DISPATCH_TIMEOUT_SECONDS = _bounded_env_int(
+    "BLENDER_BRIDGE_DISPATCH_TIMEOUT_SECONDS", 1800, 30, 3600,
+)
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(VIEWPORT_DIR, exist_ok=True)
@@ -659,11 +674,15 @@ def handle_import_glb(params: dict) -> dict:
 
 
 def handle_ping(params: dict) -> dict:
-    """Health check."""
+    """Health check using main-thread-cached values only.
+
+    Ping is dispatched directly by the TCP client thread so Render health checks
+    stay responsive while Blender's main thread is performing a long render.
+    """
     return {
         "success": True,
-        "blender_version": bpy.app.version_string,
-        "scene_objects": len(bpy.context.scene.objects),
+        "blender_version": BLENDER_VERSION,
+        "scene_objects": BRIDGE_SCENE_OBJECT_COUNT,
     }
 
 
@@ -1054,21 +1073,33 @@ def dispatch_request(data: dict) -> dict:
         }
 
 
+def dispatch_cached_ping(data: dict) -> dict:
+    """Build a health response without entering Blender's main-thread queue."""
+    return {
+        "id": data.get("id"),
+        "result": handle_ping(data.get("params", {})),
+    }
+
+
 def handle_request(data: dict) -> dict:
     """Queue Blender work for execution on Blender's main thread."""
     response_queue = queue.Queue(maxsize=1)
     REQUEST_QUEUE.put((data, response_queue))
     try:
-        return response_queue.get(timeout=240)
+        return response_queue.get(timeout=BRIDGE_DISPATCH_TIMEOUT_SECONDS)
     except queue.Empty:
         return {
             "id": data.get("id"),
-            "error": {"message": "Timed out waiting for Blender main-thread dispatch", "code": -32000},
+            "error": {
+                "message": "Timed out waiting for Blender main-thread dispatch",
+                "code": -32000,
+            },
         }
 
 
 def process_request_queue():
     """Run all queued JSON-RPC requests on Blender's main thread."""
+    global BRIDGE_SCENE_OBJECT_COUNT
     while True:
         try:
             data, response_queue = REQUEST_QUEUE.get_nowait()
@@ -1085,6 +1116,7 @@ def process_request_queue():
             })
         finally:
             REQUEST_QUEUE.task_done()
+            BRIDGE_SCENE_OBJECT_COUNT = len(bpy.context.scene.objects)
 
 
 # ---------------------------------------------------------------------------
@@ -1122,7 +1154,9 @@ def handle_client(conn, addr):
                 if method != "ping":
                     print(f"[Bridge] Request: method={method} id={request.get('id')}")
                     
-                response = handle_request(request)
+                # Ping never mutates Blender state and reads only cached scalar
+                # values, so it can bypass a long render queued on the main thread.
+                response = dispatch_cached_ping(request) if method == "ping" else handle_request(request)
                 response_json = json.dumps(response) + "\n"
                 conn.sendall(response_json.encode("utf-8"))
 

@@ -38,6 +38,11 @@ export const ReferenceManifestSchema = z.object({
   threeQuarterUrl: httpsUrl,
 }).strict();
 
+export const ReferenceSubmissionSchema = z.object({
+  references: ReferenceManifestSchema,
+  referenceSessionUuid: z.string().uuid(),
+}).strict();
+
 export const StageKindSchema = z.enum(["reference", "base", "texture", "rig_check", "rig"]);
 
 export const StageApprovalSchema = z.object({
@@ -46,6 +51,7 @@ export const StageApprovalSchema = z.object({
   artifactSha256: z.string().regex(/^[0-9a-f]{64}$/),
   assetVersionId: z.number().int().positive().nullable(),
   reportSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  visualReviewConfirmed: z.boolean().optional().default(false),
 }).strict();
 
 export const StageRejectionSchema = z.object({
