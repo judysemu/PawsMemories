@@ -53,6 +53,55 @@ test("model-build durability migration adds recovery and refund sweep evidence",
   assert.match(sql, /refund_attempts/);
 });
 
+test("Fur Reels migration keeps its published SQL but marks the generation job child table optional", () => {
+  const migration = MIGRATIONS.find((entry) => entry.version === 46);
+  assert.equal(migration?.name, "fur_bin_feedback_and_ai_video_scripts");
+  assert.equal(migration?.statementRequiresTable?.[1], "generation_jobs");
+  assert.match(migration?.statements[0] || "", /CREATE TABLE IF NOT EXISTS fur_bin_feedback/);
+  assert.match(migration?.statements[1] || "", /REFERENCES generation_jobs\(id\)/);
+});
+
+test("runMigrations skips only dependency-bound statements when their table is absent", async () => {
+  const executed = [];
+  const storedRows = [];
+  const connection = {
+    async query(sql, params = []) {
+      const text = String(sql).trim();
+      if (text.includes("GET_LOCK")) return [[{ lock_acquired: 1 }]];
+      if (text.includes("RELEASE_LOCK")) return [[{ lock_released: 1 }]];
+      if (text.startsWith("CREATE TABLE IF NOT EXISTS schema_migrations")) return [[]];
+      if (text.startsWith("SELECT COUNT(*) AS c FROM schema_migrations")) return [[{ c: storedRows.length }]];
+      if (text.includes("information_schema.TABLES") && text.includes("TABLE_NAME = ?")) {
+        return [[{ c: params[0] === "generation_jobs" ? 0 : 1 }]];
+      }
+      if (text.startsWith("SELECT version, name, checksum")) return [storedRows];
+      if (text.startsWith("INSERT INTO schema_migrations")) {
+        storedRows.push({
+          version: params[0], name: params[1], checksum: params[2],
+          applied_at: new Date(), duration_ms: params[3],
+        });
+        return [{ affectedRows: 1 }];
+      }
+      executed.push(text);
+      return [[]];
+    },
+    release() {},
+  };
+  const pool = { async getConnection() { return connection; } };
+  const migration = {
+    version: 101,
+    name: "optional_child_table",
+    statements: ["CREATE TABLE parent_independent (id INT)", "CREATE TABLE optional_child (id INT)"],
+    statementRequiresTable: { 1: "generation_jobs" },
+  };
+
+  const result = await runMigrations(pool, [migration]);
+  assert.equal(result.applied, 1);
+  assert.ok(executed.includes(migration.statements[0]));
+  assert.ok(!executed.includes(migration.statements[1]));
+  assert.equal(storedRows.length, 1);
+});
+
 test("runMigrations acquires dedicated connection, performs migration, and releases lock & connection in finally", async () => {
   const connectionQueries = [];
   const storedRows = [];

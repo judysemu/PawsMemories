@@ -8,6 +8,12 @@ export interface Migration {
   name: string;
   statements: string[];
   skipWhenTableMissing?: string;
+  /**
+   * Zero-based statement indexes whose SQL is valid only when the named table
+   * exists. This is execution metadata and deliberately does not participate
+   * in the published SQL checksum.
+   */
+  statementRequiresTable?: Partial<Record<number, string>>;
 }
 
 export interface AppliedMigration {
@@ -2270,6 +2276,11 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 46,
     name: "fur_bin_feedback_and_ai_video_scripts",
+    // generation_jobs belongs to the legacy application bootstrap and is
+    // intentionally absent from migration-only asset/Pet GLB fixtures. Keep
+    // the published SQL immutable while conditionally omitting only the Fur
+    // Reels child table in those reduced schemas.
+    statementRequiresTable: { 1: "generation_jobs" },
     statements: [
       `CREATE TABLE IF NOT EXISTS fur_bin_feedback (
         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -2391,6 +2402,15 @@ export async function runMigrations(
     if (!Array.isArray(mig.statements) || mig.statements.length === 0) {
       throw new Error(`Migration v${mig.version} (${mig.name}) must define explicit statements.`);
     }
+    for (const [indexText, tableName] of Object.entries(mig.statementRequiresTable || {})) {
+      const index = Number(indexText);
+      if (!Number.isInteger(index) || index < 0 || index >= mig.statements.length) {
+        throw new Error(`Migration v${mig.version} (${mig.name}) has an invalid statement dependency index: ${indexText}`);
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(tableName || "")) {
+        throw new Error(`Migration v${mig.version} (${mig.name}) has an invalid statement dependency table: ${tableName}`);
+      }
+    }
     versionsSeen.add(mig.version);
     namesSeen.add(mig.name);
   }
@@ -2452,17 +2472,32 @@ export async function runMigrations(
 
       const migStart = Date.now();
       let skippedMissingTable = false;
+      let skippedOptionalStatements = 0;
 
-      if (mig.skipWhenTableMissing) {
+      const tablePresence = new Map<string, boolean>();
+      const tableExists = async (tableName: string): Promise<boolean> => {
+        const cached = tablePresence.get(tableName);
+        if (cached !== undefined) return cached;
         const [tableRows]: any = await connection.query(
           "SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
-          [mig.skipWhenTableMissing],
+          [tableName],
         );
-        skippedMissingTable = Number(tableRows?.[0]?.c || 0) === 0;
+        const exists = Number(tableRows?.[0]?.c || 0) > 0;
+        tablePresence.set(tableName, exists);
+        return exists;
+      };
+
+      if (mig.skipWhenTableMissing) {
+        skippedMissingTable = !(await tableExists(mig.skipWhenTableMissing));
       }
 
       if (!skippedMissingTable) {
-        for (const statement of mig.statements) {
+        for (const [statementIndex, statement] of mig.statements.entries()) {
+          const requiredTable = mig.statementRequiresTable?.[statementIndex];
+          if (requiredTable && !(await tableExists(requiredTable))) {
+            skippedOptionalStatements++;
+            continue;
+          }
           await connection.query(statement);
         }
       }
@@ -2477,6 +2512,8 @@ export async function runMigrations(
       appliedCount++;
       const outcome = skippedMissingTable
         ? `recorded; optional table ${mig.skipWhenTableMissing} is absent`
+        : skippedOptionalStatements > 0
+          ? `applied; skipped ${skippedOptionalStatements} statement(s) with absent optional tables`
         : "applied";
       console.log(`✅ Migration v${mig.version} (${mig.name}) ${outcome} in ${durationMs}ms`);
     }
