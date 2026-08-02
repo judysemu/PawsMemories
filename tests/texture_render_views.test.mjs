@@ -180,3 +180,25 @@ test("render script fails as data, never as an exception", () => {
   assert.match(src, /except Exception/);
   assert.match(src, /"success": False/);
 });
+
+test("render worker selects an engine supported by the running Blender build", () => {
+  const src = read(RENDER_PY);
+  assert.match(src, /def _select_render_engine\(/);
+  assert.match(src, /scene\.render\.engine = _select_render_engine\(scene\)/);
+  assert.doesNotMatch(
+    src,
+    /scene\.render\.engine\s*=\s*["']BLENDER_EEVEE_NEXT["']/,
+    "Blender 5.x must not fail before the EEVEE fallback can run",
+  );
+});
+
+test("standard cameras use Blender camera-local Y as the up axis", () => {
+  for (const f of [REBAKE_PY, RENDER_PY]) {
+    const src = read(f);
+    assert.match(
+      src,
+      /to_track_quat\(["']-Z["'],\s*["']Y["']\)/,
+      `${f} must keep the model upright in cardinal review views`,
+    );
+  }
+});

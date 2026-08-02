@@ -12,7 +12,9 @@ import {
   meshProfilePolicy,
   ReferenceManifestSchema,
   rigGenerationAvailability,
+  StageApprovalSchema,
   StageKindSchema,
+  StageRejectionSchema,
   StageRetrySchema,
 } from "./contracts";
 import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
@@ -58,7 +60,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
       sku: "CUSTOM_RIGGED_PET_GLB_V1",
       name: "Custom 3D Model",
       deliverables: ["Fur Bin GLB", "measured mesh report", "secure private download"],
-      customerModelApprovalRequired: false,
+      customerModelApprovalRequired: true,
       operatorApprovalRequired: false,
       prices: {
         base: PET_GLB_STAGE_PRICES.BASE,
@@ -181,30 +183,55 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     } catch (err) { fail(res, err); }
   });
 
-  // Reference submission now starts the purchased pipeline automatically.
-  // Keep this retired endpoint explicit so old clients do not start a second job.
+  // Reference approval remains the single decision that can queue the first
+  // paid model stage. The legacy generate endpoint cannot bypass that gate.
   router.post("/orders/:orderUuid/generate", writeLimiter, async (req, res) => {
     if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
     res.status(409).json({
-      error: "ENDPOINT_RETIRED",
-      message: "Saving the generated reference set now starts the model build automatically.",
+      error: "GATED_FLOW_REQUIRED",
+      message: "Save and approve the generated reference set before starting the model build.",
     });
   });
 
   router.post("/orders/:orderUuid/stages/:stage/approve", writeLimiter, async (req, res) => {
-    if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
-    res.status(410).json({
-      error: "CUSTOMER_APPROVAL_RETIRED",
-      message: "Model stages advance automatically after their integrity checks pass.",
-    });
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    const parsed = StageApprovalSchema.safeParse(req.body);
+    if (!stage.success || !parsed.success) {
+      return res.status(400).json({ error: "INVALID_STAGE_APPROVAL" });
+    }
+    try {
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (view.currentStage?.stage !== stage.data) {
+        return res.status(409).json({ error: "STALE_STAGE" });
+      }
+      res.json(await service.approveCustomerStage(req.params.orderUuid, phone, {
+        idempotencyKey: parsed.data.idempotencyKey,
+        attemptUuid: parsed.data.attemptUuid,
+        artifactSha256: parsed.data.artifactSha256,
+        assetVersionId: parsed.data.assetVersionId ?? null,
+        reportSha256: parsed.data.reportSha256 ?? null,
+        approvalHash: canonicalHash({ orderUuid: req.params.orderUuid, stage: stage.data, ...parsed.data }),
+      }));
+    } catch (err) { fail(res, err); }
   });
 
   router.post("/orders/:orderUuid/stages/:stage/reject", writeLimiter, async (req, res) => {
-    if (!phoneOf(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
-    res.status(410).json({
-      error: "CUSTOMER_REVIEW_RETIRED",
-      message: "Use full-price retry or delete the completed model from Fur Bin.",
-    });
+    const phone = phoneOf(req);
+    if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
+    const stage = StageKindSchema.safeParse(req.params.stage);
+    const parsed = StageRejectionSchema.safeParse(req.body);
+    if (!stage.success || !parsed.success) {
+      return res.status(400).json({ error: "INVALID_STAGE_REJECTION" });
+    }
+    try {
+      const view = await service.getOrderView(req.params.orderUuid, phone);
+      if (view.currentStage?.stage !== stage.data) {
+        return res.status(409).json({ error: "STALE_STAGE" });
+      }
+      res.json(await service.rejectCustomerStage(req.params.orderUuid, phone, parsed.data));
+    } catch (err) { fail(res, err); }
   });
 
   router.post("/orders/:orderUuid/stages/:stage/retry", writeLimiter, async (req, res) => {

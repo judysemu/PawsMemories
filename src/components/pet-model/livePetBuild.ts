@@ -23,6 +23,7 @@ export function liveBuildAction(view: LivePetBuildView | null): LiveBuildAction 
   if (!view || TERMINAL_ORDER_STATES.has(view.order.state.toLowerCase())) return "stop";
   const stage = view.currentStage;
   if (!stage) return "refresh";
+  if (stage.state === "awaiting_customer_approval") return "stop";
   if (stage.stage !== "reference" && ACTIVE_STAGE_STATES.has(stage.state)) return "poll";
   if (stage.state === "failed" || stage.state === "rejected") return "stop";
   return "refresh";

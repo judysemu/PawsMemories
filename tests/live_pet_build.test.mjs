@@ -26,7 +26,8 @@ const orderView = (overrides = {}) => ({
 
 test("live build chooses automatic provider polling only for active generated stages", () => {
   assert.equal(liveBuildAction(orderView()), "poll");
-  assert.equal(liveBuildAction(orderView({ currentStage: { stage: "reference", state: "awaiting_customer_approval" } })), "refresh");
+  assert.equal(liveBuildAction(orderView({ currentStage: { stage: "reference", state: "awaiting_customer_approval" } })), "stop");
+  assert.equal(liveBuildAction(orderView({ currentStage: { stage: "rig", state: "awaiting_customer_approval" } })), "stop");
   assert.equal(liveBuildAction(orderView({ order: { state: "approved" }, currentStage: null })), "stop");
   assert.equal(liveBuildAction(orderView({ order: { state: "failed" }, currentStage: { state: "failed" } })), "stop");
 });

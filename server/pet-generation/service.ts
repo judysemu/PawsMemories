@@ -150,7 +150,8 @@ export class PetGlbService {
             evidence: { stage: claimed.stage, priorState: claimed.state, artifactPresent: true },
           });
           if (recovered.validationReport?.operatorReady) {
-            await this.advanceCompletedStage(order.orderUuid, order.ownerPhone, order, recovered);
+            // Persisted recovery restores the exact reviewable artifact. It
+            // must not manufacture customer approval or queue another charge.
           } else {
             await this.stages.failAndRefund(
               order.id,
@@ -257,23 +258,15 @@ export class PetGlbService {
       textureQuality: order.textureQuality,
       styleDirection: order.styleDirection,
     });
-    const reference = await this.stages.saveReferenceManifest(
+    await this.stages.saveReferenceManifest(
       order.id,
       ownerPhone,
       { ...manifest } as Record<string, string>,
       inputHash,
     );
-    // Reference submission is the customer's instruction to build. The former
-    // customer approval pause is retired: bind the exact saved manifest and
-    // atomically queue the first paid stage in the same request.
-    return this.approveCustomerStage(orderUuid, ownerPhone, {
-      idempotencyKey: `auto-reference:${reference.attemptUuid}`,
-      attemptUuid: reference.attemptUuid,
-      artifactSha256: inputHash,
-      assetVersionId: null,
-      reportSha256: null,
-      approvalHash: canonicalHash({ orderUuid, attemptUuid: reference.attemptUuid, inputHash }),
-    });
+    // Saving is free. The exact manifest remains reviewable until the customer
+    // approves it, which is the only operation allowed to queue the paid base.
+    return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
 
   async approveCustomerStage(
@@ -349,7 +342,7 @@ export class PetGlbService {
           await this.stages.failAndRefund(order.id, recovered.id, ownerPhone, "VALIDATION_BLOCKED");
           return this.buildView((await this.orders.findByUuid(orderUuid))!);
         }
-        return this.advanceCompletedStage(orderUuid, ownerPhone, order, recovered);
+        return this.buildView((await this.orders.findByUuid(orderUuid))!, recovered);
       }
       attempt = await this.stages.resumeProviderRecovery(order.id, attempt.id);
       await this.stages.recordRecoveryEvidence({
@@ -367,7 +360,12 @@ export class PetGlbService {
         await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "VALIDATION_BLOCKED");
         return this.buildView((await this.orders.findByUuid(orderUuid))!);
       }
-      return this.advanceCompletedStage(orderUuid, ownerPhone, order, attempt);
+      // The zero-cost provider capability check has no visual artifact for the
+      // customer to approve. Validated model artifacts remain paused here.
+      if (attempt.stage === "rig_check") {
+        return this.advanceCompletedStage(orderUuid, ownerPhone, order, attempt);
+      }
+      return this.buildView(order, attempt);
     }
     let completionClaimed = false;
     if (attempt.state === "persisting") {
@@ -497,7 +495,7 @@ export class PetGlbService {
         await this.stages.failAndRefund(order.id, attempt.id, ownerPhone, "VALIDATION_BLOCKED");
         return this.buildView((await this.orders.findByUuid(orderUuid))!);
       }
-      return this.advanceCompletedStage(orderUuid, ownerPhone, order, completed);
+      return this.buildView((await this.orders.findByUuid(orderUuid))!, completed);
     } catch (error) {
       if (persisted && !stageFinalized) {
         await this.stages.markPersistedRecovery({

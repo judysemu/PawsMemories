@@ -74,6 +74,55 @@ const VIEW_INSTRUCTIONS: Record<ViewKind, string> = {
   front_three_quarter: "front three-quarter view",
 };
 
+type GeminiImageClient = {
+  models: {
+    generateContent(request: any): Promise<any>;
+  };
+};
+
+function generatedImagePart(response: any): { data: string; mimeType: string } | null {
+  for (const part of response?.candidates?.[0]?.content?.parts || []) {
+    if (typeof part?.inlineData?.data !== "string" || !part.inlineData.data) continue;
+    return {
+      data: part.inlineData.data,
+      mimeType: part.inlineData.mimeType || "image/png",
+    };
+  }
+  return null;
+}
+
+/**
+ * Gemini can occasionally return a useful text explanation without the image
+ * modality requested. Retry that one condition exactly once with an
+ * image-only response contract; transport/quota failures are never multiplied.
+ */
+export async function requestGeminiReferenceImage(
+  client: GeminiImageClient,
+  model: string,
+  parts: any[],
+  label: string,
+): Promise<{ imageBuffer: Buffer; mimeType: string; widthPx: number; heightPx: number; model: string }> {
+  const request = async (responseModalities: string[]) => client.models.generateContent({
+    model,
+    contents: [{ role: "user", parts }],
+    config: { responseModalities, imageConfig: { aspectRatio: "1:1" } },
+  });
+
+  let response = await request(["IMAGE", "TEXT"]);
+  let imagePart = generatedImagePart(response);
+  if (!imagePart) {
+    response = await request(["IMAGE"]);
+    imagePart = generatedImagePart(response);
+  }
+  if (!imagePart) {
+    throw new Error(`${label} returned no image output from the configured reference model after one image-only retry.`);
+  }
+
+  const imageBuffer = Buffer.from(imagePart.data, "base64");
+  const inspected = await inspectReferenceImage(imageBuffer, imagePart.mimeType);
+  return { imageBuffer, ...inspected, model };
+}
+
 export class GeminiReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "gemini";
   readonly model: string;
@@ -103,19 +152,7 @@ export class GeminiReferenceImageProvider implements ReferenceImageProvider {
 
   private async generateImage(parts: any[], label: string): Promise<{ imageBuffer: Buffer; mimeType: string; widthPx: number; heightPx: number; model: string }> {
     if (!this.ai) throw new Error("GEMINI_API_KEY is required for multiview reference generation.");
-    const response = await this.ai.models.generateContent({
-      model: this.model,
-      contents: [{ role: "user", parts }],
-      config: { responseModalities: ["IMAGE", "TEXT"], imageConfig: { aspectRatio: "1:1" } },
-    });
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (!part.inlineData?.data) continue;
-      const mimeType = part.inlineData.mimeType || "image/png";
-      const imageBuffer = Buffer.from(part.inlineData.data, "base64");
-      const inspected = await inspectReferenceImage(imageBuffer, mimeType);
-      return { imageBuffer, ...inspected, model: this.model };
-    }
-    throw new Error(`${label} returned no image output from the configured reference model.`);
+    return requestGeminiReferenceImage(this.ai, this.model, parts, label);
   }
 
   async generateMultiview(
@@ -150,8 +187,9 @@ export class GeminiReferenceImageProvider implements ReferenceImageProvider {
       const anchor = { inlineData: { data: front.imageBuffer.toString("base64"), mimeType: front.mimeType } };
       for (const viewKind of ORDERED_VIEW_KINDS.slice(1)) {
         const generated = await this.generateImage([
+          ...sourceParts,
           anchor,
-          { text: `Using the supplied front image as the immutable identity anchor, generate the same subject in an exact ${VIEW_INSTRUCTIONS[viewKind]}. Preserve anatomy, silhouette, markings, colors, face, accessories, scale, lighting, and neutral background. Full subject visible. No text or collage.` },
+          { text: `Use the original supplied photo evidence and the generated front image together as immutable identity anchors. Generate the same subject in an exact ${VIEW_INSTRUCTIONS[viewKind]}. Preserve anatomy, silhouette, markings, colors, face, accessories, scale, lighting, and neutral background. Full subject visible. No text or collage.` },
         ], `${viewKind} reference view`);
         views.push({ viewKind, imageBuffer: generated.imageBuffer, mimeType: generated.mimeType, widthPx: generated.widthPx, heightPx: generated.heightPx, isSynthesized: true });
       }

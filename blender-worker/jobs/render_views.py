@@ -121,7 +121,9 @@ def _make_camera(name, azimuth_deg, lo, hi):
     bpy.context.scene.collection.objects.link(cam)
     direction = (center - cam_pos).normalized()
     cam.location = cam_pos
-    cam.rotation_euler = direction.to_track_quat("-Z", "Z").to_euler()
+    # Blender cameras look down local -Z and use local Y as their vertical
+    # axis. Using Z as both tracking and up makes side/rear views roll 90/180°.
+    cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
     return cam, direction
 
 
@@ -145,19 +147,23 @@ def _setup_world_lighting():
         bg.inputs[1].default_value = 1.0
 
 
+def _select_render_engine(scene):
+    """Select the first engine exposed by this exact Blender build."""
+    available = {item.identifier for item in scene.render.bl_rna.properties["engine"].enum_items}
+    for candidate in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
+        if candidate in available:
+            return candidate
+    raise RuntimeError("No supported Blender render engine is available.")
+
+
 def _configure_render(resolution, transparent):
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT" if hasattr(scene, "eevee") else "CYCLES"
     # EEVEE is enough here and an order of magnitude cheaper than Cycles for
-    # flat-lit views. Fall back if this Blender build names it differently.
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except TypeError:
-        try:
-            scene.render.engine = "BLENDER_EEVEE"
-        except TypeError:
-            scene.render.engine = "CYCLES"
-            scene.cycles.samples = 16
+    # flat-lit views. Blender 5.x renamed the enum, so select from the runtime
+    # list instead of assigning a possibly-invalid value before a fallback.
+    scene.render.engine = _select_render_engine(scene)
+    if scene.render.engine == "CYCLES":
+        scene.cycles.samples = 16
 
     scene.render.resolution_x = resolution
     scene.render.resolution_y = resolution

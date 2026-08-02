@@ -203,14 +203,14 @@ test("humanoid selection maps to a biped rig type without claiming embedded AI",
   assert.doesNotMatch(studio, /facialRig:\s*true/);
 });
 
-test("model studio accepts one photo or four explicit angles and automatically starts the purchased build", () => {
+test("model studio accepts one photo or four explicit angles and requires exact-artifact approval", () => {
   const studio = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
   const routes = fs.readFileSync("server/pet-generation/routes.ts", "utf8");
   assert.match(studio, /createReferenceSession/);
   assert.match(studio, /startReferenceAttempt/);
   assert.match(studio, /Four angles required/);
-  assert.match(studio, /approveReferenceManifest/);
-  assert.match(studio, /stages\/reference\/approve/);
+  assert.match(studio, /approveCustomerStage/);
+  assert.match(studio, /stages\/\$\{stage\.stage\}\/approve/);
   assert.doesNotMatch(studio, /Check stage progress|Load secure 3D preview|Back to model builds/);
   assert.match(routes, /requiredSourceUploads:\s*4/);
   assert.match(routes, /generatedForApproval:\s*\["front", "left", "right", "rear", "three_quarter"\]/);

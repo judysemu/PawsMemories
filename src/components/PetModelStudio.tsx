@@ -238,7 +238,7 @@ export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
-  const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
+  const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(true);
   const [includeRig, setIncludeRig] = useState(true);
@@ -477,15 +477,15 @@ export default function PetModelStudio() {
         }),
       }) as OrderView;
       applyView(created);
-      setGenerationMessage("Saving your pet and starting the model…");
-      const building = await requestJson(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
+      setGenerationMessage("Saving the generated views for your review…");
+      const awaitingApproval = await requestJson(`/api/pet-glb/orders/${created.order.orderUuid}/references`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ references: generatedManifest }),
       }) as OrderView;
       setReferences(generatedManifest as Record<string, string>);
-      applyView(building);
-      setGenerationMessage("Your pet is building live.");
+      applyView(awaitingApproval);
+      setGenerationMessage("Review the five views, then approve the exact set to build.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
       setGenerationMessage(null);
@@ -533,6 +533,39 @@ export default function PetModelStudio() {
     });
     setGenerationMessage(null);
     setError(null);
+  };
+
+  const approveCustomerStage = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || stage.state !== "awaiting_customer_approval" || !stage.artifactSha256) return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey(),
+        attemptUuid: stage.attemptUuid,
+        artifactSha256: stage.artifactSha256,
+        assetVersionId: stage.assetVersionId,
+        reportSha256: stage.validationReportSha256,
+      }),
+    }).then((next) => {
+      setGenerationMessage("Approved. Starting the next build stage…");
+      applyView(next);
+    }).catch(() => {});
+  };
+
+  const rejectCustomerStage = () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || stage.state !== "awaiting_customer_approval") return;
+    call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: idempotencyKey(),
+        attemptUuid: stage.attemptUuid,
+        reason: "Customer requested a remake after reviewing the generated artifact.",
+      }),
+    }).then(applyView).catch(() => {});
   };
 
   const retry = () => {
@@ -602,6 +635,13 @@ export default function PetModelStudio() {
 
   const stage = view?.currentStage;
   const primaryReferenceReady = Boolean(references.frontUrl?.trim());
+  const canApprove = Boolean(
+    stage
+    && stage.stage !== "rig_check"
+    && stage.state === "awaiting_customer_approval"
+    && stage.artifactSha256
+    && stage.validationReport?.operatorReady !== false,
+  );
   const selectedStages: StageKind[] = [
     "reference",
     "base",
@@ -679,7 +719,7 @@ export default function PetModelStudio() {
               <input type="checkbox" checked={includeRig} disabled={Boolean(view) || !product.rigGeneration.available} onChange={(event) => setIncludeRig(event.target.checked)} />
               <span><strong className="block">Make animation-ready</strong><span className="text-on-surface-variant">{product.rigGeneration.available ? "Adds a pet body skeleton after texturing." : product.rigGeneration.reason}</span></span>
             </label>
-            <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">Animation-ready body rig · {product.prices.rig} PupCoins. Facial blendshapes are separate from the body/skeletal rig above. AI behavior is not embedded in the GLB.</p>
+            <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">Animation-ready body rig · {product.prices.rig} PupCoins. Facial blendshapes are separate from the body/skeletal rig above and are not for sale. AI behavior is not embedded in the GLB.</p>
             {includeTexture && (
               <div className="mt-3">
                 <label className="text-xs font-bold text-on-surface-variant">Color style</label>
@@ -717,7 +757,16 @@ export default function PetModelStudio() {
           </div>
           {previewUrl ? (
             <div className="absolute inset-0">
-              <PetModelViewer src={previewUrl} poster={sourcePoster || undefined} alt="Live model of your pet" autoRotate={false} thumbnail={false} className="h-full w-full" />
+              <PetModelViewer
+                src={previewUrl}
+                poster={sourcePoster || undefined}
+                alt="Live model of your pet"
+                animationName={stage?.stage === "rig" ? "idle" : undefined}
+                autoPlayAnimation={stage?.stage === "rig" && stage.state === "awaiting_customer_approval"}
+                autoRotate={false}
+                thumbnail={false}
+                className="h-full w-full"
+              />
             </div>
           ) : stage?.stage === "reference" && view?.order.referenceManifest ? (
             <div className="grid h-full grid-cols-2 gap-2 p-12 sm:grid-cols-3">
@@ -788,6 +837,25 @@ export default function PetModelStudio() {
           </section>
 
           {error && <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-3 text-xs font-bold text-error">{error}</div>}
+
+          {canApprove && (
+            <section className="space-y-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs">
+              <strong className="block text-sm">
+                {stage?.stage === "reference" ? "Check all five generated views" : "Review this model before continuing"}
+              </strong>
+              <p className="text-on-surface-variant">
+                {stage?.stage === "rig"
+                  ? "The idle animation plays here so bent limbs or a broken rig cannot be hidden by a static preview."
+                  : "Approval is bound to this exact saved version before another paid stage can start."}
+              </p>
+              <button type="button" onClick={approveCustomerStage} disabled={busy} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
+                {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
+              </button>
+              <button type="button" onClick={rejectCustomerStage} disabled={busy} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
+                This needs a remake
+              </button>
+            </section>
+          )}
 
           {stage && ["failed", "rejected"].includes(stage.state) && stage.stage !== "reference" && (
             <button type="button" onClick={retry} disabled={busy} className="w-full rounded-xl bg-primary px-3 py-2 text-xs font-black text-on-primary">

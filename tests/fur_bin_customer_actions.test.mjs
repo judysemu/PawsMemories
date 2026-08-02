@@ -27,10 +27,12 @@ test("delete is soft-tracked and offers an optional defect message to admin", ()
   assert.doesNotMatch(`${service}\n${routes}`, /auto.?refund/i);
 });
 
-test("the customer model flow has no texture approval gate and retries at full stage price", () => {
+test("the customer model flow gates exact artifacts and retries rejected stages at full price", () => {
   const studio = read("src/components/PetModelStudio.tsx");
   const service = read("server/pet-generation/service.ts");
-  assert.match(studio, /canApprove\s*=\s*stage\?\.stage\s*===\s*["']reference["']/);
+  assert.match(studio, /stage\.state === "awaiting_customer_approval"/);
+  assert.match(studio, /artifactSha256: stage\.artifactSha256/);
+  assert.match(service, /must not manufacture customer approval or queue another charge/);
   assert.doesNotMatch(studio, /first.*retry free|second.*retry free/i);
   assert.match(service, /const retryPrice = stagePrice\(current\.stage\)/);
 });

@@ -49,6 +49,8 @@ interface PetModelViewerProps {
   className?: string;
   animationName?: string;
   animationCrossfade?: number;
+  /** Play the selected clip only on an explicit animation-review surface. */
+  autoPlayAnimation?: boolean;
   /**
    * Default false. Auto-rotate was on everywhere, which meant every card in a
    * grid ran its own render loop — the GPU cost of a FurBin page scaled with
@@ -73,6 +75,7 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
   className = "",
   animationName,
   animationCrossfade,
+  autoPlayAnimation = false,
   autoRotate = false,
   thumbnail,
 }) => {
@@ -164,7 +167,7 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
       interaction-prompt="none"
       animation-name={animationName}
       animation-crossfade-duration={animationCrossfade !== undefined ? animationCrossfade : 300}
-      autoplay={false}
+      autoplay={autoPlayAnimation ? true : undefined}
       ar
       ar-modes="webxr scene-viewer quick-look"
       shadow-intensity="1"

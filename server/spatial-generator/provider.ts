@@ -7,9 +7,18 @@ import {
   SpatialVerifyOutputSchema,
 } from "./schemas";
 
-const LAYER8_BASE = process.env.LAYER8_BASE_URL || "";
-const LAYER8_API_KEY = process.env.LAYER8_TENANT_API_KEY || "";
-const LAYER8_TIMEOUT = Number(process.env.LAYER8_SPATIAL_TIMEOUT_MS || 30000);
+export function resolveLayer8Config(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): { baseUrl: string; apiKey: string; timeoutMs: number } {
+  const configuredTimeout = Number(environment.LAYER8_SPATIAL_TIMEOUT_MS || 30_000);
+  return {
+    baseUrl: String(environment.LAYER8_BASE_URL || "").trim().replace(/\/+$/, ""),
+    apiKey: String(environment.LAYER8_TENANT_API_KEY || "").trim(),
+    timeoutMs: Number.isFinite(configuredTimeout)
+      ? Math.max(1_000, Math.min(configuredTimeout, 120_000))
+      : 30_000,
+  };
+}
 
 export class Layer8Error extends Error {
   constructor(
@@ -27,19 +36,20 @@ async function layer8Request<T>(
   payload: unknown,
   responseSchema: z.ZodSchema<T>,
 ): Promise<T> {
-  if (!LAYER8_BASE || !LAYER8_API_KEY) {
+  const { baseUrl, apiKey, timeoutMs } = resolveLayer8Config();
+  if (!baseUrl || !apiKey) {
     throw new Layer8Error("NOT_CONFIGURED", "Layer8 not configured", false);
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LAYER8_TIMEOUT);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${LAYER8_BASE}${path}`, {
+    const response = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-API-Key": LAYER8_API_KEY,
+        "X-API-Key": apiKey,
         Accept: "application/json",
       },
       body: JSON.stringify(payload),
@@ -142,13 +152,14 @@ export async function checkLayer8Health(): Promise<{
   spatialMath: boolean;
   spatialVerify: boolean;
 }> {
-  if (!LAYER8_BASE || !LAYER8_API_KEY) {
+  const { baseUrl, apiKey } = resolveLayer8Config();
+  if (!baseUrl || !apiKey) {
     return { spatialObserve: false, spatialPlan: false, spatialMath: false, spatialVerify: false };
   }
 
   try {
-    const response = await fetch(`${LAYER8_BASE}/v1/spatial/health`, {
-      headers: { "X-API-Key": LAYER8_API_KEY },
+    const response = await fetch(`${baseUrl}/v1/spatial/health`, {
+      headers: { "X-API-Key": apiKey },
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return { spatialObserve: false, spatialPlan: false, spatialMath: false, spatialVerify: false };

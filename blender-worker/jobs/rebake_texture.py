@@ -134,7 +134,9 @@ def _make_camera(name, azimuth_deg, lo, hi):
     bpy.context.scene.collection.objects.link(cam)
     direction = (center - cam_pos).normalized()
     cam.location = cam_pos
-    cam.rotation_euler = direction.to_track_quat("-Z", "Z").to_euler()
+    # Blender cameras look down local -Z and use local Y as their vertical
+    # axis. Using Z as both tracking and up makes side/rear views roll 90/180°.
+    cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
     return cam, direction
 
 
