@@ -15,6 +15,7 @@ import path from "node:path";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const privateStorageSource = readFileSync(path.join(repoRoot, "storage.private.ts"), "utf8");
+const serverSource = readFileSync(path.join(repoRoot, "server.ts"), "utf8");
 
 const baseEnv = {
   MEDIA_BUCKET_NAME: "pawsmemories-media",
@@ -81,6 +82,38 @@ test("boot assertion rejects missing credentials", async () => {
 test("boot assertion accepts a valid split-bucket config", async () => {
   const { assertPrivateStorageConfig } = await loadModule();
   assert.doesNotThrow(() => assertPrivateStorageConfig({ ...baseEnv }));
+});
+
+test("boot assertion rejects half-configured private credentials", async () => {
+  const { assertPrivateStorageConfig } = await loadModule();
+  assert.throws(
+    () => assertPrivateStorageConfig({ ...baseEnv, MEDIA_PRIVATE_BUCKET_KEY: "private-key" }),
+    /must be configured together/i,
+  );
+});
+
+test("boot assertion rejects placeholder credentials", async () => {
+  const { assertPrivateStorageConfig } = await loadModule();
+  assert.throws(
+    () => assertPrivateStorageConfig({ ...baseEnv, MEDIA_BUCKET_KEY: "YOUR_ACCESS_KEY" }),
+    /placeholder/i,
+  );
+});
+
+test("boot assertion rejects insecure non-local storage endpoints", async () => {
+  const { assertPrivateStorageConfig } = await loadModule();
+  assert.throws(
+    () => assertPrivateStorageConfig({ ...baseEnv, MEDIA_BUCKET_URL: "http://s3.example.test" }),
+    /HTTPS/i,
+  );
+  assert.doesNotThrow(() => assertPrivateStorageConfig({ ...baseEnv, MEDIA_BUCKET_URL: "http://127.0.0.1:9000" }));
+});
+
+test("production validates private storage before opening the server listener", () => {
+  const guardAt = serverSource.indexOf("assertPrivateStorageConfig();");
+  const listenerAt = serverSource.indexOf('app.listen(PORT, "0.0.0.0"');
+  assert.ok(guardAt > 0, "server startup must call assertPrivateStorageConfig");
+  assert.ok(listenerAt > guardAt, "private storage must be validated before the server listener opens");
 });
 
 test("object keys are server-minted and reject traversal", async () => {

@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from "uuid";
 import { createHash } from "node:crypto";
 
 /**
- * PRIVATE object storage — purchasable marketplace assets only.
+ * PRIVATE object storage — customer-owned source and generated assets.
  *
  * WHY THIS FILE EXISTS SEPARATELY FROM storage.ts
  * ------------------------------------------------
@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
  *
  * So the bucket IS the security boundary:
  *   storage.ts          -> MEDIA_BUCKET_NAME          (public-read)  previews, look variations
- *   storage.private.ts  -> MEDIA_PRIVATE_BUCKET_NAME  (private)      source GLBs, STL derivatives
+ *   storage.private.ts  -> MEDIA_PRIVATE_BUCKET_NAME  (private)      references, source GLBs, STL derivatives
  *
  * Rules enforced here:
  *   1. This module NEVER writes to the public bucket.
@@ -80,6 +80,95 @@ export class PrivateStorageError extends Error {
   }
 }
 
+type ResolvedPrivateStorageConfig = {
+  publicBucketName: string;
+  privateBucketName: string;
+  bucketEndpoint: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+function configuredValue(env: NodeJS.ProcessEnv, name: string): string {
+  return String(env[name] || "").trim();
+}
+
+function isPlaceholderCredential(value: string): boolean {
+  return /^(?:YOUR_|MY_|CHANGE[_-]?ME|REPLACE[_-]?ME)/i.test(value);
+}
+
+function resolvePrivateStorageConfig(env: NodeJS.ProcessEnv): ResolvedPrivateStorageConfig {
+  const publicName = configuredValue(env, "MEDIA_BUCKET_NAME");
+  const privateName = configuredValue(env, "MEDIA_PRIVATE_BUCKET_NAME");
+  const endpointValue = configuredValue(env, "MEDIA_BUCKET_URL");
+  const privateKey = configuredValue(env, "MEDIA_PRIVATE_BUCKET_KEY");
+  const privateSecret = configuredValue(env, "MEDIA_PRIVATE_BUCKET_SECRET");
+  const sharedKey = configuredValue(env, "MEDIA_BUCKET_KEY");
+  const sharedSecret = configuredValue(env, "MEDIA_BUCKET_SECRET");
+
+  if (!privateName) {
+    throw new PrivateStorageError(
+      "MEDIA_PRIVATE_BUCKET_NAME is not set. Private customer assets have nowhere " +
+        "safe to live — refusing to start rather than recording objects that were not uploaded.",
+    );
+  }
+  if (publicName && privateName === publicName) {
+    throw new PrivateStorageError(
+      `MEDIA_PRIVATE_BUCKET_NAME ("${privateName}") is the same bucket as MEDIA_BUCKET_NAME. ` +
+        "Backblaze applies ACLs per bucket, so this would publish every private asset. " +
+        "Point MEDIA_PRIVATE_BUCKET_NAME at a bucket whose type is Private.",
+    );
+  }
+  if (!endpointValue) {
+    throw new PrivateStorageError("MEDIA_BUCKET_URL is required for private asset storage.");
+  }
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL(endpointValue);
+  } catch {
+    throw new PrivateStorageError("MEDIA_BUCKET_URL must be a valid absolute URL.");
+  }
+  const localEndpoint = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "::1";
+  if (endpoint.protocol !== "https:" && !localEndpoint) {
+    throw new PrivateStorageError("MEDIA_BUCKET_URL must use HTTPS outside local development.");
+  }
+  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new PrivateStorageError("MEDIA_BUCKET_URL must not contain credentials, query parameters, or a fragment.");
+  }
+
+  if (Boolean(privateKey) !== Boolean(privateSecret)) {
+    throw new PrivateStorageError(
+      "MEDIA_PRIVATE_BUCKET_KEY and MEDIA_PRIVATE_BUCKET_SECRET must be configured together.",
+    );
+  }
+  if (!privateKey && Boolean(sharedKey) !== Boolean(sharedSecret)) {
+    throw new PrivateStorageError(
+      "MEDIA_BUCKET_KEY and MEDIA_BUCKET_SECRET must be configured together when private credentials are not supplied.",
+    );
+  }
+
+  const key = privateKey || sharedKey;
+  const secret = privateSecret || sharedSecret;
+  if (!key || !secret) {
+    throw new PrivateStorageError(
+      "No credentials for the private bucket. Set MEDIA_PRIVATE_BUCKET_KEY/_SECRET, " +
+        "or ensure MEDIA_BUCKET_KEY/_SECRET belong to a key scoped to all buckets " +
+        "(a key pinned to one bucket cannot reach the private one).",
+    );
+  }
+  if (isPlaceholderCredential(key) || isPlaceholderCredential(secret)) {
+    throw new PrivateStorageError("Private bucket credentials still contain placeholder values.");
+  }
+
+  return {
+    publicBucketName: publicName,
+    privateBucketName: privateName,
+    bucketEndpoint: endpoint.toString().replace(/\/$/, ""),
+    accessKeyId: key,
+    secretAccessKey: secret,
+  };
+}
+
 /**
  * Fail fast on a configuration that would silently expose paid assets.
  *
@@ -88,57 +177,19 @@ export class PrivateStorageError extends Error {
  * per-object fallback to catch this at runtime, so it has to be caught at boot.
  */
 export function assertPrivateStorageConfig(env: NodeJS.ProcessEnv = process.env): void {
-  const pub = env.MEDIA_BUCKET_NAME;
-  const priv = env.MEDIA_PRIVATE_BUCKET_NAME;
-
-  if (!priv) {
-    throw new PrivateStorageError(
-      "MEDIA_PRIVATE_BUCKET_NAME is not set. Marketplace source assets have nowhere " +
-        "safe to live — refusing to start rather than defaulting to the public bucket.",
-    );
-  }
-  if (pub && priv === pub) {
-    throw new PrivateStorageError(
-      `MEDIA_PRIVATE_BUCKET_NAME ("${priv}") is the same bucket as MEDIA_BUCKET_NAME. ` +
-        "Backblaze applies ACLs per bucket, so this would publish every paid asset. " +
-        "Point MEDIA_PRIVATE_BUCKET_NAME at a bucket whose type is Private.",
-    );
-  }
-  if (!env.MEDIA_BUCKET_URL) {
-    throw new PrivateStorageError("MEDIA_BUCKET_URL is required for private asset storage.");
-  }
-  const key = env.MEDIA_PRIVATE_BUCKET_KEY || env.MEDIA_BUCKET_KEY;
-  const secret = env.MEDIA_PRIVATE_BUCKET_SECRET || env.MEDIA_BUCKET_SECRET;
-  if (!key || !secret) {
-    throw new PrivateStorageError(
-      "No credentials for the private bucket. Set MEDIA_PRIVATE_BUCKET_KEY/_SECRET, " +
-        "or ensure MEDIA_BUCKET_KEY/_SECRET belong to a key scoped to all buckets " +
-        "(a key pinned to one bucket cannot reach the private one).",
-    );
-  }
-}
-
-/** True when the private bucket is usable. Lets callers degrade rather than crash. */
-export function isPrivateStorageConfigured(): boolean {
-  try {
-    assertPrivateStorageConfig();
-    return true;
-  } catch {
-    return false;
-  }
+  resolvePrivateStorageConfig(env);
 }
 
 let cachedClient: S3Client | null = null;
 
 function client(): S3Client {
-  publicBucketName = process.env.MEDIA_BUCKET_NAME || publicBucketName;
-  privateBucketName = process.env.MEDIA_PRIVATE_BUCKET_NAME || privateBucketName;
-  bucketEndpoint = process.env.MEDIA_BUCKET_URL || bucketEndpoint;
-  accessKeyId = process.env.MEDIA_PRIVATE_BUCKET_KEY || process.env.MEDIA_BUCKET_KEY || accessKeyId;
-  secretAccessKey = process.env.MEDIA_PRIVATE_BUCKET_SECRET || process.env.MEDIA_BUCKET_SECRET || secretAccessKey;
-
   if (cachedClient) return cachedClient;
-  assertPrivateStorageConfig();
+  const resolved = resolvePrivateStorageConfig(process.env);
+  publicBucketName = resolved.publicBucketName;
+  privateBucketName = resolved.privateBucketName;
+  bucketEndpoint = resolved.bucketEndpoint;
+  accessKeyId = resolved.accessKeyId;
+  secretAccessKey = resolved.secretAccessKey;
   cachedClient = new S3Client({
     region: "us-east-1", // Backblaze ignores this; the AWS SDK requires it
     endpoint: bucketEndpoint,

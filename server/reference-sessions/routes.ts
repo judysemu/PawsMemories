@@ -13,6 +13,7 @@ import {
 } from "./schemas";
 import { ReferenceSessionService, ReferenceSessionError } from "./service";
 import { TripoReferenceImageProvider, type ReferenceImageProvider } from "./provider";
+import type { ReferenceStorageAdapter } from "./storage";
 
 function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -23,10 +24,11 @@ export function createReferenceSessionsRouter(
     provider: ReferenceImageProvider;
     pool?: mysql.Pool;
     isAdmin?: (userId: string) => Promise<boolean>;
+    storage?: ReferenceStorageAdapter;
   },
 ): Router {
   const router = Router();
-  const service = new ReferenceSessionService(options.provider, () => options.pool || getPool());
+  const service = new ReferenceSessionService(options.provider, () => options.pool || getPool(), options.storage);
   const checkAdmin = options.isAdmin || isUserAdmin;
   const generationLimiter = rateLimit({
     windowMs: 60_000,

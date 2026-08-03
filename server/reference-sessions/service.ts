@@ -35,7 +35,7 @@ import {
   insertApproval,
   findApprovalBySessionId,
 } from "./repository";
-import { storeReferenceImage, storeReferenceSource, storeReferenceReport, storeReferenceManifest, cleanupReferenceImage } from "./storage";
+import { privateReferenceStorage, type ReferenceStorageAdapter } from "./storage";
 import { evaluateReferenceConsistency } from "./consistency";
 import { inspectReferenceImage, type ReferenceImageProvider } from "./provider";
 import type {
@@ -146,6 +146,7 @@ export class ReferenceSessionService {
   constructor(
     private provider: ReferenceImageProvider,
     private getPoolFn: () => mysql.Pool = getPool,
+    private storage: ReferenceStorageAdapter = privateReferenceStorage,
   ) {}
 
   async createSession(
@@ -183,7 +184,7 @@ export class ReferenceSessionService {
       // User uploads only need to decode safely. The provider prepares a
       // canonical 1024px front plus the three generated approval views.
       const inspected = await inspectReferenceImage(imageBuffer, imageMimeType, 1);
-      const stored = await storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
+      const stored = await this.storage.storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
       sourceObjectKey = stored.objectKey;
       try {
         const registered = await registerAsset({
@@ -202,7 +203,7 @@ export class ReferenceSessionService {
         }, { authorization: { internal: true }, isNewObjectUpload: false, pool });
         sourceAsset = { id: registered.asset.id, versionId: registered.version.id };
       } catch (error) {
-        await cleanupReferenceImage(stored.objectKey);
+        await this.storage.cleanupReferenceImage(stored.objectKey);
         throw error;
       }
     }
@@ -218,7 +219,7 @@ export class ReferenceSessionService {
         sourceAssetVersionId: sourceAsset?.versionId,
       });
     } catch (error) {
-      if (sourceObjectKey) await cleanupReferenceImage(sourceObjectKey);
+      if (sourceObjectKey) await this.storage.cleanupReferenceImage(sourceObjectKey);
       if (sourceAsset) await hardDeleteUnpublishedAsset(pool, sourceAsset.id).catch(() => {});
       throw error;
     }
@@ -239,7 +240,7 @@ export class ReferenceSessionService {
       if (session.input_mode !== "photo") throw new ReferenceSessionError("Only photo sessions have a replaceable source.", "INVALID_INPUT_MODE");
       if (!["draft", "ready", "failed"].includes(session.state)) throw new ReferenceSessionError("Source cannot be replaced in the current state.", "INVALID_STATE");
 
-      const stored = await storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
+      const stored = await this.storage.storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
       storedKey = stored.objectKey;
       const registered = await registerAsset({
         ownerId, assetType: "reference_source_photo", visibility: "private", mimeType: inspected.mimeType,
@@ -253,7 +254,7 @@ export class ReferenceSessionService {
       return (await findSessionByUuid(pool, sessionUuid))!;
     } catch (error) {
       await connection.rollback().catch(() => {});
-      if (storedKey) await cleanupReferenceImage(storedKey);
+      if (storedKey) await this.storage.cleanupReferenceImage(storedKey);
       if (registeredAssetId) await hardDeleteUnpublishedAsset(pool, registeredAssetId).catch(() => {});
       throw error;
     } finally {
@@ -396,7 +397,7 @@ export class ReferenceSessionService {
 
       // Store generated views and register canonical assets
       for (const viewPayload of genResult.views) {
-        const stored = await storeReferenceImage(
+        const stored = await this.storage.storeReferenceImage(
           session.session_uuid,
           nextAttemptNumber,
           viewPayload.viewKind,
@@ -446,7 +447,7 @@ export class ReferenceSessionService {
       );
 
       const reportBytes = Buffer.from(JSON.stringify(reportPayload), "utf8");
-      const storedReport = await storeReferenceReport(session.session_uuid, nextAttemptNumber, reportBytes);
+      const storedReport = await this.storage.storeReferenceReport(session.session_uuid, nextAttemptNumber, reportBytes);
       createdObjectKeys.push(storedReport.objectKey);
       const reportRegistration = await registerAsset({
         ownerId, assetType: "validation_report", visibility: "private", mimeType: "application/json",
@@ -494,7 +495,7 @@ export class ReferenceSessionService {
 
       // Compensating storage cleanup for failed attempts
       for (const key of createdObjectKeys) {
-        await cleanupReferenceImage(key);
+        await this.storage.cleanupReferenceImage(key);
       }
 
       if (createdAssetIds.length > 0) {
@@ -628,7 +629,7 @@ export class ReferenceSessionService {
         reportHash: report.report_hash,
         manifestHash: computedHash,
       }), "utf8");
-      const storedManifest = await storeReferenceManifest(session.session_uuid, manifestBytes);
+      const storedManifest = await this.storage.storeReferenceManifest(session.session_uuid, manifestBytes);
       manifestObjectKey = storedManifest.objectKey;
       const manifestRegistration = await registerAsset({
         ownerId, assetType: "provider_manifest", visibility: "private", mimeType: "application/json",
@@ -668,7 +669,7 @@ export class ReferenceSessionService {
       return this.getSessionPublic(sessionUuid, ownerId, false);
     } catch (error: any) {
       await connection.rollback().catch(() => {});
-      if (manifestObjectKey) await cleanupReferenceImage(manifestObjectKey);
+      if (manifestObjectKey) await this.storage.cleanupReferenceImage(manifestObjectKey);
       if (manifestAssetId) await hardDeleteUnpublishedAsset(pool, manifestAssetId).catch(() => {});
       throw error;
     } finally {

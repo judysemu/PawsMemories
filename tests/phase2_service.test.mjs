@@ -5,6 +5,7 @@ import { runMigrations } from "../server/migrations/runner.ts";
 import { ReferenceSessionService, ReferenceSessionError, computeOrderedManifestHash } from "../server/reference-sessions/service.ts";
 import { FakeReferenceImageProvider } from "../server/reference-sessions/provider.ts";
 import { ORDERED_VIEW_KINDS } from "../server/reference-sessions/types.ts";
+import { createReferenceStorageTestDouble } from "./helpers/referenceStorage.mjs";
 
 const mysqlHost = process.env.MYSQL_TEST_HOST || "127.0.0.1";
 const mysqlPort = Number(process.env.MYSQL_TEST_PORT || 3306);
@@ -118,7 +119,8 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   `);
   await runMigrations(pool);
 
-  const service = new ReferenceSessionService(new FakeReferenceImageProvider(), () => pool);
+  const referenceStorage = createReferenceStorageTestDouble();
+  const service = new ReferenceSessionService(new FakeReferenceImageProvider(), () => pool, referenceStorage);
 
   t.after(async () => {
     delete process.env.MULTIVIEW_APPROVAL_ENABLED;
@@ -187,7 +189,7 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   await t.test("3b. Concurrent idempotent starts invoke the provider only once", async () => {
     const ownerId = "+15551114444";
     const provider = new FakeReferenceImageProvider();
-    const concurrentService = new ReferenceSessionService(provider, () => pool);
+    const concurrentService = new ReferenceSessionService(provider, () => pool, referenceStorage);
     const session = await concurrentService.createSession(ownerId, { inputMode: "text", prompt: "A beagle" });
     const [first, second] = await Promise.all([
       concurrentService.startOrRetryAttempt(ownerId, session.session_uuid, "same-concurrent-key"),
@@ -200,7 +202,7 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   await t.test("3c. New sessions are not blocked by another pet's attempt history", async () => {
     const ownerId = "+15551115555";
     const provider = new FakeReferenceImageProvider();
-    const cappedService = new ReferenceSessionService(provider, () => pool);
+    const cappedService = new ReferenceSessionService(provider, () => pool, referenceStorage);
     const first = await cappedService.createSession(ownerId, { inputMode: "text", prompt: "A terrier" });
     await cappedService.startOrRetryAttempt(ownerId, first.session_uuid, "daily-cap-first");
     assert.equal(provider.calls, 1);
@@ -224,8 +226,8 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
   await t.test("3d. Durable concurrency cap blocks a second provider invocation", async () => {
     const firstProvider = new BlockingReferenceImageProvider();
     const secondProvider = new FakeReferenceImageProvider();
-    const firstService = new ReferenceSessionService(firstProvider, () => pool);
-    const secondService = new ReferenceSessionService(secondProvider, () => pool);
+    const firstService = new ReferenceSessionService(firstProvider, () => pool, referenceStorage);
+    const secondService = new ReferenceSessionService(secondProvider, () => pool, referenceStorage);
     const first = await firstService.createSession("+15551116661", { inputMode: "text", prompt: "A poodle" });
     const second = await secondService.createSession("+15551116662", { inputMode: "text", prompt: "A corgi" });
     process.env.REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP = "1";
@@ -266,8 +268,8 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
         secondLockReached.resolve();
       }
     });
-    const firstService = new ReferenceSessionService(firstProvider, () => firstPool);
-    const secondService = new ReferenceSessionService(secondProvider, () => secondPool);
+    const firstService = new ReferenceSessionService(firstProvider, () => firstPool, referenceStorage);
+    const secondService = new ReferenceSessionService(secondProvider, () => secondPool, referenceStorage);
     const first = await firstService.createSession("+15551117771", { inputMode: "text", prompt: "A dachshund" });
     const second = await secondService.createSession("+15551117772", { inputMode: "text", prompt: "A schnauzer" });
 

@@ -108,7 +108,7 @@ import { createHash, randomUUID } from "crypto";
 import { resolveBreedProfile } from "./server/breedProfiles";
 import { decayDrives, DEFAULT_DRIVES, DEFAULT_HORMONES, weightsFromTemperament } from "./src/brain";
 import { uploadBase64Image, uploadBinaryFromUrl, fetchUrlAsBase64, uploadBase64Binary } from "./storage";
-import { deletePrivateObject, getPrivateSignedUrl, putPrivateObject, mintObjectKey } from "./storage.private";
+import { assertPrivateStorageConfig, deletePrivateObject, getPrivateSignedUrl, putPrivateObject, mintObjectKey } from "./storage.private";
 import { runBuildPipeline } from "./agent/graph/orchestrator";
 import { analyzePetImage, type PetAnalysis } from "./ollama-agent";
 import { getBlenderClient } from "./agent/tools/blender_client";
@@ -521,6 +521,13 @@ async function startServer() {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "MY_JWT_SECRET" || process.env.JWT_SECRET.length < 16) {
     console.error("❌ FATAL: JWT_SECRET is missing or too short. Set a long random string in your .env file.");
     process.exit(1);
+  }
+
+  // Private customer assets must never degrade to metadata-only records. Every
+  // production process — and any development process with multiview enabled —
+  // validates the split private-bucket boundary before opening its listener.
+  if (process.env.NODE_ENV === "production" || process.env.MULTIVIEW_APPROVAL_ENABLED === "true") {
+    assertPrivateStorageConfig();
   }
 
   // The Hostinger launcher opens the socket before this large bundle loads, then

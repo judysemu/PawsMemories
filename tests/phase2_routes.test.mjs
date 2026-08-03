@@ -6,6 +6,7 @@ import { runMigrations } from "../server/migrations/runner.ts";
 import { createReferenceSessionsRouter } from "../server/reference-sessions/routes.ts";
 import { FakeReferenceImageProvider } from "../server/reference-sessions/provider.ts";
 import { requireAuth, signToken } from "../auth.ts";
+import { createReferenceStorageTestDouble } from "./helpers/referenceStorage.mjs";
 
 process.env.JWT_SECRET = "phase2-route-test-secret-at-least-32-characters";
 
@@ -64,6 +65,7 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
       provider: new FakeReferenceImageProvider(),
       pool,
       isAdmin: async () => false,
+      storage: createReferenceStorageTestDouble(),
     });
 
     const app = express();

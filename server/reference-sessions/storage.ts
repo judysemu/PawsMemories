@@ -1,6 +1,22 @@
 import crypto from "node:crypto";
-import { putPrivateObject, deletePrivateObject, sha256Hex, extensionForMime, isPrivateStorageConfigured } from "../../storage.private";
+import { putPrivateObject, deletePrivateObject, extensionForMime } from "../../storage.private";
 import type { ViewKind } from "./types";
+
+export type StoredReferenceObject = { objectKey: string; sizeBytes: number; sha256: string };
+
+export interface ReferenceStorageAdapter {
+  storeReferenceImage(
+    sessionUuid: string,
+    attemptNumber: number,
+    viewKind: ViewKind,
+    imageBuffer: Buffer,
+    mimeType?: string,
+  ): Promise<StoredReferenceObject>;
+  storeReferenceSource(sessionUuid: string, imageBuffer: Buffer, mimeType: string): Promise<StoredReferenceObject>;
+  storeReferenceReport(sessionUuid: string, attemptNumber: number, reportBuffer: Buffer): Promise<StoredReferenceObject>;
+  storeReferenceManifest(sessionUuid: string, manifestBuffer: Buffer): Promise<StoredReferenceObject>;
+  cleanupReferenceImage(objectKey: string): Promise<void>;
+}
 
 export function mintReferenceObjectKey(
   sessionUuid: string,
@@ -24,82 +40,40 @@ export async function storeReferenceImage(
   viewKind: ViewKind,
   imageBuffer: Buffer,
   mimeType: string = "image/png",
-): Promise<{ objectKey: string; sizeBytes: number; sha256: string }> {
+): Promise<StoredReferenceObject> {
   const objectKey = mintReferenceObjectKey(sessionUuid, attemptNumber, viewKind, mimeType);
-  const sha256 = sha256Hex(imageBuffer);
-
-  try {
-    const result = await putPrivateObject(objectKey, imageBuffer, mimeType);
-    return {
-      objectKey: result.objectKey,
-      sizeBytes: result.sizeBytes,
-      sha256: result.sha256,
-    };
-  } catch (err: any) {
-    if (!isPrivateStorageConfigured() || process.env.NODE_ENV === "test" || process.env.MEDIA_BUCKET_URL?.includes("localhost")) {
-      return {
-        objectKey,
-        sizeBytes: imageBuffer.byteLength,
-        sha256,
-      };
-    }
-    throw err;
-  }
+  return putPrivateObject(objectKey, imageBuffer, mimeType);
 }
 
 export async function storeReferenceSource(
   sessionUuid: string,
   imageBuffer: Buffer,
   mimeType: string,
-): Promise<{ objectKey: string; sizeBytes: number; sha256: string }> {
+): Promise<StoredReferenceObject> {
   if (!/^[0-9a-f-]{36}$/i.test(sessionUuid)) throw new Error(`Invalid session UUID: ${sessionUuid}`);
   const objectKey = `references/${sessionUuid}/source/${crypto.randomUUID()}.${extensionForMime(mimeType)}`;
-  const sha256 = sha256Hex(imageBuffer);
-  try {
-    return await putPrivateObject(objectKey, imageBuffer, mimeType);
-  } catch (err) {
-    if (!isPrivateStorageConfigured() || process.env.NODE_ENV === "test" || process.env.MEDIA_BUCKET_URL?.includes("localhost")) {
-      return { objectKey, sizeBytes: imageBuffer.byteLength, sha256 };
-    }
-    throw err;
-  }
+  return putPrivateObject(objectKey, imageBuffer, mimeType);
 }
 
 export async function storeReferenceReport(
   sessionUuid: string,
   attemptNumber: number,
   reportBuffer: Buffer,
-): Promise<{ objectKey: string; sizeBytes: number; sha256: string }> {
+): Promise<StoredReferenceObject> {
   if (!/^[0-9a-f-]{36}$/i.test(sessionUuid) || !Number.isInteger(attemptNumber) || attemptNumber < 1) {
     throw new Error("Invalid reference report identity.");
   }
   const objectKey = `references/${sessionUuid}/attempt_${attemptNumber}/consistency-report-${crypto.randomUUID()}.json`;
-  const sha256 = sha256Hex(reportBuffer);
-  try {
-    return await putPrivateObject(objectKey, reportBuffer, "application/json");
-  } catch (err) {
-    if (!isPrivateStorageConfigured() || process.env.NODE_ENV === "test" || process.env.MEDIA_BUCKET_URL?.includes("localhost")) {
-      return { objectKey, sizeBytes: reportBuffer.byteLength, sha256 };
-    }
-    throw err;
-  }
+  return putPrivateObject(objectKey, reportBuffer, "application/json");
 }
 
 export async function storeReferenceManifest(
   sessionUuid: string,
   manifestBuffer: Buffer,
-): Promise<{ objectKey: string; sizeBytes: number; sha256: string }> {
+): Promise<StoredReferenceObject> {
   if (!/^[0-9a-f-]{36}$/i.test(sessionUuid)) throw new Error("Invalid reference manifest identity.");
   const objectKey = `references/${sessionUuid}/approved/manifest-${crypto.randomUUID()}.json`;
-  const sha256 = sha256Hex(manifestBuffer);
-  try {
-    return await putPrivateObject(objectKey, manifestBuffer, "application/json");
-  } catch (err) {
-    if (!isPrivateStorageConfigured() || process.env.NODE_ENV === "test" || process.env.MEDIA_BUCKET_URL?.includes("localhost")) {
-      return { objectKey, sizeBytes: manifestBuffer.byteLength, sha256 };
-    }
-    throw err;
-  }
+  return putPrivateObject(objectKey, manifestBuffer, "application/json");
 }
 
 export async function cleanupReferenceImage(objectKey: string): Promise<void> {
@@ -110,3 +84,11 @@ export async function cleanupReferenceImage(objectKey: string): Promise<void> {
     console.warn(`⚠️ Compensating cleanup failed for reference object ${objectKey}:`, err.message);
   });
 }
+
+export const privateReferenceStorage: ReferenceStorageAdapter = {
+  storeReferenceImage,
+  storeReferenceSource,
+  storeReferenceReport,
+  storeReferenceManifest,
+  cleanupReferenceImage,
+};

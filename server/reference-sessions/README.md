@@ -10,7 +10,7 @@ Phase 2 High-Resolution Multiview Approval domain module.
 - **`service.ts`**: State machine transitions, idempotency, retry tracking, source image replacement, and immutable approval validation.
 - **`provider.ts`**: `ReferenceImageProvider` port definition and Tripo image-to-multiview adapter implementation.
 - **`consistency.ts`**: Multi-perspective AI consistency analysis composition and Zod vision report parser.
-- **`storage.ts`**: Server-minted private object key generation (`references/...`), SHA-256/size/MIME calculation, and S3/private storage persistence.
+- **`storage.ts`**: Server-minted private object key generation (`references/...`), SHA-256/size/MIME calculation, and fail-closed S3/private storage persistence. Production never records a reference asset when its Backblaze write fails.
 - **`routes.ts`**: Thin authenticated Express router mounted at `/api/reference-sessions`.
 - **`featureFlag.ts`**: Server-authoritative feature flag checking `MULTIVIEW_APPROVAL_ENABLED`.
 
