@@ -252,7 +252,6 @@ export default function PetModelStudio() {
   const [collarReadiness, setCollarReadiness] = useState<CollarReadiness | null>(null);
   const [references, setReferences] = useState<Record<string, string>>({});
   const [referenceSessionUuid, setReferenceSessionUuid] = useState<string | null>(null);
-  const [referenceAttemptCount, setReferenceAttemptCount] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -260,9 +259,11 @@ export default function PetModelStudio() {
   const [busy, setBusy] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autoRefreshPaused, setAutoRefreshPaused] = useState(false);
   const downloadRequestIdRef = useRef(0);
   const liveRefreshRef = useRef(new SerializedLiveRefresh());
   const previewRequestIdRef = useRef(0);
+  const startInFlightRef = useRef(false);
   const downloadIdentity = view
     ? `${view.order.orderUuid}:${view.order.approvedVersionId ?? "none"}`
     : "none";
@@ -289,7 +290,6 @@ export default function PetModelStudio() {
             setView(requestedView);
             if (requestedView.order.referenceManifest) setReferences(requestedView.order.referenceManifest);
             setReferenceSessionUuid(requestedView.referenceSession?.sessionUuid || null);
-            setReferenceAttemptCount(requestedView.referenceSession?.attemptsUsed || 0);
           }
         }
       })
@@ -369,7 +369,6 @@ export default function PetModelStudio() {
       setReferences(next.order.referenceManifest);
     }
     setReferenceSessionUuid(next.referenceSession?.sessionUuid || null);
-    setReferenceAttemptCount(next.referenceSession?.attemptsUsed || 0);
   }, []);
 
   const applyView = useCallback((next: OrderView) => {
@@ -381,8 +380,12 @@ export default function PetModelStudio() {
   }, [selectOrder]);
 
   useEffect(() => {
+    setAutoRefreshPaused(false);
+  }, [view?.order.orderUuid, view?.currentStage?.attemptUuid]);
+
+  useEffect(() => {
     const orderUuid = view?.order.orderUuid;
-    if (!orderUuid) return;
+    if (!orderUuid || autoRefreshPaused) return;
     const runner = liveRefreshRef.current;
     runner.select(orderUuid);
     const action = liveBuildAction(view);
@@ -399,7 +402,10 @@ export default function PetModelStudio() {
         }
         return await requestJson(`/api/pet-glb/orders/${orderUuid}`) as OrderView;
       }).catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not refresh this build.");
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "Could not refresh this build.");
+          setAutoRefreshPaused(true);
+        }
         return undefined;
       });
       if (!cancelled && next) applyView(next);
@@ -410,7 +416,7 @@ export default function PetModelStudio() {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [applyView, view]);
+  }, [applyView, autoRefreshPaused, view]);
 
   const previewIdentity = livePreviewIdentity(view);
   useEffect(() => {
@@ -435,7 +441,8 @@ export default function PetModelStudio() {
   }, [previewIdentity, view?.currentStage?.stage, view?.order.orderUuid]);
 
   const start = async () => {
-    if (busy) return;
+    if (startInFlightRef.current) return;
+    startInFlightRef.current = true;
     setBusy(true);
     setError(null);
     setGenerationMessage("Preparing your reference session…");
@@ -458,7 +465,6 @@ export default function PetModelStudio() {
       if (generatedViews.length !== 4 || !manifestHash) {
         throw new Error("The image generator did not return a complete 360° view set.");
       }
-      setReferenceAttemptCount(Number(generated.session.retryCount || 1));
       const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
       const generatedManifest = {
         frontUrl: byKind.get("front"),
@@ -500,6 +506,7 @@ export default function PetModelStudio() {
       setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
       setGenerationMessage(null);
     } finally {
+      startInFlightRef.current = false;
       setBusy(false);
     }
   };
@@ -529,7 +536,6 @@ export default function PetModelStudio() {
       void optimizeReferenceFile(file).then((dataUrl) => {
         setReferences({ frontUrl: dataUrl });
         setReferenceSessionUuid(null);
-        setReferenceAttemptCount(0);
       }).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not read the reference photo."));
     }
     event.target.value = "";
@@ -572,14 +578,9 @@ export default function PetModelStudio() {
       setError("This older reference set cannot be remade in place. Start a new pet build with the source photo.");
       return;
     }
-    if (referenceAttemptCount >= 2) {
-      setError("The one free remake has already been used. Start a new build with a different source photo to try again.");
-      return;
-    }
-
     setBusy(true);
     setError(null);
-    setGenerationMessage("Creating your one free reference remake…");
+    setGenerationMessage("Creating a new reference set…");
     try {
       await requestJson(`/api/pet-glb/orders/${view.order.orderUuid}/stages/reference/reject`, {
         method: "POST",
@@ -587,7 +588,7 @@ export default function PetModelStudio() {
         body: JSON.stringify({
           idempotencyKey: idempotencyKey(),
           attemptUuid: stage.attemptUuid,
-          reason: "Customer requested the included reference-view remake.",
+          reason: "Customer requested a new reference-view set.",
         }),
       });
       const retried = await retryReferenceAttempt(
@@ -617,12 +618,11 @@ export default function PetModelStudio() {
           referenceSessionUuid,
         }),
       }) as OrderView;
-      setReferenceAttemptCount(Number(retried.session.retryCount || 2));
       setReferences(regeneratedManifest as Record<string, string>);
       applyView(awaitingApproval);
-      setGenerationMessage("Your free remake is ready. Approve these views to start the model build.");
+      setGenerationMessage("Your new reference set is ready. Approve these views to start the model build.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The free reference remake could not be completed.");
+      setError(cause instanceof Error ? cause.message : "The reference remake could not be completed.");
       setGenerationMessage(null);
     } finally {
       setBusy(false);
@@ -908,7 +908,7 @@ export default function PetModelStudio() {
             )}
           </section>
 
-          {error && <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-3 text-xs font-bold text-error">{error}</div>}
+          {error && <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-3 text-xs font-bold text-error">{error}{autoRefreshPaused && <button type="button" onClick={() => { setError(null); setAutoRefreshPaused(false); }} className="mt-2 block w-full rounded-lg border border-error/30 px-2 py-1.5">Check status again</button>}</div>}
 
           {stageApprovable && (
             <section className="space-y-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs">
@@ -933,9 +933,9 @@ export default function PetModelStudio() {
               <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
                 {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
-              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && (!referenceSessionUuid || referenceAttemptCount >= 2))} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
+              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !referenceSessionUuid)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
                 {stage?.stage === "reference"
-                  ? !referenceSessionUuid ? "Start a new build to remake" : referenceAttemptCount >= 2 ? "Free remake already used" : "Remake these views once — free"
+                  ? !referenceSessionUuid ? "Start a new build to remake" : "Remake these views"
                   : "This needs a remake"}
               </button>
             </section>

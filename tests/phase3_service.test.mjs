@@ -43,7 +43,6 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
 
   before(async () => {
     process.env.MODEL_BUILD_V3_ENABLED = "true";
-    process.env.MULTIVIEW_APPROVAL_ENABLED = "true";
     process.env.MEDIA_PRIVATE_BUCKET_NAME = "paws-private-test";
     process.env.MEDIA_BUCKET_NAME = "paws-public-test";
     process.env.MEDIA_BUCKET_URL = "http://localhost:9000";

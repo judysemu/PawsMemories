@@ -14,10 +14,10 @@ export interface ModelBuildProviderInput {
   rearUrl: string;
   threeQuarterUrl?: string;
   geometry?: {
-    faceLimit: number;
-    texture: boolean;
-    pbr: boolean;
-    modelVersion: string;
+    faceLimit?: number;
+    texture?: boolean;
+    pbr?: boolean;
+    modelVersion?: string;
     smartLowPoly?: boolean;
     geometryQuality?: "standard" | "detailed";
   };

@@ -13,16 +13,19 @@ test("one Tripo task returns the uploaded front plus three generated views", asy
   process.env.TRIPO_API_KEY = "test-only-key";
   globalThis.fetch = async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/v3/files")) {
+    if (url.endsWith("/upload/sts")) {
       events.push("upload");
-      return Response.json({ code: 0, data: { file_token: "file_test" } });
+      return Response.json({ code: 0, data: { image_token: "file_test" } });
     }
-    if (url.endsWith("/generation/image-to-multiview")) {
+    if (url.endsWith("/task") && init?.method === "POST") {
       events.push("submit");
-      assert.deepEqual(JSON.parse(String(init?.body)), { input: "file_test" });
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        type: "generate_multiview_image",
+        file: { type: "png", file_token: "file_test" },
+      });
       return Response.json({ code: 0, data: { task_id: "task_test" } });
     }
-    if (url.endsWith("/tasks/task_test")) {
+    if (url.endsWith("/task/task_test")) {
       events.push("poll");
       return Response.json({
         code: 0,

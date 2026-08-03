@@ -888,7 +888,7 @@ export class PetGlbService {
         ? {
             sessionUuid: referenceContext.sessionUuid,
             attemptsUsed: referenceContext.sourceAttemptCount || 0,
-            canRegenerate: (referenceContext.sourceAttemptCount || 0) < 2,
+            canRegenerate: true,
           }
         : null,
     };

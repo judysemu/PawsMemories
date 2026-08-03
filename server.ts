@@ -524,9 +524,9 @@ async function startServer() {
   }
 
   // Private customer assets must never degrade to metadata-only records. Every
-  // production process — and any development process with multiview enabled —
-  // validates the split private-bucket boundary before opening its listener.
-  if (process.env.NODE_ENV === "production" || process.env.MULTIVIEW_APPROVAL_ENABLED === "true") {
+  // production process validates the split private-bucket boundary before
+  // opening its listener.
+  if (process.env.NODE_ENV === "production") {
     assertPrivateStorageConfig();
   }
 

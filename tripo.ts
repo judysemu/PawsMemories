@@ -1,7 +1,6 @@
 import sharp from "sharp";
 
 const TRIPO_BASE = "https://api.tripo3d.ai/v2/openapi";
-const TRIPO_V3_BASE = "https://openapi.tripo3d.ai/v3";
 export const TRIPO_PREFIX = "tripo:";
 export const TRIPO_MULTIVIEW_PREFIX = "tripo-multiview:";
 const MAX_TRIPO_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -128,80 +127,43 @@ export async function normalizeTripoUploadImage(bytes: Buffer): Promise<Buffer> 
   return image.rotate().png({ compressionLevel: 9 }).toBuffer();
 }
 
-async function uploadBufferToTripoV3(imageBytes: Buffer): Promise<string> {
+async function uploadBytesToTripo(imageBytes: Buffer): Promise<UploadedImage> {
   const normalized = await normalizeTripoUploadImage(imageBytes);
   const blob = new Blob([Uint8Array.from(normalized)], { type: "image/png" });
   const formData = new FormData();
-  formData.append("file", blob, "reference.png");
+  formData.append("file", blob, "upload.png");
 
-  const response = await fetch(`${TRIPO_V3_BASE}/files`, {
+  const response = await fetch(`${TRIPO_BASE}/upload/sts`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey()}` },
     body: formData,
   });
   const body: any = await response.json().catch(() => ({}));
   const code = typeof body?.code === "number" ? body.code : null;
-  if (!response.ok || code !== 0) {
+  if (!response.ok || (code !== null && code !== 0)) {
     throw new TripoError(
       response.status,
       code,
       String(body?.message || ""),
-      `Tripo reference upload failed (HTTP ${response.status}, code ${code ?? "unknown"})`,
+      `Tripo upload failed (HTTP ${response.status}, code ${code ?? "unknown"})`,
       response.status >= 500 ? "safe_retry" : "definitive_rejection",
     );
   }
-  const token = body?.data?.file_token;
+  const token = body?.data?.image_token || body?.data?.file_token;
   if (typeof token !== "string" || !token) {
-    throw new Error("Tripo reference upload returned no file token");
+    throw new Error("Tripo upload returned no image token");
   }
-  return token;
+  return { ext: "png", token };
 }
 
-/** Submit one source image to Tripo's v3 canonical multiview generator. */
+/** Submit one source image to Tripo's canonical multiview task API. */
 export async function startTripoImageToMultiview(imageBytes: Buffer): Promise<string> {
-  const fileToken = await uploadBufferToTripoV3(imageBytes);
-  let response: Response;
-  try {
-    response = await fetch(`${TRIPO_V3_BASE}/generation/image-to-multiview`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ input: fileToken }),
-    });
-  } catch {
-    throw new TripoError(
-      0,
-      null,
-      "",
-      "Tripo multiview submission outcome is unknown after a transport failure",
-      "ambiguous_acceptance",
-    );
-  }
-
-  const body: any = await response.json().catch(() => ({}));
-  const code = typeof body?.code === "number" ? body.code : null;
-  if (!response.ok || code !== 0) {
-    throw new TripoError(
-      response.status,
-      code,
-      String(body?.message || ""),
-      `Tripo multiview submission failed (HTTP ${response.status}, code ${code ?? "unknown"})`,
-      response.status >= 500 ? "ambiguous_acceptance" : response.status === 429 || code === 2000 ? "safe_retry" : "definitive_rejection",
-    );
-  }
-  const taskId = body?.data?.task_id;
-  if (typeof taskId !== "string" || !taskId) {
-    throw new TripoError(
-      response.status,
-      code,
-      "",
-      "Tripo multiview submission succeeded without a recoverable task ID",
-      "ambiguous_acceptance",
-    );
-  }
-  return `${TRIPO_MULTIVIEW_PREFIX}${taskId}`;
+  const uploaded = await uploadBytesToTripo(imageBytes);
+  const taskHandle = await submitTask({
+    type: "generate_multiview_image",
+    file: { type: uploaded.ext, file_token: uploaded.token },
+  });
+  return `${TRIPO_MULTIVIEW_PREFIX}${tripoTaskId(taskHandle)}`;
 }
 
 function tripoMultiviewTaskId(handle: string): string {
@@ -211,10 +173,10 @@ function tripoMultiviewTaskId(handle: string): string {
   return handle.slice(TRIPO_MULTIVIEW_PREFIX.length);
 }
 
-/** Poll one v3 multiview task without exposing provider response bodies. */
+/** Poll one current multiview task without exposing provider response bodies. */
 export async function pollTripoImageToMultiview(handle: string): Promise<TripoMultiviewPollResult> {
   const taskId = tripoMultiviewTaskId(handle);
-  const response = await fetch(`${TRIPO_V3_BASE}/tasks/${encodeURIComponent(taskId)}`, {
+  const response = await fetch(`${TRIPO_BASE}/task/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey()}` },
   });
   const body: any = await response.json().catch(() => ({}));
@@ -310,41 +272,7 @@ async function uploadToTripo(imageUrl: string): Promise<UploadedImage> {
     sourceBytes = Buffer.from(await imgRes.arrayBuffer());
   }
 
-  const normalized = await normalizeTripoUploadImage(sourceBytes);
-  const blob = new Blob([Uint8Array.from(normalized)], { type: "image/png" });
-  const formData = new FormData();
-  formData.append("file", blob, "upload.png");
-
-  const uploadRes = await fetch(`${TRIPO_BASE}/upload`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey()}` },
-    body: formData,
-  });
-
-  const uploadJson: any = await uploadRes.json().catch(() => ({}));
-  if (uploadJson?.code === 2000) {
-    throw new TripoError(
-      uploadRes.status,
-      2000,
-      String(uploadJson?.message || ""),
-      `Tripo upload was rate limited (HTTP ${uploadRes.status}, code 2000)`,
-    );
-  }
-  if (!uploadRes.ok) {
-    const code = typeof uploadJson?.code === "number" ? uploadJson.code : null;
-    const rawMsg = uploadJson?.message || "";
-    throw new TripoError(
-      uploadRes.status,
-      code,
-      rawMsg,
-      `Tripo upload failed (HTTP ${uploadRes.status}, code ${code ?? "unknown"})`
-    );
-  }
-  const token = uploadJson?.data?.image_token;
-  if (!token) {
-    throw new Error("Tripo upload returned no image token");
-  }
-  return { ext: "png", token };
+  return uploadBytesToTripo(sourceBytes);
 }
 
 async function submitTask(body: Record<string, unknown>): Promise<string> {
@@ -432,11 +360,6 @@ async function submitTask(body: Record<string, unknown>): Promise<string> {
  *   dramatically better geometry + texture wrap on the sides and back.
  * - Without → `image_to_model` from the single front image.
  *
- * Both request DETAILED PBR textures (texture_quality="detailed") for the
- * richest color/fur fidelity. `texture_alignment: "original_image"` keeps the
- * generated texture faithful to the reference colours (the "color coordination"
- * requirement) rather than letting Tripo re-tint from geometry.
- *
  * NOTE: do NOT set quad: true — Tripo forces FBX output when quad is enabled,
  * but this pipeline downloads output.model expecting a GLB.
  */
@@ -446,25 +369,19 @@ export async function startImageTo3D(input: TripoJobInput): Promise<string> {
   const right = input.views?.right;
   const hasMultiview = !!(left || back || right);
 
-  // Shared high-fidelity flags. Geometry overrides (from the text-to-3D UI or
-  // any caller) tune the triangle budget and texturing; defaults preserve the
-  // original behaviour (40k faces, detailed PBR aligned to the reference image).
+  // Only send product choices that a caller explicitly made. In particular,
+  // omitting face_limit lets Tripo adapt topology to the supplied subject.
   const g = input.geometry || {};
   const texture = g.texture !== undefined ? g.texture : true;
   const pbr = g.pbr !== undefined ? g.pbr : true;
   const common: Record<string, unknown> = {
     texture,
     pbr,
-    face_limit: g.faceLimit && g.faceLimit > 0 ? g.faceLimit : 40000,
   };
+  if (g.faceLimit && g.faceLimit > 0) common.face_limit = g.faceLimit;
   if (g.modelVersion) common.model_version = g.modelVersion;
   if (g.smartLowPoly) common.smart_low_poly = true;
   if (g.geometryQuality) common.geometry_quality = g.geometryQuality;
-  // Texture-quality/alignment only matter when a texture is actually baked.
-  if (texture) {
-    common.texture_quality = "detailed";
-    common.texture_alignment = "original_image";
-  }
 
   if (!hasMultiview) {
     const front = await uploadToTripo(input.imageUrl);
@@ -554,12 +471,9 @@ export async function startTextureModel(
   const body: Record<string, unknown> = {
     type: "texture_model",
     original_model_task_id: original,
-    texture: true,
-    pbr: opts.pbr !== false,
-    texture_quality: opts.quality || "standard",
-    texture_alignment: "original_image",
-    bake: true,
   };
+  if (opts.quality) body.texture_quality = opts.quality;
+  if (opts.pbr !== undefined) body.pbr = opts.pbr;
   const prompt = opts.prompt?.trim();
   if (prompt) body.texture_prompt = { text: prompt.slice(0, 400) };
   return submitTask(body);

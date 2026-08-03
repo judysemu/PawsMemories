@@ -27,9 +27,9 @@ export function CreativeDashboard({ title, subtitle, metrics, left, center, righ
   return (
     <section
       data-creative-dashboard="true"
-      className="h-[calc(100dvh-4rem)] w-full overflow-hidden bg-background p-2 text-on-background sm:p-3"
+      className="w-full bg-background p-2 text-on-background sm:p-3 lg:h-[calc(100dvh-4rem)] lg:overflow-hidden"
     >
-      <div className="mx-auto grid h-full max-w-[1720px] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2">
+      <div className="mx-auto grid max-w-[1720px] gap-2 lg:h-full lg:min-h-0 lg:grid-rows-[auto_minmax(0,1fr)_auto]">
         <header className="grid shrink-0 gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
           <div className="min-w-0 rounded-2xl border border-outline-variant/25 bg-surface/90 px-4 py-2 shadow-sm">
             <h1 className="truncate text-base font-black sm:text-lg">{title}</h1>
@@ -46,13 +46,13 @@ export function CreativeDashboard({ title, subtitle, metrics, left, center, righ
         </header>
 
         <div className="grid min-h-0 gap-2 lg:grid-cols-[280px_minmax(0,1fr)_300px] xl:grid-cols-[300px_minmax(0,1fr)_330px]">
-          <aside data-dashboard-region="left" className="min-h-0 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
+          <aside data-dashboard-region="left" className="min-h-0 rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm lg:overflow-y-auto [scrollbar-width:thin]">
             {left}
           </aside>
-          <main data-dashboard-region="center" className="relative min-h-0 overflow-hidden rounded-2xl border border-outline-variant/25 bg-surface-container-lowest shadow-sm">
+          <main data-dashboard-region="center" className="relative min-h-[56dvh] overflow-hidden rounded-2xl border border-outline-variant/25 bg-surface-container-lowest shadow-sm lg:min-h-0">
             {center}
           </main>
-          <aside data-dashboard-region="right" className="min-h-0 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
+          <aside data-dashboard-region="right" className="min-h-0 rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm lg:overflow-y-auto [scrollbar-width:thin]">
             {right}
           </aside>
         </div>

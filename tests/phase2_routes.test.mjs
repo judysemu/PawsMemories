@@ -81,7 +81,6 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
   });
 
   t.after(async () => {
-    delete process.env.MULTIVIEW_APPROVAL_ENABLED;
     if (server) await new Promise((resolve) => server.close(resolve));
     if (pool) await pool.end();
     const cleanupConn = await mysql.createConnection({ host: mysqlHost, port: mysqlPort, user: mysqlUser, password: mysqlPassword });
@@ -95,9 +94,7 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
     Authorization: `Bearer ${signToken({ phone: userPhone, uid: 1 })}`,
   });
 
-  await t.test("1. When MULTIVIEW_APPROVAL_ENABLED=false, endpoints fail-closed with 403 FEATURE_DISABLED", async () => {
-    delete process.env.MULTIVIEW_APPROVAL_ENABLED;
-
+  await t.test("1. Reference sessions remain available without a separate feature flag", async () => {
     const res = await fetch(`${baseUrl()}/api/reference-sessions/create`, {
       method: "POST",
       headers: authHeaders("+15551112222"),
@@ -105,12 +102,11 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
     });
 
     const body = await res.json();
-    assert.equal(res.status, 403);
-    assert.equal(body.code, "FEATURE_DISABLED");
+    assert.equal(res.status, 201);
+    assert.ok(body.sessionUuid);
   });
 
   await t.test("2. Full Reference Session Lifecycle via HTTP Router", async () => {
-    process.env.MULTIVIEW_APPROVAL_ENABLED = "true";
     const userPhone = "+15551112222";
 
     // A. Create Session
@@ -155,7 +151,6 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
   });
 
   await t.test("2b. x-user-phone cannot spoof authentication", async () => {
-    process.env.MULTIVIEW_APPROVAL_ENABLED = "true";
     const response = await fetch(`${baseUrl()}/api/reference-sessions/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-user-phone": "+15551112222" },
@@ -165,7 +160,6 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
   });
 
   await t.test("3. 3D Provider Spy: Prove ZERO 3D provider calls made by Phase 2 endpoints", async () => {
-    process.env.MULTIVIEW_APPROVAL_ENABLED = "true";
     let tripoCalled = false;
     let blenderCalled = false;
 

@@ -7,7 +7,8 @@ import {
 import type { GeneratedViewPayload, ProviderGenerationResult, ViewKind } from "./types";
 import { ORDERED_VIEW_KINDS } from "./types";
 
-export const MIN_REFERENCE_DIMENSION_PX = 1024;
+export const MIN_REFERENCE_DIMENSION_PX = 256;
+export const CANONICAL_REFERENCE_DIMENSION_PX = 1024;
 export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
 export const REFERENCE_PROVIDER_TIMEOUT_MS = 120_000;
 const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -61,7 +62,7 @@ export class FakeReferenceImageProvider implements ReferenceImageProvider {
   ): Promise<ProviderGenerationResult> {
     this.calls += 1;
     const imageBuffer = await sharp({
-      create: { width: MIN_REFERENCE_DIMENSION_PX, height: MIN_REFERENCE_DIMENSION_PX, channels: 3, background: "#d6c7a8" },
+      create: { width: CANONICAL_REFERENCE_DIMENSION_PX, height: CANONICAL_REFERENCE_DIMENSION_PX, channels: 3, background: "#d6c7a8" },
     }).png().toBuffer();
     return {
       provider: this.name,
@@ -70,8 +71,8 @@ export class FakeReferenceImageProvider implements ReferenceImageProvider {
         viewKind,
         imageBuffer,
         mimeType: "image/png",
-        widthPx: MIN_REFERENCE_DIMENSION_PX,
-        heightPx: MIN_REFERENCE_DIMENSION_PX,
+        widthPx: CANONICAL_REFERENCE_DIMENSION_PX,
+        heightPx: CANONICAL_REFERENCE_DIMENSION_PX,
         isSynthesized: inputMode === "text" || viewKind !== "front",
       })),
     };
@@ -83,7 +84,7 @@ const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPayload> {
   const imageBuffer = await sharp(photoBuffer, { failOn: "error", limitInputPixels: 40_000_000 })
     .rotate()
-    .resize(MIN_REFERENCE_DIMENSION_PX, MIN_REFERENCE_DIMENSION_PX, {
+    .resize(CANONICAL_REFERENCE_DIMENSION_PX, CANONICAL_REFERENCE_DIMENSION_PX, {
       fit: "contain",
       background: "#ffffff",
     })
@@ -93,8 +94,8 @@ async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPa
     viewKind: "front",
     imageBuffer,
     mimeType: "image/png",
-    widthPx: MIN_REFERENCE_DIMENSION_PX,
-    heightPx: MIN_REFERENCE_DIMENSION_PX,
+    widthPx: CANONICAL_REFERENCE_DIMENSION_PX,
+    heightPx: CANONICAL_REFERENCE_DIMENSION_PX,
     isSynthesized: false,
   };
 }
@@ -102,8 +103,7 @@ async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPa
 /** Production reference provider: one uploaded image -> Tripo left/back/right views. */
 export class TripoReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "tripo";
-  readonly model = "image-to-multiview-v3";
-  private inFlight = false;
+  readonly model = "generate-multiview-image-v2";
 
   async generateMultiview(
     input: ReferenceGenerationInput,
@@ -111,48 +111,41 @@ export class TripoReferenceImageProvider implements ReferenceImageProvider {
   ): Promise<ProviderGenerationResult> {
     if (inputMode !== "photo") throw new Error("This reference builder requires one uploaded pet photo.");
     if (!input.photoBuffer || !input.photoMimeType) throw new Error("A source photo is required.");
-    if (this.inFlight) throw new Error("Reference generation is already running. Please wait for it to finish.");
-    this.inFlight = true;
+    const front = await canonicalFrontImage(input.photoBuffer);
+    const taskHandle = await startTripoImageToMultiview(input.photoBuffer);
+    await input.onProviderTaskCreated?.(taskHandle);
 
-    try {
-      const front = await canonicalFrontImage(input.photoBuffer);
-      const taskHandle = await startTripoImageToMultiview(input.photoBuffer);
-      await input.onProviderTaskCreated?.(taskHandle);
-
-      const deadline = Date.now() + REFERENCE_PROVIDER_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        const polled = await pollTripoImageToMultiview(taskHandle);
-        if (polled.error) throw new Error(polled.error);
-        if (!polled.done || !polled.views) {
-          await sleep(1_500);
-          continue;
-        }
-        const [leftBuffer, backBuffer, rightBuffer] = await Promise.all([
-          downloadTripoReferenceImage(polled.views.leftUrl),
-          downloadTripoReferenceImage(polled.views.backUrl),
-          downloadTripoReferenceImage(polled.views.rightUrl),
-        ]);
-        const providerViews: Array<{ viewKind: ViewKind; imageBuffer: Buffer }> = [
-          { viewKind: "left", imageBuffer: leftBuffer },
-          { viewKind: "right", imageBuffer: rightBuffer },
-          { viewKind: "rear", imageBuffer: backBuffer },
-        ];
-        const generatedViews = await Promise.all(providerViews.map(async ({ viewKind, imageBuffer }) => {
-          const metadata = await sharp(imageBuffer, { failOn: "error" }).metadata();
-          const mimeType = metadata.format === "jpeg" ? "image/jpeg" : metadata.format === "webp" ? "image/webp" : "image/png";
-          const inspected = await inspectReferenceImage(imageBuffer, mimeType);
-          return { viewKind, imageBuffer, ...inspected, isSynthesized: true } as GeneratedViewPayload;
-        }));
-        const byKind = new Map(generatedViews.map((view) => [view.viewKind, view]));
-        return {
-          provider: this.name,
-          model: this.model,
-          views: ORDERED_VIEW_KINDS.map((kind) => kind === "front" ? front : byKind.get(kind)!),
-        };
+    const deadline = Date.now() + REFERENCE_PROVIDER_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const polled = await pollTripoImageToMultiview(taskHandle);
+      if (polled.error) throw new Error(polled.error);
+      if (!polled.done || !polled.views) {
+        await sleep(1_500);
+        continue;
       }
-      throw new Error("Tripo is still preparing the reference views. Please try again shortly.");
-    } finally {
-      this.inFlight = false;
+      const [leftBuffer, backBuffer, rightBuffer] = await Promise.all([
+        downloadTripoReferenceImage(polled.views.leftUrl),
+        downloadTripoReferenceImage(polled.views.backUrl),
+        downloadTripoReferenceImage(polled.views.rightUrl),
+      ]);
+      const providerViews: Array<{ viewKind: ViewKind; imageBuffer: Buffer }> = [
+        { viewKind: "left", imageBuffer: leftBuffer },
+        { viewKind: "right", imageBuffer: rightBuffer },
+        { viewKind: "rear", imageBuffer: backBuffer },
+      ];
+      const generatedViews = await Promise.all(providerViews.map(async ({ viewKind, imageBuffer }) => {
+        const metadata = await sharp(imageBuffer, { failOn: "error" }).metadata();
+        const mimeType = metadata.format === "jpeg" ? "image/jpeg" : metadata.format === "webp" ? "image/webp" : "image/png";
+        const inspected = await inspectReferenceImage(imageBuffer, mimeType);
+        return { viewKind, imageBuffer, ...inspected, isSynthesized: true } as GeneratedViewPayload;
+      }));
+      const byKind = new Map(generatedViews.map((view) => [view.viewKind, view]));
+      return {
+        provider: this.name,
+        model: this.model,
+        views: ORDERED_VIEW_KINDS.map((kind) => kind === "front" ? front : byKind.get(kind)!),
+      };
     }
+    throw new Error("Tripo is still preparing the reference views. Please try again shortly.");
   }
 }

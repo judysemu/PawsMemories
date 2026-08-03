@@ -116,12 +116,9 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       geometry: (() => {
         const policy = meshProfilePolicy(input.meshProfile || "hd");
         return {
-          faceLimit: policy.faceLimit,
           texture: false,
           pbr: false,
           modelVersion: policy.modelVersion,
-          smartLowPoly: policy.smartLowPoly,
-          geometryQuality: policy.geometryQuality,
         };
       })(),
     };
@@ -154,7 +151,6 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
     const taskHandle = await startTextureModel(source.providerTaskHandle, {
       prompt: options.styleDirection || undefined,
       quality: options.quality,
-      pbr: true,
     });
     return this.persistChainedJob(source, taskHandle, "texture", {
       styleDirection: options.styleDirection || null,

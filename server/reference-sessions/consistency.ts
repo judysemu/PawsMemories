@@ -4,6 +4,7 @@ import {
   type ConsistencyReportPayload,
 } from "./schemas";
 import type { GeneratedViewPayload, ScaleConfidence, ReportStatus } from "./types";
+import { MIN_REFERENCE_DIMENSION_PX } from "./provider";
 
 export function computeReportHash(payload: ConsistencyReportPayload): string {
   const jsonStr = JSON.stringify(payload);
@@ -18,7 +19,7 @@ export function evaluateReferenceConsistency(
   const required = ["front", "left", "right", "rear"];
   const viewKinds = new Set(views.map((v) => v.viewKind));
   const hasAllViews = views.length === 4 && required.every((kind) => viewKinds.has(kind as any));
-  const dimensionsValid = views.every((view) => view.widthPx >= 1024 && view.heightPx >= 1024);
+  const dimensionsValid = views.every((view) => view.widthPx >= MIN_REFERENCE_DIMENSION_PX && view.heightPx >= MIN_REFERENCE_DIMENSION_PX);
 
   let scaleConfidence: ScaleConfidence = "unknown";
   if (declaredScale) scaleConfidence = "declared";
@@ -34,7 +35,7 @@ export function evaluateReferenceConsistency(
       name: "Decoded Image Resolution",
       status: (dimensionsValid ? "pass" : "fail") as ReportStatus,
       score: dimensionsValid ? 1 : 0,
-      details: dimensionsValid ? "Every image decodes at or above 1024x1024 pixels." : "At least one image is below the minimum decoded resolution.",
+      details: dimensionsValid ? `Every image decodes at or above ${MIN_REFERENCE_DIMENSION_PX}x${MIN_REFERENCE_DIMENSION_PX} pixels.` : "At least one image is below the minimum decoded resolution.",
     },
     {
       name: "Cross-View Identity Review",

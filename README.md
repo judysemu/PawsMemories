@@ -183,10 +183,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `VITE_GOOGLE_MAPS_API_KEY_BROWSER` | Browser Maps/Places (HTTP‑referrer‑restricted to pawsome3d.com). Baked in at build time. |
 | `MEDIA_BUCKET_NAME` / `MEDIA_BUCKET_URL` / `MEDIA_BUCKET_KEY` / `MEDIA_BUCKET_SECRET` | Object storage for generated media |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Twilio SMS API for request fulfillment notifications |
-| `TRIPO_API_KEY` | Tripo3D API key for Image-to-3D mesh generation (Primary 3D engine) |
-| `GEMINI_REFERENCE_IMAGE_MODEL` | Dedicated five-view reference model; production default `gemini-3.1-flash-image` |
-| `REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP` / `REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP` | Durable reference-generator burst controls; production defaults `1` active attempt and `2` attempts/minute |
-| `REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP` | Global provider-spend guard for reference generation; production default `100` attempts per rolling 24 hours. Each reference session separately limits its initial render plus retries. |
+| `TRIPO_API_KEY` | Tripo3D API key for reference views, 3D models, textures, body rigs, and animation tasks. Provider account limits remain authoritative. |
 | `PETSIM_IMAGE_GENERATION_ENABLED` | Kill switch for shared Gemini/Imagen image-output calls; applies to admins too |
 | `PETSIM_IMAGE_GENERATION_DAILY_CAP` / `PETSIM_IMAGE_GENERATION_GLOBAL_DAILY_CAP` | Database-backed actual provider-call caps; defaults `5` per user and `50` globally per database UTC day |
 | `PETSIM_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP` | Database-backed shared provider-call cap; default `10` calls per 60-second window, leaving headroom below the observed 20 RPM Nano Banana Pro quota. The Flash reference path has its own independent cap. |

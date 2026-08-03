@@ -23,7 +23,7 @@ async function runAdapterCreate(taskResponse) {
   let uploadNumber = 0;
   return withFetch(
     async (url) => {
-      if (String(url).endsWith("/upload")) {
+      if (String(url).endsWith("/upload/sts")) {
         uploadNumber += 1;
         return Response.json({ data: { image_token: `safe-upload-${uploadNumber}` } });
       }

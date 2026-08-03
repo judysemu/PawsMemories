@@ -11,10 +11,11 @@ import {
 const providerSource = await readFile(new URL("../server/reference-sessions/provider.ts", import.meta.url), "utf8");
 const routeSource = await readFile(new URL("../server/reference-sessions/routes.ts", import.meta.url), "utf8");
 const serviceSource = await readFile(new URL("../server/reference-sessions/service.ts", import.meta.url), "utf8");
+const tripoSource = await readFile(new URL("../tripo.ts", import.meta.url), "utf8");
 
 test("reference image inspection trusts decoded bytes, not claimed dimensions", async () => {
   const onePixel = await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).png().toBuffer();
-  await assert.rejects(() => inspectReferenceImage(onePixel, "image/png"), /at least 1024x1024/);
+  await assert.rejects(() => inspectReferenceImage(onePixel, "image/png"), /at least 256x256/);
   assert.deepEqual(
     await inspectReferenceImage(onePixel, "image/png", 1),
     { mimeType: "image/png", widthPx: 1, heightPx: 1 },
@@ -35,26 +36,23 @@ test("fake provider emits four genuinely high-resolution decodable images", asyn
 
 test("production provider accepts photo input only", async () => {
   const provider = new TripoReferenceImageProvider();
-  assert.equal(provider.model, "image-to-multiview-v3");
+  assert.equal(provider.model, "generate-multiview-image-v2");
   await assert.rejects(
     () => provider.generateMultiview({ prompt: "a dog" }, "text"),
     /requires one uploaded pet photo/,
   );
 });
 
-test("reference generation uses one bounded Tripo multiview task", () => {
+test("reference generation uses Tripo's current task API without app-level provider blocks", () => {
   assert.match(providerSource, /startTripoImageToMultiview\(input\.photoBuffer\)/);
   assert.match(providerSource, /onProviderTaskCreated/);
   assert.match(providerSource, /REFERENCE_PROVIDER_TIMEOUT_MS/);
   assert.doesNotMatch(providerSource, /GoogleGenAI|GEMINI_REFERENCE_IMAGE_MODEL/);
-  assert.match(providerSource, /if \(this\.inFlight\)/);
-  assert.match(providerSource, /finally \{\s*this\.inFlight = false/);
-  assert.match(routeSource, /windowMs:\s*60_000,\s*\n\s*max:\s*5/);
-  assert.match(routeSource, /keyGenerator:\s*\(req\)\s*=>\s*getRequestUserPhone/);
-  assert.match(serviceSource, /REFERENCE_GENERATION_MAX_ATTEMPTS/);
-  assert.match(serviceSource, /ATTEMPT_LIMIT_REACHED/);
-  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP/);
-  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP/);
-  assert.match(serviceSource, /REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP/);
-  assert.match(serviceSource, /GET_LOCK/);
+  assert.match(tripoSource, /type:\s*"generate_multiview_image"/);
+  assert.match(tripoSource, /TRIPO_BASE\}\/upload\/sts/);
+  assert.match(tripoSource, /TRIPO_BASE\}\/task\/\$\{encodeURIComponent\(taskId\)\}/);
+  assert.doesNotMatch(tripoSource, /openapi\.tripo3d\.ai\/v3|image-to-multiview/);
+  assert.doesNotMatch(providerSource, /this\.inFlight/);
+  assert.doesNotMatch(routeSource, /rateLimit|MULTIVIEW_APPROVAL_ENABLED/);
+  assert.doesNotMatch(serviceSource, /REFERENCE_GENERATION_GLOBAL|REFERENCE_GENERATION_MAX_ATTEMPTS|GET_LOCK/);
 });

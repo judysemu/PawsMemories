@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 import sharp from "sharp";
 
 process.env.TRIPO_API_KEY = "test-key";
-const { normalizeTripoUploadImage, startImageTo3D } = await import("../tripo.ts");
+const { normalizeTripoUploadImage, startImageTo3D, startTextureModel } = await import("../tripo.ts");
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -26,7 +26,7 @@ test("Tripo bridge converts WebP and ambiguous object-storage responses to real 
         headers: { "content-type": "application/octet-stream" },
       });
     }
-    if (url.endsWith("/upload")) {
+    if (url.endsWith("/upload/sts")) {
       const file = init.body.get("file");
       const bytes = Buffer.from(await file.arrayBuffer());
       uploaded.push({ name: file.name, type: file.type, bytes });
@@ -59,6 +59,34 @@ test("Tripo bridge converts WebP and ambiguous object-storage responses to real 
   }
   assert.equal(taskBody.type, "multiview_to_model");
   assert.deepEqual(taskBody.files.map((file) => file.type), ["png", "png", "png", "png"]);
+  assert.equal("face_limit" in taskBody, false);
+  assert.equal("geometry_quality" in taskBody, false);
+  assert.equal("texture_alignment" in taskBody, false);
+});
+
+test("Tripo texture task receives only supported customer choices and provider defaults", async () => {
+  let taskBody = null;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.endsWith("/task")) {
+      taskBody = JSON.parse(String(init.body));
+      return Response.json({ code: 0, data: { task_id: "texture-task" } });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  const handle = await startTextureModel("tripo:base-task", {
+    prompt: "Preserve the pet's markings",
+    quality: "standard",
+  });
+
+  assert.equal(handle, "tripo:texture-task");
+  assert.deepEqual(taskBody, {
+    type: "texture_model",
+    original_model_task_id: "base-task",
+    texture_quality: "standard",
+    texture_prompt: { text: "Preserve the pet's markings" },
+  });
 });
 
 test("Tripo bridge rejects non-images before any provider upload", async () => {
@@ -95,7 +123,7 @@ test("multiview upload stops at the first invalid view instead of orphaning late
       sourceOrder.push("later");
       return new Response(png, { status: 200 });
     }
-    if (url.endsWith("/upload")) {
+    if (url.endsWith("/upload/sts")) {
       uploadCalls += 1;
       return Response.json({ data: { image_token: `token-${uploadCalls}` } });
     }

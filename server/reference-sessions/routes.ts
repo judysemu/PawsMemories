@@ -1,5 +1,4 @@
 import { Router, type Request, type Response } from "express";
-import rateLimit from "express-rate-limit";
 import type mysql from "mysql2/promise";
 import { getPool, isUserAdmin } from "../../db";
 import type { AuthedRequest } from "../../auth";
@@ -30,21 +29,6 @@ export function createReferenceSessionsRouter(
   const router = Router();
   const service = new ReferenceSessionService(options.provider, () => options.pool || getPool(), options.storage);
   const checkAdmin = options.isAdmin || isUserAdmin;
-  const generationLimiter = rateLimit({
-    windowMs: 60_000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req) => getRequestUserPhone(req) || "missing-auth",
-    message: { success: false, error: "Too many reference generation requests. Try again shortly.", code: "RATE_LIMITED" },
-  });
-
-  router.use((_req, res, next) => {
-    if (process.env.MULTIVIEW_APPROVAL_ENABLED !== "true") {
-      return res.status(403).json({ success: false, error: "Reference view generation is disabled.", code: "FEATURE_DISABLED" });
-    }
-    next();
-  });
 
   /**
    * POST /api/reference-sessions/create
@@ -83,7 +67,7 @@ export function createReferenceSessionsRouter(
   /**
    * POST /api/reference-sessions/start
    */
-  router.post("/start", generationLimiter, async (req: Request, res: Response) => {
+  router.post("/start", async (req: Request, res: Response) => {
     try {
       const userPhone = getRequestUserPhone(req);
       if (!userPhone) return res.status(401).json({ success: false, error: "Authentication required" });
@@ -101,7 +85,11 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
+        ? 403
+        : error instanceof ReferenceSessionError && error.code === "GENERATION_FAILED"
+          ? 502
+          : 422;
       return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });
@@ -109,7 +97,7 @@ export function createReferenceSessionsRouter(
   /**
    * POST /api/reference-sessions/retry
    */
-  router.post("/retry", generationLimiter, async (req: Request, res: Response) => {
+  router.post("/retry", async (req: Request, res: Response) => {
     try {
       const userPhone = getRequestUserPhone(req);
       if (!userPhone) return res.status(401).json({ success: false, error: "Authentication required" });
@@ -128,7 +116,11 @@ export function createReferenceSessionsRouter(
       if (error.name === "ZodError") {
         return res.status(400).json({ success: false, error: "Invalid input schema", details: error.errors });
       }
-      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED" ? 403 : 422;
+      const statusCode = error instanceof ReferenceSessionError && error.code === "UNAUTHORIZED"
+        ? 403
+        : error instanceof ReferenceSessionError && error.code === "GENERATION_FAILED"
+          ? 502
+          : 422;
       return res.status(statusCode).json({ success: false, error: error.message, code: error.code });
     }
   });

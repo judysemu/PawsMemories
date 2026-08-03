@@ -12,6 +12,9 @@ test("model creation stays in one live dashboard and refreshes exact-version pre
   assert.match(modelStudio, /liveBuildAction\(view\)/);
   assert.match(modelStudio, /stages\/current\/preview/);
   assert.match(modelStudio, /autoRotate=\{false\}/);
+  assert.match(modelStudio, /startInFlightRef\.current/);
+  assert.match(modelStudio, /setAutoRefreshPaused\(true\)/);
+  assert.match(modelStudio, /Check status again/);
   assert.doesNotMatch(modelStudio, /Check stage progress|Load secure 3D preview|Back to model builds|This stage is running/);
 });
 

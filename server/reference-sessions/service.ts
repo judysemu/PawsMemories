@@ -37,7 +37,7 @@ import {
 } from "./repository";
 import { privateReferenceStorage, type ReferenceStorageAdapter } from "./storage";
 import { evaluateReferenceConsistency } from "./consistency";
-import { inspectReferenceImage, type ReferenceImageProvider } from "./provider";
+import { inspectReferenceImage, MIN_REFERENCE_DIMENSION_PX, type ReferenceImageProvider } from "./provider";
 import type {
   ReferenceSessionRecord,
   ReferenceAttemptRecord,
@@ -53,61 +53,6 @@ export class ReferenceSessionError extends Error {
   constructor(message: string, public code: string = "REFERENCE_SESSION_ERROR") {
     super(message);
     this.name = "ReferenceSessionError";
-  }
-}
-
-const REFERENCE_BUDGET_LOCK = "paws_reference_provider_budget_v1";
-const DAILY_ATTEMPT_CAP_MESSAGE = "Reference generation has reached its rolling 24-hour global safety limit.";
-
-function boundedReferenceCap(
-  environment: Readonly<Record<string, string | undefined>>,
-  name: string,
-  productionFallback: number,
-  maximum: number,
-): number {
-  const fallback = environment.NODE_ENV === "production" ? productionFallback : maximum;
-  const parsed = Number.parseInt(environment[name] || "", 10);
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : fallback;
-}
-
-export function resolveReferenceProviderBudget(
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-) {
-  return {
-    globalDailyCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_DAILY_ATTEMPT_CAP", 100, 200),
-    globalMinuteCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_MINUTE_ATTEMPT_CAP", 2, 20),
-    globalConcurrentCap: boundedReferenceCap(environment, "REFERENCE_GENERATION_GLOBAL_CONCURRENT_ATTEMPT_CAP", 1, 5),
-    dailyCapMessage: DAILY_ATTEMPT_CAP_MESSAGE,
-  };
-}
-
-async function assertReferenceProviderBudget(connection: mysql.PoolConnection): Promise<void> {
-  const { globalDailyCap, globalMinuteCap, globalConcurrentCap, dailyCapMessage } = resolveReferenceProviderBudget();
-  const [rows]: any = await connection.query(
-    `SELECT
-       COUNT(*) AS global_day_count,
-       SUM(CASE WHEN a.started_at >= NOW() - INTERVAL 1 MINUTE THEN 1 ELSE 0 END) AS global_minute_count,
-       (
-         SELECT COUNT(*)
-         FROM reference_attempts active
-         INNER JOIN reference_sessions active_session
-           ON active_session.current_attempt_id = active.id
-         WHERE active_session.state = 'generating'
-           AND active.started_at >= NOW() - INTERVAL 15 MINUTE
-       ) AS global_active_count
-     FROM reference_attempts a
-     INNER JOIN reference_sessions s ON s.id = a.session_id
-     WHERE a.started_at >= NOW() - INTERVAL 24 HOUR`,
-  );
-  const counts = rows?.[0] || {};
-  if (Number(counts.global_active_count || 0) >= globalConcurrentCap) {
-    throw new ReferenceSessionError("Another reference set is already generating. Try again after it finishes.", "CONCURRENT_ATTEMPT_CAP");
-  }
-  if (Number(counts.global_minute_count || 0) >= globalMinuteCap) {
-    throw new ReferenceSessionError("Reference generation is at its global minute safety limit. Try again shortly.", "MINUTE_ATTEMPT_CAP");
-  }
-  if (Number(counts.global_day_count || 0) >= globalDailyCap) {
-    throw new ReferenceSessionError(dailyCapMessage, "DAILY_ATTEMPT_CAP");
   }
 }
 
@@ -273,32 +218,8 @@ export class ReferenceSessionService {
 
     const createdObjectKeys: string[] = [];
     const createdAssetIds: number[] = [];
-    let budgetLockHeld = false;
-    let connectionDestroyed = false;
-    const releaseBudgetLock = async () => {
-      if (!budgetLockHeld) return;
-      try {
-        await connection.query("SELECT RELEASE_LOCK(?)", [REFERENCE_BUDGET_LOCK]);
-      } catch {
-        connection.destroy();
-        connectionDestroyed = true;
-      } finally {
-        budgetLockHeld = false;
-      }
-    };
 
     try {
-      // Serialize provider-budget admission before opening the transaction. If
-      // two transactions take empty-range locks in reference_attempts first,
-      // one can wait on this named lock while the lock holder waits on that
-      // transaction's gap lock. Acquiring the named lock first gives every
-      // admission path the same lock order and avoids that cross-lock stall.
-      const [lockRows]: any = await connection.query("SELECT GET_LOCK(?, 5) AS acquired", [REFERENCE_BUDGET_LOCK]);
-      if (Number(lockRows?.[0]?.acquired || 0) !== 1) {
-        throw new ReferenceSessionError("Reference generation is busy. Try again shortly.", "MINUTE_ATTEMPT_CAP");
-      }
-      budgetLockHeld = true;
-
       await connection.beginTransaction();
 
       const session = await findSessionByUuidForUpdate(connection, sessionUuid);
@@ -308,9 +229,8 @@ export class ReferenceSessionService {
         throw new ReferenceSessionError("Unauthorized access to session", "UNAUTHORIZED");
       }
 
-      // Check idempotency
-      // Use a current/locking read so this check cannot establish a stale
-      // REPEATABLE READ snapshot before the global budget query.
+      // Keep retries idempotent while the session row lock prevents two tasks
+      // from being started for the same reference session.
       const existingAttempt = await findAttemptByIdempotencyKey(connection, session.id, idempotencyKey, true);
       if (existingAttempt) {
         await connection.rollback();
@@ -323,19 +243,6 @@ export class ReferenceSessionService {
       if (!["draft", "ready", "failed"].includes(session.state)) {
         throw new ReferenceSessionError(`Session cannot start an attempt while ${session.state}.`, "INVALID_STATE");
       }
-      const configuredMaxAttempts = Number(process.env.REFERENCE_GENERATION_MAX_ATTEMPTS || 2);
-      const maxAttempts = Number.isSafeInteger(configuredMaxAttempts)
-        ? Math.max(1, Math.min(3, configuredMaxAttempts))
-        : 2;
-      if (session.source_attempt_count >= maxAttempts) {
-        throw new ReferenceSessionError(
-          `This source photo has reached its ${maxAttempts}-attempt safety limit. Replace the source photo or create a new session to try again.`,
-          "ATTEMPT_LIMIT_REACHED",
-        );
-      }
-
-      await assertReferenceProviderBudget(connection);
-
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto
         .createHash("sha256")
@@ -359,7 +266,6 @@ export class ReferenceSessionService {
       });
 
       await connection.commit();
-      await releaseBudgetLock();
 
       // Generate reference views via provider
       let photoBuffer: Buffer | null = null;
@@ -490,8 +396,7 @@ export class ReferenceSessionService {
 
       return { session: updatedSession, attempt: updatedAttempt };
     } catch (error: any) {
-      if (!connectionDestroyed) await connection.rollback().catch(() => {});
-      await releaseBudgetLock();
+      await connection.rollback().catch(() => {});
 
       // Compensating storage cleanup for failed attempts
       for (const key of createdObjectKeys) {
@@ -520,8 +425,7 @@ export class ReferenceSessionService {
         ? error
         : new ReferenceSessionError(`Attempt generation failed: ${error.message}`, "GENERATION_FAILED");
     } finally {
-      await releaseBudgetLock();
-      if (!connectionDestroyed) connection.release();
+      connection.release();
     }
   }
 
@@ -594,7 +498,7 @@ export class ReferenceSessionService {
         if (!asset || !version) {
           throw new ReferenceSessionError("Corrupt view asset reference", "CORRUPT_VIEW");
         }
-        if (version.asset_id !== asset.id || v.width_px < 1024 || v.height_px < 1024) {
+        if (version.asset_id !== asset.id || v.width_px < MIN_REFERENCE_DIMENSION_PX || v.height_px < MIN_REFERENCE_DIMENSION_PX) {
           throw new ReferenceSessionError("View asset/version or decoded dimensions are invalid.", "CORRUPT_VIEW");
         }
         viewManifestItems.push({

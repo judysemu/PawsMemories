@@ -128,7 +128,7 @@ test("prices are separated by stage and total is deterministic", () => {
   assert.equal(petGlbTotalCost({ texture: false, rig: true }), 80);
 });
 
-test("SmartMesh and HD produce different real provider geometry contracts", async () => {
+test("SmartMesh and HD select supported provider models while Tripo owns topology", async () => {
   const calls = [];
   const fake = {
     async start(input) {
@@ -150,10 +150,11 @@ test("SmartMesh and HD produce different real provider geometry contracts", asyn
   assert.equal(calls[0].geometry.texture, false);
   assert.equal(calls[0].geometry.pbr, false);
   assert.equal(calls[0].geometry.modelVersion, "v3.1-20260211");
-  assert.equal(calls[0].geometry.faceLimit, 100_000);
   assert.equal(calls[1].geometry.modelVersion, "P1-20260311");
-  assert.equal(calls[1].geometry.faceLimit, 7_000);
-  assert.ok(calls[1].geometry.faceLimit < calls[0].geometry.faceLimit);
+  assert.equal("faceLimit" in calls[0].geometry, false);
+  assert.equal("faceLimit" in calls[1].geometry, false);
+  assert.equal("geometryQuality" in calls[0].geometry, false);
+  assert.equal("smartLowPoly" in calls[1].geometry, false);
 });
 
 test("an untextured body rig is valid only when the order did not purchase texture", () => {
@@ -214,14 +215,15 @@ test("rig validation blocks missing promised animation evidence", () => {
   assert.ok(report.reasonCodes.includes("ANIM_RETARGET"));
 });
 
-test("SmartMesh over-budget output is blocked by measured triangles", () => {
+test("SmartMesh triangle target is advisory when Tripo chooses topology", () => {
   const report = validatePetGlbStage(
     modelGlb({ triangles: meshProfilePolicy("smart_mesh").maxTriangles + 1 }),
     { stage: "base", meshProfile: "smart_mesh" },
   );
-  assert.equal(report.operatorReady, false);
+  assert.equal(report.operatorReady, true);
   assert.equal(report.checks.find((check) => check.id === "triangle_budget").passed, false);
-  assert.ok(report.reasonCodes.includes("TRIANGLE_BUDGET_EXCEEDED"));
+  assert.equal(report.checks.find((check) => check.id === "triangle_budget").critical, false);
+  assert.equal(report.reasonCodes.includes("TRIANGLE_BUDGET_EXCEEDED"), false);
 });
 
 test("humanoid selection maps to a biped rig type without claiming embedded AI", () => {
@@ -233,14 +235,14 @@ test("humanoid selection maps to a biped rig type without claiming embedded AI",
   assert.doesNotMatch(studio, /facialRig:\s*true/);
 });
 
-test("model studio accepts one photo, includes one free view remake, and requires exact-artifact approval", () => {
+test("model studio accepts one photo, supports Tripo view remakes, and requires exact-artifact approval", () => {
   const studio = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
   const routes = fs.readFileSync("server/pet-generation/routes.ts", "utf8");
   assert.match(studio, /createReferenceSession/);
   assert.match(studio, /startReferenceAttempt/);
   assert.match(studio, /Choose one pet photo/);
   assert.match(studio, /retryReferenceAttempt/);
-  assert.match(studio, /Remake these views once — free/);
+  assert.match(studio, /Remake these views/);
   assert.match(studio, /useState<MeshProfile>\("smart_mesh"\)/);
   assert.match(studio, /approveCustomerStage/);
   assert.match(studio, /stages\/\$\{stage\.stage\}\/approve/);

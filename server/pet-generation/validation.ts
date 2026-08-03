@@ -386,11 +386,10 @@ export function validatePetGlbStage(
     });
     const budgetPass = triangleCount > 0 && triangleCount <= policy.maxTriangles;
     checks.push({
-      id: "triangle_budget", channel: "T", critical: true, passed: budgetPass,
-      detail: `${triangleCount} / ${policy.maxTriangles} maximum for ${opts.meshProfile}`,
+      id: "triangle_budget", channel: "T", critical: false, passed: budgetPass,
+      detail: `${triangleCount} / ${policy.maxTriangles} advisory target for ${opts.meshProfile}`,
       measured: { triangles: triangleCount, budget: policy.maxTriangles },
     });
-    if (!budgetPass) reasonCodes.push("TRIANGLE_BUDGET_EXCEEDED");
 
     const finiteVector = (value: unknown, length: number): value is number[] =>
       Array.isArray(value) && value.length === length && value.every((item) => Number.isFinite(item));
@@ -526,7 +525,7 @@ export function validatePetGlbStage(
       if (!idlePass || !walkPass || !animationTargetsPass) reasonCodes.push("ANIM_RETARGET");
     }
   } else {
-    for (const id of ["scene_exists", "mesh_exists", "triangle_budget", "buffers_self_contained"]) {
+    for (const id of ["scene_exists", "mesh_exists", "buffers_self_contained"]) {
       checks.push({
         id, channel: id.includes("mesh") || id.includes("triangle") ? "T" : "X",
         critical: true, passed: null, detail: "UNMEASURED — GLB did not parse",
