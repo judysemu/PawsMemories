@@ -25,8 +25,8 @@ test("exact-artifact customer approval endpoint remains live", () => {
   assert.doesNotMatch(approveRoute, /CUSTOMER_APPROVAL_RETIRED/);
 });
 
-test("current studio keeps its layout but exposes approval and defaults new quality builds to HD", () => {
-  assert.match(studio, /useState<MeshProfile>\("hd"\)/);
+test("current studio keeps its layout, exposes approval, and defaults new builds to SmartMesh", () => {
+  assert.match(studio, /useState<MeshProfile>\("smart_mesh"\)/);
   assert.match(studio, /Approve (?:generated views|this model|and continue)/);
   assert.match(studio, /approveCustomerStage|\/approve/);
 });

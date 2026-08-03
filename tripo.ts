@@ -1,9 +1,16 @@
 import sharp from "sharp";
 
 const TRIPO_BASE = "https://api.tripo3d.ai/v2/openapi";
+const TRIPO_V3_BASE = "https://openapi.tripo3d.ai/v3";
 export const TRIPO_PREFIX = "tripo:";
+export const TRIPO_MULTIVIEW_PREFIX = "tripo-multiview:";
 const MAX_TRIPO_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
 const TRIPO_IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const TRIPO_MULTIVIEW_OUTPUT_HOSTS = new Set([
+  "cdn.tripo3d.ai",
+  "tripo-data.cdn.bcebos.com",
+  "tripo-data.rg1.data.tripo3d.com",
+]);
 
 export class TripoError extends Error {
   constructor(
@@ -90,6 +97,19 @@ interface UploadedImage {
   token: string;
 }
 
+export interface TripoMultiviewPollResult {
+  done: boolean;
+  progress?: number;
+  error?: string;
+  failureCode?: string;
+  views?: {
+    frontUrl: string;
+    leftUrl: string;
+    backUrl: string;
+    rightUrl: string;
+  };
+}
+
 /**
  * Decode the real bytes and produce the one upload format this bridge supports.
  * Signed object URLs may return application/octet-stream and Gemini may return
@@ -106,6 +126,164 @@ export async function normalizeTripoUploadImage(bytes: Buffer): Promise<Buffer> 
     throw new Error("Tripo source image must decode as JPEG, PNG, or WebP.");
   }
   return image.rotate().png({ compressionLevel: 9 }).toBuffer();
+}
+
+async function uploadBufferToTripoV3(imageBytes: Buffer): Promise<string> {
+  const normalized = await normalizeTripoUploadImage(imageBytes);
+  const blob = new Blob([Uint8Array.from(normalized)], { type: "image/png" });
+  const formData = new FormData();
+  formData.append("file", blob, "reference.png");
+
+  const response = await fetch(`${TRIPO_V3_BASE}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey()}` },
+    body: formData,
+  });
+  const body: any = await response.json().catch(() => ({}));
+  const code = typeof body?.code === "number" ? body.code : null;
+  if (!response.ok || code !== 0) {
+    throw new TripoError(
+      response.status,
+      code,
+      String(body?.message || ""),
+      `Tripo reference upload failed (HTTP ${response.status}, code ${code ?? "unknown"})`,
+      response.status >= 500 ? "safe_retry" : "definitive_rejection",
+    );
+  }
+  const token = body?.data?.file_token;
+  if (typeof token !== "string" || !token) {
+    throw new Error("Tripo reference upload returned no file token");
+  }
+  return token;
+}
+
+/** Submit one source image to Tripo's v3 canonical multiview generator. */
+export async function startTripoImageToMultiview(imageBytes: Buffer): Promise<string> {
+  const fileToken = await uploadBufferToTripoV3(imageBytes);
+  let response: Response;
+  try {
+    response = await fetch(`${TRIPO_V3_BASE}/generation/image-to-multiview`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ input: fileToken }),
+    });
+  } catch {
+    throw new TripoError(
+      0,
+      null,
+      "",
+      "Tripo multiview submission outcome is unknown after a transport failure",
+      "ambiguous_acceptance",
+    );
+  }
+
+  const body: any = await response.json().catch(() => ({}));
+  const code = typeof body?.code === "number" ? body.code : null;
+  if (!response.ok || code !== 0) {
+    throw new TripoError(
+      response.status,
+      code,
+      String(body?.message || ""),
+      `Tripo multiview submission failed (HTTP ${response.status}, code ${code ?? "unknown"})`,
+      response.status >= 500 ? "ambiguous_acceptance" : response.status === 429 || code === 2000 ? "safe_retry" : "definitive_rejection",
+    );
+  }
+  const taskId = body?.data?.task_id;
+  if (typeof taskId !== "string" || !taskId) {
+    throw new TripoError(
+      response.status,
+      code,
+      "",
+      "Tripo multiview submission succeeded without a recoverable task ID",
+      "ambiguous_acceptance",
+    );
+  }
+  return `${TRIPO_MULTIVIEW_PREFIX}${taskId}`;
+}
+
+function tripoMultiviewTaskId(handle: string): string {
+  if (!handle.startsWith(TRIPO_MULTIVIEW_PREFIX)) {
+    throw new Error("Invalid Tripo multiview task handle");
+  }
+  return handle.slice(TRIPO_MULTIVIEW_PREFIX.length);
+}
+
+/** Poll one v3 multiview task without exposing provider response bodies. */
+export async function pollTripoImageToMultiview(handle: string): Promise<TripoMultiviewPollResult> {
+  const taskId = tripoMultiviewTaskId(handle);
+  const response = await fetch(`${TRIPO_V3_BASE}/tasks/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey()}` },
+  });
+  const body: any = await response.json().catch(() => ({}));
+  const code = typeof body?.code === "number" ? body.code : null;
+  if (!response.ok || code !== 0) {
+    if (response.status === 429 || code === 2000) {
+      throw new TripoError(response.status, code, "", "Tripo multiview status check was rate limited", "safe_retry");
+    }
+    throw new TripoError(response.status, code, "", "Tripo multiview status check failed");
+  }
+
+  const task = body?.data || {};
+  const progress = typeof task.progress === "number" ? task.progress : undefined;
+  if (task.status === "failed" || task.status === "cancelled" || task.status === "banned") {
+    return {
+      done: true,
+      progress,
+      error: "Tripo could not generate the additional reference views",
+      failureCode: task.status === "banned" ? "PROVIDER_CONTENT_REJECTED" : "PROVIDER_TASK_FAILED",
+    };
+  }
+  if (task.status !== "success") return { done: false, progress };
+
+  const output = task.output || {};
+  const frontUrl = output.front_view_url;
+  const leftUrl = output.left_view_url;
+  const backUrl = output.back_view_url;
+  const rightUrl = output.right_view_url;
+  if (![frontUrl, leftUrl, backUrl, rightUrl].every((value) => typeof value === "string" && value.length > 0)) {
+    return { done: true, progress: 100, error: "Tripo returned an incomplete reference set", failureCode: "PROVIDER_OUTPUT_MISSING" };
+  }
+  return { done: true, progress: 100, views: { frontUrl, leftUrl, backUrl, rightUrl } };
+}
+
+function assertTripoMultiviewOutputUrl(rawUrl: string): URL {
+  const parsed = new URL(rawUrl);
+  if (parsed.protocol !== "https:" || !TRIPO_MULTIVIEW_OUTPUT_HOSTS.has(parsed.hostname.toLowerCase())) {
+    throw new Error("Blocked Tripo reference image URL");
+  }
+  return parsed;
+}
+
+/** Download a provider-generated reference image with an exact-host and byte cap. */
+export async function downloadTripoReferenceImage(rawUrl: string): Promise<Buffer> {
+  const parsed = assertTripoMultiviewOutputUrl(rawUrl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRIPO_IMAGE_DOWNLOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(parsed, { signal: controller.signal, redirect: "error" });
+    if (!response.ok || !response.body) throw new Error(`Tripo reference download failed (HTTP ${response.status})`);
+    const declaredLength = Number(response.headers.get("content-length") || 0);
+    if (declaredLength > MAX_TRIPO_SOURCE_IMAGE_BYTES) throw new Error("Tripo reference image exceeds the byte limit");
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > MAX_TRIPO_SOURCE_IMAGE_BYTES) {
+        await reader.cancel();
+        throw new Error("Tripo reference image exceeds the byte limit");
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /** Download an image (URL or data URL) and upload its bytes to Tripo → image_token. */

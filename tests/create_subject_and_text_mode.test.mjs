@@ -61,22 +61,14 @@ test("anatomy is coherent for bipeds, quadrupeds and birds", () => {
   assert.match(block, /hasWings: isWinged/);
 });
 
-test("the subject picker offers a human option and only valid classes", () => {
+test("the public subject picker advertises only cats and dogs", () => {
   const screen = read("src/components/CreateScreen.tsx");
   assert.match(screen, /SUBJECT_OPTIONS/);
   const block = screen.slice(screen.indexOf("SUBJECT_OPTIONS"), screen.indexOf("];", screen.indexOf("SUBJECT_OPTIONS")));
-  assert.match(block, /value: "human"/, "a person must be selectable or biped rigging is unreachable");
-
-  // Every offered value must be a real ExtendedSubjectClass, otherwise the
-  // server silently falls through to 'other' → quadruped.
   const values = [...block.matchAll(/value: "([a-z_]+)"/g)].map((m) => m[1]);
-  assert.ok(values.length >= 3);
+  assert.deepEqual(values, ["dog", "cat"]);
   for (const v of values) {
-    const profile = getBuildProfileForSpecies(v);
-    assert.ok(profile, `"${v}" has no build profile`);
-    if (v !== "other") {
-      assert.notEqual(profile, "other", `"${v}" falls through to the generic profile`);
-    }
+    assert.equal(getBuildProfileForSpecies(v), "quadruped");
   }
 });
 
@@ -84,13 +76,10 @@ test("the subject picker offers a human option and only valid classes", () => {
 /* Text-to-model                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the create flow can start from a description, not just a photo", () => {
+test("the public create flow starts from one photo", () => {
   const screen = read("src/components/CreateScreen.tsx");
-  assert.match(screen, /inputMode/, "the screen must track input mode");
-  assert.match(screen, /From a description/, "text mode must be selectable");
-  assert.match(screen, /textPrompt/, "a description field must exist");
-  // Both the disabled state and the styling must read the same flag, or the
-  // button can look enabled while refusing to act.
+  assert.match(screen, /const isReady = !!state\.inputPhotoUrl/);
+  assert.doesNotMatch(screen, /From a description|textPrompt/);
   assert.match(screen, /disabled=\{!isReady\}/);
   assert.match(screen, /isReady\s*\n?\s*\?/);
 });
@@ -145,8 +134,8 @@ test("generatePetReferenceImage still bails on empty input", () => {
   );
 });
 
-test("the description is length-bounded on both sides", () => {
+test("the removed public description field remains bounded on the legacy server path", () => {
   const screen = read("src/components/CreateScreen.tsx");
-  assert.match(screen, /slice\(0, 500\)/, "client must bound the field");
+  assert.doesNotMatch(screen, /textPrompt|From a description/);
   assert.match(server, /slice\(0, 500\)/, "server must not trust the client bound");
 });

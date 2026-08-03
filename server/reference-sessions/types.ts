@@ -26,7 +26,6 @@ export const ORDERED_VIEW_KINDS: readonly ViewKind[] = [
   "left",
   "right",
   "rear",
-  "front_three_quarter",
 ] as const;
 
 export type InputMode = "text" | "photo";

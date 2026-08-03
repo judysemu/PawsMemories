@@ -1,5 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
+import {
+  downloadTripoReferenceImage,
+  pollTripoImageToMultiview,
+  startTripoImageToMultiview,
+} from "../../tripo";
 import type { GeneratedViewPayload, ProviderGenerationResult, ViewKind } from "./types";
 import { ORDERED_VIEW_KINDS } from "./types";
 
@@ -8,11 +12,19 @@ export const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
 export const REFERENCE_PROVIDER_TIMEOUT_MS = 120_000;
 const ALLOWED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+export interface ReferenceGenerationInput {
+  prompt?: string | null;
+  photoBuffer?: Buffer | null;
+  photoMimeType?: string | null;
+  retryNotes?: string | null;
+  onProviderTaskCreated?: (taskHandle: string) => Promise<void>;
+}
+
 export interface ReferenceImageProvider {
   readonly name: string;
   readonly model: string;
   generateMultiview(
-    input: { prompt?: string | null; photoBuffer?: Buffer | null; photoMimeType?: string | null; retryNotes?: string | null },
+    input: ReferenceGenerationInput,
     inputMode: "text" | "photo",
   ): Promise<ProviderGenerationResult>;
 }
@@ -39,7 +51,7 @@ export async function inspectReferenceImage(
 
 /** Deterministic provider used only when explicitly injected by tests. */
 export class FakeReferenceImageProvider implements ReferenceImageProvider {
-  readonly name = "fake_gemini";
+  readonly name = "fake_tripo";
   readonly model = "fake-reference-provider-v1";
   calls = 0;
 
@@ -66,134 +78,79 @@ export class FakeReferenceImageProvider implements ReferenceImageProvider {
   }
 }
 
-const VIEW_INSTRUCTIONS: Record<ViewKind, string> = {
-  front: "straight-on front view",
-  left: "exact left profile view",
-  right: "exact right profile view",
-  rear: "straight-on rear view",
-  front_three_quarter: "front three-quarter view",
-};
+const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-type GeminiImageClient = {
-  models: {
-    generateContent(request: any): Promise<any>;
+async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPayload> {
+  const imageBuffer = await sharp(photoBuffer, { failOn: "error", limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize(MIN_REFERENCE_DIMENSION_PX, MIN_REFERENCE_DIMENSION_PX, {
+      fit: "contain",
+      background: "#ffffff",
+    })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  return {
+    viewKind: "front",
+    imageBuffer,
+    mimeType: "image/png",
+    widthPx: MIN_REFERENCE_DIMENSION_PX,
+    heightPx: MIN_REFERENCE_DIMENSION_PX,
+    isSynthesized: false,
   };
-};
-
-function generatedImagePart(response: any): { data: string; mimeType: string } | null {
-  for (const part of response?.candidates?.[0]?.content?.parts || []) {
-    if (typeof part?.inlineData?.data !== "string" || !part.inlineData.data) continue;
-    return {
-      data: part.inlineData.data,
-      mimeType: part.inlineData.mimeType || "image/png",
-    };
-  }
-  return null;
 }
 
-/**
- * Gemini can occasionally return a useful text explanation without the image
- * modality requested. Retry that one condition exactly once with an
- * image-only response contract; transport/quota failures are never multiplied.
- */
-export async function requestGeminiReferenceImage(
-  client: GeminiImageClient,
-  model: string,
-  parts: any[],
-  label: string,
-): Promise<{ imageBuffer: Buffer; mimeType: string; widthPx: number; heightPx: number; model: string }> {
-  const request = async (responseModalities: string[]) => client.models.generateContent({
-    model,
-    contents: [{ role: "user", parts }],
-    config: { responseModalities, imageConfig: { aspectRatio: "1:1" } },
-  });
-
-  let response = await request(["IMAGE", "TEXT"]);
-  let imagePart = generatedImagePart(response);
-  if (!imagePart) {
-    response = await request(["IMAGE"]);
-    imagePart = generatedImagePart(response);
-  }
-  if (!imagePart) {
-    throw new Error(`${label} returned no image output from the configured reference model after one image-only retry.`);
-  }
-
-  const imageBuffer = Buffer.from(imagePart.data, "base64");
-  const inspected = await inspectReferenceImage(imageBuffer, imagePart.mimeType);
-  return { imageBuffer, ...inspected, model };
-}
-
-export class GeminiReferenceImageProvider implements ReferenceImageProvider {
-  readonly name = "gemini";
-  readonly model: string;
-  private readonly ai: GoogleGenAI | null;
+/** Production reference provider: one uploaded image -> Tripo left/back/right views. */
+export class TripoReferenceImageProvider implements ReferenceImageProvider {
+  readonly name = "tripo";
+  readonly model = "image-to-multiview-v3";
   private inFlight = false;
 
-  constructor(
-    apiKey = process.env.GEMINI_API_KEY || "",
-    model = process.env.GEMINI_REFERENCE_IMAGE_MODEL || "gemini-3.1-flash-image",
-  ) {
-    const configuredModel = model.trim();
-    this.model = !configuredModel || /^gemini-2\./i.test(configuredModel)
-      ? "gemini-3.1-flash-image"
-      : configuredModel;
-    this.ai = apiKey.trim() ? new GoogleGenAI({
-      apiKey: apiKey.trim(),
-      httpOptions: {
-        headers: { "User-Agent": "pawsome3d-reference-builder" },
-        timeout: REFERENCE_PROVIDER_TIMEOUT_MS,
-        // Keep this explicit even though the installed SDK does not retry
-        // without retryOptions. A future SDK/config change must not multiply
-        // this workflow's five intentional angle calls.
-        retryOptions: { attempts: 1 },
-      },
-    }) : null;
-  }
-
-  private async generateImage(parts: any[], label: string): Promise<{ imageBuffer: Buffer; mimeType: string; widthPx: number; heightPx: number; model: string }> {
-    if (!this.ai) throw new Error("GEMINI_API_KEY is required for multiview reference generation.");
-    return requestGeminiReferenceImage(this.ai, this.model, parts, label);
-  }
-
   async generateMultiview(
-    input: { prompt?: string | null; photoBuffer?: Buffer | null; photoMimeType?: string | null; retryNotes?: string | null },
+    input: ReferenceGenerationInput,
     inputMode: "text" | "photo",
   ): Promise<ProviderGenerationResult> {
-    if (inputMode === "text" && !input.prompt?.trim()) throw new Error("A text prompt is required.");
-    if (inputMode === "photo" && (!input.photoBuffer || !input.photoMimeType)) throw new Error("A source photo is required.");
+    if (inputMode !== "photo") throw new Error("This reference builder requires one uploaded pet photo.");
+    if (!input.photoBuffer || !input.photoMimeType) throw new Error("A source photo is required.");
     if (this.inFlight) throw new Error("Reference generation is already running. Please wait for it to finish.");
     this.inFlight = true;
 
     try {
-      const sourceParts: any[] = [];
-      if (input.photoBuffer && input.photoMimeType) {
-        sourceParts.push({ inlineData: { data: input.photoBuffer.toString("base64"), mimeType: input.photoMimeType } });
-      }
-      const baseDescription = `${input.prompt?.trim() || "Preserve the exact identity, anatomy, markings, colors, proportions, and accessories of the supplied subject."} The supplied photo may be a four-photo contact sheet ordered top-left front, top-right left profile, bottom-left rear, bottom-right right profile; treat those four panels as separate observed angles of the same subject, not as a collage to reproduce.`;
-      const retryClause = input.retryNotes?.trim() ? ` Requested correction: ${input.retryNotes.trim()}` : "";
-      const front = await this.generateImage([
-        ...sourceParts,
-        { text: `${baseDescription}${retryClause} Create a clean, full-subject, centered ${VIEW_INSTRUCTIONS.front} on a neutral background for multi-view 3D reconstruction. Preserve identity exactly. No text, collage, props, crop, or perspective distortion.` },
-      ], "front reference view");
+      const front = await canonicalFrontImage(input.photoBuffer);
+      const taskHandle = await startTripoImageToMultiview(input.photoBuffer);
+      await input.onProviderTaskCreated?.(taskHandle);
 
-      const views: GeneratedViewPayload[] = [{
-        viewKind: "front",
-        imageBuffer: front.imageBuffer,
-        mimeType: front.mimeType,
-        widthPx: front.widthPx,
-        heightPx: front.heightPx,
-        isSynthesized: true,
-      }];
-      const anchor = { inlineData: { data: front.imageBuffer.toString("base64"), mimeType: front.mimeType } };
-      for (const viewKind of ORDERED_VIEW_KINDS.slice(1)) {
-        const generated = await this.generateImage([
-          ...sourceParts,
-          anchor,
-          { text: `Use the original supplied photo evidence and the generated front image together as immutable identity anchors. Generate the same subject in an exact ${VIEW_INSTRUCTIONS[viewKind]}. Preserve anatomy, silhouette, markings, colors, face, accessories, scale, lighting, and neutral background. Full subject visible. No text or collage.` },
-        ], `${viewKind} reference view`);
-        views.push({ viewKind, imageBuffer: generated.imageBuffer, mimeType: generated.mimeType, widthPx: generated.widthPx, heightPx: generated.heightPx, isSynthesized: true });
+      const deadline = Date.now() + REFERENCE_PROVIDER_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        const polled = await pollTripoImageToMultiview(taskHandle);
+        if (polled.error) throw new Error(polled.error);
+        if (!polled.done || !polled.views) {
+          await sleep(1_500);
+          continue;
+        }
+        const [leftBuffer, backBuffer, rightBuffer] = await Promise.all([
+          downloadTripoReferenceImage(polled.views.leftUrl),
+          downloadTripoReferenceImage(polled.views.backUrl),
+          downloadTripoReferenceImage(polled.views.rightUrl),
+        ]);
+        const providerViews: Array<{ viewKind: ViewKind; imageBuffer: Buffer }> = [
+          { viewKind: "left", imageBuffer: leftBuffer },
+          { viewKind: "right", imageBuffer: rightBuffer },
+          { viewKind: "rear", imageBuffer: backBuffer },
+        ];
+        const generatedViews = await Promise.all(providerViews.map(async ({ viewKind, imageBuffer }) => {
+          const metadata = await sharp(imageBuffer, { failOn: "error" }).metadata();
+          const mimeType = metadata.format === "jpeg" ? "image/jpeg" : metadata.format === "webp" ? "image/webp" : "image/png";
+          const inspected = await inspectReferenceImage(imageBuffer, mimeType);
+          return { viewKind, imageBuffer, ...inspected, isSynthesized: true } as GeneratedViewPayload;
+        }));
+        const byKind = new Map(generatedViews.map((view) => [view.viewKind, view]));
+        return {
+          provider: this.name,
+          model: this.model,
+          views: ORDERED_VIEW_KINDS.map((kind) => kind === "front" ? front : byKind.get(kind)!),
+        };
       }
-      return { provider: this.name, model: this.model, views };
+      throw new Error("Tripo is still preparing the reference views. Please try again shortly.");
     } finally {
       this.inFlight = false;
     }

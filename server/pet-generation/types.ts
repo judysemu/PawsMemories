@@ -13,13 +13,8 @@ export interface PetModelGenerationInput {
   leftUrl: string;
   rightUrl: string;
   rearUrl: string;
-  /**
-   * Collected by G4 reference intake but NOT consumed under Path 1 — the
-   * Tripo adapter maps 5 canonical views onto a 4-slot contract and drops
-   * this one (server/model-builds/provider.ts:100-110, "Tripo has no fifth
-   * slot"). Recorded, not hidden. Consumed once G12 replaces the provider.
-   */
-  threeQuarterUrl: string;
+  /** Legacy fifth view retained for old manifests; Tripo consumes four views. */
+  threeQuarterUrl?: string;
   meshProfile?: MeshProfile;
   subjectProfile?: SubjectProfile;
 }

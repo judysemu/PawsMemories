@@ -26,6 +26,7 @@ import {
   findAttemptByIdempotencyKey,
   updateAttemptState,
   updateAttemptProvider,
+  updateAttemptProviderTaskHandle,
   updateSessionSource,
   insertView,
   findViewsByAttemptId,
@@ -124,7 +125,7 @@ export function computeOrderedManifestHash(
   views: { viewKind: ViewKind; assetUuid: string; sha256: string }[],
   reportHash: string,
 ): string {
-  const ordered = ["front", "left", "right", "rear", "front_three_quarter"] as const;
+  const ordered = ["front", "left", "right", "rear"] as const;
   const parts: string[] = [];
 
   for (const kind of ordered) {
@@ -179,8 +180,8 @@ export class ReferenceSessionService {
           top: Math.floor(index / 2) * 1024,
         })))).png().toBuffer();
       const imageMimeType = inspectedInputs.length === 1 ? inspectedInputs[0].mimeType : "image/png";
-      // User uploads only need to decode safely. Gemini generates the canonical
-      // high-resolution approval views, which retain the stricter 1024px gate.
+      // User uploads only need to decode safely. The provider prepares a
+      // canonical 1024px front plus the three generated approval views.
       const inspected = await inspectReferenceImage(imageBuffer, imageMimeType, 1);
       const stored = await storeReferenceSource(sessionUuid, imageBuffer, inspected.mimeType);
       sourceObjectKey = stored.objectKey;
@@ -286,6 +287,17 @@ export class ReferenceSessionService {
     };
 
     try {
+      // Serialize provider-budget admission before opening the transaction. If
+      // two transactions take empty-range locks in reference_attempts first,
+      // one can wait on this named lock while the lock holder waits on that
+      // transaction's gap lock. Acquiring the named lock first gives every
+      // admission path the same lock order and avoids that cross-lock stall.
+      const [lockRows]: any = await connection.query("SELECT GET_LOCK(?, 5) AS acquired", [REFERENCE_BUDGET_LOCK]);
+      if (Number(lockRows?.[0]?.acquired || 0) !== 1) {
+        throw new ReferenceSessionError("Reference generation is busy. Try again shortly.", "MINUTE_ATTEMPT_CAP");
+      }
+      budgetLockHeld = true;
+
       await connection.beginTransaction();
 
       const session = await findSessionByUuidForUpdate(connection, sessionUuid);
@@ -321,11 +333,6 @@ export class ReferenceSessionService {
         );
       }
 
-      const [lockRows]: any = await connection.query("SELECT GET_LOCK(?, 5) AS acquired", [REFERENCE_BUDGET_LOCK]);
-      if (Number(lockRows?.[0]?.acquired || 0) !== 1) {
-        throw new ReferenceSessionError("Reference generation is busy. Try again shortly.", "MINUTE_ATTEMPT_CAP");
-      }
-      budgetLockHeld = true;
       await assertReferenceProviderBudget(connection);
 
       const nextAttemptNumber = session.retry_count + 1;
@@ -364,10 +371,18 @@ export class ReferenceSessionService {
         photoMimeType = sourceVersion.mime_type;
       }
       const genResult = await this.provider.generateMultiview(
-        { prompt: session.prompt, photoBuffer, photoMimeType, retryNotes },
+        {
+          prompt: session.prompt,
+          photoBuffer,
+          photoMimeType,
+          retryNotes,
+          onProviderTaskCreated: async (taskHandle) => {
+            await updateAttemptProviderTaskHandle(pool, attempt.id, taskHandle);
+          },
+        },
         session.input_mode,
       );
-      const requiredKinds = new Set(["front", "left", "right", "rear", "front_three_quarter"]);
+      const requiredKinds = new Set(["front", "left", "right", "rear"]);
       if (genResult.views.length !== requiredKinds.size || new Set(genResult.views.map((view) => view.viewKind)).size !== requiredKinds.size || genResult.views.some((view) => !requiredKinds.has(view.viewKind))) {
         throw new ReferenceSessionError("Provider must return exactly one of each required view.", "INVALID_PROVIDER_OUTPUT");
       }
@@ -467,14 +482,8 @@ export class ReferenceSessionService {
       await updateAttemptState(pool, attempt.id, "ready");
       await updateSessionState(pool, session.id, "ready");
 
-      // A successful five-view result is finalized immediately. There is no
-      // customer review pause; integrity and consistency evidence still bind
-      // the exact immutable manifest used by the model build.
-      const readyPublic = await this.getSessionPublic(sessionUuid, ownerId, false);
-      if (!readyPublic.manifestHash) {
-        throw new ReferenceSessionError("Generated reference manifest is incomplete.", "INCOMPLETE_MANIFEST");
-      }
-      await this.approveManifest(ownerId, sessionUuid, readyPublic.manifestHash);
+      // Stop here for customer approval. No model provider job or paid stage is
+      // permitted to start until the exact current manifest is accepted.
       const updatedSession = (await findSessionByUuid(pool, sessionUuid))!;
       const updatedAttempt = (await findAttemptById(pool, attempt.id))!;
 
@@ -570,8 +579,10 @@ export class ReferenceSessionService {
       }
 
       const views = await findViewsByAttemptId(connection, attempt.id);
-      if (views.length !== 5) {
-        throw new ReferenceSessionError("Approval requires exactly 5 reference views.", "INCOMPLETE_VIEWS");
+      const requiredKinds = ["front", "left", "right", "rear"] as const;
+      const availableKinds = new Set(views.map((view) => view.view_kind));
+      if (!requiredKinds.every((kind) => availableKinds.has(kind))) {
+        throw new ReferenceSessionError("Approval requires the uploaded front plus left, right, and rear reference views.", "INCOMPLETE_VIEWS");
       }
 
       // Compute server-side ordered manifest hash and verify match
@@ -719,7 +730,7 @@ export class ReferenceSessionService {
           reportHash: reportRecord.report_hash,
           metrics: reportRecord.metrics_json,
         };
-        if (viewsPublic.length === 5) manifestHash = computeOrderedManifestHash(manifestItems, reportRecord.report_hash);
+        if (viewsPublic.length >= 4) manifestHash = computeOrderedManifestHash(manifestItems, reportRecord.report_hash);
       }
     }
 

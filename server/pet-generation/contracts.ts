@@ -35,7 +35,7 @@ export const ReferenceManifestSchema = z.object({
   leftUrl: httpsUrl,
   rightUrl: httpsUrl,
   rearUrl: httpsUrl,
-  threeQuarterUrl: httpsUrl,
+  threeQuarterUrl: httpsUrl.optional(),
 }).strict();
 
 export const ReferenceSubmissionSchema = z.object({

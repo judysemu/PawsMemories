@@ -8,21 +8,11 @@ interface CreateScreenProps {
   onNavigate: (screen: Screen) => void;
 }
 
-/**
- * Selectable subjects, in the order shown.
- *
- * `value` must be a member of ExtendedSubjectClass (avatarPrompts.ts) because
- * the server maps it through getBuildProfileForSpecies to choose the rig
- * skeleton. "human" is what unlocks the biped bonemap; without it a person is
- * classified "other", rigged as a quadruped, and fails the confidence gate.
- */
+/** Public pet subjects, in the order shown. The broader backend model profiles
+ * remain available to internal callers but are not advertised in this flow. */
 const SUBJECT_OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: "dog", label: "Dog", hint: "A natural four-legged shape" },
   { value: "cat", label: "Cat", hint: "A natural four-legged shape" },
-  { value: "human", label: "Person", hint: "A natural human shape" },
-  { value: "bird", label: "Bird", hint: "A natural winged shape" },
-  { value: "small_animal", label: "Small pet", hint: "Rabbit, guinea pig, ferret" },
-  { value: "other", label: "Other", hint: "We’ll choose a fitting shape" },
 ];
 
 function downscaleReferenceImage(dataUrl: string, maxDimension = 2048): Promise<string> {
@@ -97,22 +87,16 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
     reader.readAsDataURL(file);
   };
 
-  const mode = state.inputMode ?? "image";
   /** Single source of truth for "can this step proceed" — used by both the
    *  button's disabled state and its styling, so they can never disagree. */
-  const isReady = mode === "image"
-    ? !!state.inputPhotoUrl
-    : !!(state.textPrompt || "").trim();
+  const isReady = !!state.inputPhotoUrl;
 
   const handleNext = () => {
-    if (mode === "image" && !state.inputPhotoUrl) {
+    if (!state.inputPhotoUrl) {
       setError("Please upload a reference photo to continue.");
       return;
     }
-    if (mode === "text" && !(state.textPrompt || "").trim()) {
-      setError("Describe what you want to create to continue.");
-      return;
-    }
+    setState((current) => ({ ...current, inputMode: "image" }));
     onNavigate(Screen.CREATE_REFERENCE);
   };
 
@@ -120,7 +104,7 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
     <div className="w-full max-w-4xl mx-auto px-4 py-8 animate-in fade-in zoom-in duration-500">
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-black text-on-surface mb-2">Create Your 3D Pet</h1>
-        <p className="text-on-surface-variant text-lg">Start from a photo, or describe what you want us to build.</p>
+        <p className="text-on-surface-variant text-lg">Upload one clear photo of your cat or dog.</p>
       </div>
 
       <div className="glass-panel p-8 rounded-3xl relative overflow-hidden">
@@ -129,50 +113,8 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
           {/* Upload Section */}
           <div className="flex flex-col gap-6">
             <h2 className="text-xl font-bold text-on-surface flex items-center gap-2">
-              <Camera className="text-primary" /> Step 1: {mode === "image" ? "Upload Photo" : "Describe It"}
+              <Camera className="text-primary" /> Step 1: Upload Photo
             </h2>
-
-            {/* Photo vs description. The server has always accepted both
-                (inputMode "image" | "text"); only the UI for text was lost when
-                this flow replaced the old create dialog. */}
-            <div className="flex gap-1 rounded-xl bg-surface-variant/50 p-1" role="tablist">
-              {([
-                { id: "image", label: "From a photo" },
-                { id: "text", label: "From a description" },
-              ] as const).map((m) => (
-                <button
-                  key={m.id}
-                  role="tab"
-                  aria-selected={mode === m.id}
-                  onClick={() => { setError(""); setState(s => ({ ...s, inputMode: m.id })); }}
-                  className={`flex-1 rounded-lg py-2 text-sm font-bold transition-all ${
-                    mode === m.id ? "bg-primary text-on-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-
-            {mode === "text" ? (
-              <div className="flex flex-col gap-2">
-                <textarea
-                  value={state.textPrompt || ""}
-                  onChange={(e) => { setError(""); setState(s => ({ ...s, textPrompt: e.target.value.slice(0, 500) })); }}
-                  maxLength={500}
-                  placeholder="e.g. a scruffy grey terrier with one ear up, sitting, wearing a red bandana"
-                  className="min-h-[220px] w-full resize-none rounded-2xl border-2 border-outline-variant bg-surface p-4 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
-                  <span>The more specific the description, the closer the result.</span>
-                  <span>{(state.textPrompt || "").length}/500</span>
-                </div>
-                <p className="rounded-xl bg-surface-variant/40 p-3 text-[11px] leading-snug text-on-surface-variant">
-                  Describing a subject creates an original model, not a likeness of
-                  a specific pet. Upload a photo instead if you want your own animal.
-                </p>
-              </div>
-            ) : (
             <div
               className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-colors cursor-pointer min-h-[300px] relative overflow-hidden ${
                 state.inputPhotoUrl ? 'border-primary bg-primary/5' : 'border-outline-variant hover:border-primary/50 hover:bg-surface-variant/30'
@@ -211,7 +153,6 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
                 </div>
               )}
             </div>
-            )}
 
             {error && <FriendlyError message={error} action="Check the details above and try again." />}
           </div>
@@ -236,13 +177,7 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
 
               <div>
                 <label className="block text-sm font-bold text-on-surface mb-2">Subject</label>
-                {/* This list is the ONLY thing that decides which skeleton a model
-                    gets — server.ts routes it through getBuildProfileForSpecies to
-                    pick biped vs quadruped. It previously offered only dog/cat/
-                    other, so a person came through as "other" → quadruped and
-                    could never pass the rig confidence gate. Any species added
-                    here must exist in ExtendedSubjectClass (avatarPrompts.ts). */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {SUBJECT_OPTIONS.map((option) => (
                     <button
                       key={option.value}
@@ -259,8 +194,7 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
                   ))}
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-on-surface-variant">
-                  This helps us shape your subject naturally. We’ll choose the
-                  right style for a person, animal, or other subject.
+                  This helps us shape your pet naturally.
                 </p>
               </div>
               
@@ -293,7 +227,7 @@ export default function CreateScreen({ onNavigate }: CreateScreenProps) {
                   : 'bg-surface-variant text-on-surface-variant/50 cursor-not-allowed'
               }`}
             >
-              Generate AI Concept <ChevronRight />
+              Generate Pet Views <ChevronRight />
             </button>
             <p className="text-center text-xs text-on-surface-variant">No PupCoins will be charged yet.</p>
           </div>

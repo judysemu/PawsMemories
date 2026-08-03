@@ -4,7 +4,7 @@ import test from "node:test";
 import sharp from "sharp";
 import {
   FakeReferenceImageProvider,
-  GeminiReferenceImageProvider,
+  TripoReferenceImageProvider,
   inspectReferenceImage,
 } from "../server/reference-sessions/provider.ts";
 
@@ -22,10 +22,10 @@ test("reference image inspection trusts decoded bytes, not claimed dimensions", 
   await assert.rejects(() => inspectReferenceImage(onePixel, "image/jpeg"), /do not match/);
 });
 
-test("fake provider emits five genuinely high-resolution decodable images", async () => {
+test("fake provider emits four genuinely high-resolution decodable images", async () => {
   const provider = new FakeReferenceImageProvider();
   const result = await provider.generateMultiview({ prompt: "test" }, "text");
-  assert.equal(result.views.length, 5);
+  assert.equal(result.views.length, 4);
   for (const view of result.views) {
     const inspected = await inspectReferenceImage(view.imageBuffer, view.mimeType);
     assert.equal(inspected.widthPx, 1024);
@@ -33,26 +33,23 @@ test("fake provider emits five genuinely high-resolution decodable images", asyn
   }
 });
 
-test("production provider fails closed without GEMINI_API_KEY", async () => {
-  const provider = new GeminiReferenceImageProvider("");
-  assert.equal(provider.model, "gemini-3.1-flash-image");
-  assert.equal(
-    new GeminiReferenceImageProvider("", "gemini-2.5-flash-image").model,
-    "gemini-3.1-flash-image",
-  );
+test("production provider accepts photo input only", async () => {
+  const provider = new TripoReferenceImageProvider();
+  assert.equal(provider.model, "image-to-multiview-v3");
   await assert.rejects(
     () => provider.generateMultiview({ prompt: "a dog" }, "text"),
-    /GEMINI_API_KEY is required/,
+    /requires one uploaded pet photo/,
   );
 });
 
-test("reference generation cannot multiply calls through SDK retries or model fallback chains", () => {
-  assert.match(providerSource, /retryOptions:\s*\{\s*attempts:\s*1\s*\}/);
-  assert.match(providerSource, /GEMINI_REFERENCE_IMAGE_MODEL/);
-  assert.doesNotMatch(providerSource, /for \(const model of this\.models\)/);
+test("reference generation uses one bounded Tripo multiview task", () => {
+  assert.match(providerSource, /startTripoImageToMultiview\(input\.photoBuffer\)/);
+  assert.match(providerSource, /onProviderTaskCreated/);
+  assert.match(providerSource, /REFERENCE_PROVIDER_TIMEOUT_MS/);
+  assert.doesNotMatch(providerSource, /GoogleGenAI|GEMINI_REFERENCE_IMAGE_MODEL/);
   assert.match(providerSource, /if \(this\.inFlight\)/);
   assert.match(providerSource, /finally \{\s*this\.inFlight = false/);
-  assert.match(routeSource, /windowMs:\s*60_000,\s*\n\s*max:\s*1/);
+  assert.match(routeSource, /windowMs:\s*60_000,\s*\n\s*max:\s*5/);
   assert.match(routeSource, /keyGenerator:\s*\(req\)\s*=>\s*getRequestUserPhone/);
   assert.match(serviceSource, /REFERENCE_GENERATION_MAX_ATTEMPTS/);
   assert.match(serviceSource, /ATTEMPT_LIMIT_REACHED/);

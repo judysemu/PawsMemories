@@ -74,7 +74,7 @@ const DEFAULT_GLOBAL_DAILY_COST_MICRO_USD: Record<PaidEndpoint, number> = {
 /**
  * Shared image generation gets ten actual provider attempts per minute, leaving
  * headroom below the observed 20 RPM Nano Banana Pro quota. The dedicated
- * five-view reference generator uses its own Flash model and independent cap;
+ * Tripo reference-view generator uses its own provider task and independent cap;
  * the two counters must not be represented as one atomic combined ceiling.
  */
 const DEFAULT_IMAGE_GENERATION_GLOBAL_MINUTE_CALL_CAP = 10;

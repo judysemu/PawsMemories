@@ -1,29 +1,69 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
-import { requestGeminiReferenceImage } from "../server/reference-sessions/provider.ts";
+import { TripoReferenceImageProvider } from "../server/reference-sessions/provider.ts";
 
-test("a text-only Gemini response gets one bounded image-only retry", async () => {
+test("one Tripo task returns the uploaded front plus three generated views", async () => {
   const png = await sharp({
     create: { width: 1024, height: 1024, channels: 3, background: "#8b6f47" },
   }).png().toBuffer();
-  const calls = [];
-  const client = {
-    models: {
-      async generateContent(request) {
-        calls.push(request);
-        if (calls.length === 1) {
-          return { candidates: [{ content: { parts: [{ text: "I could not create that image." }] } }] };
-        }
-        return { candidates: [{ content: { parts: [{ inlineData: { data: png.toString("base64"), mimeType: "image/png" } }] } }] };
-      },
-    },
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.TRIPO_API_KEY;
+  const events = [];
+  process.env.TRIPO_API_KEY = "test-only-key";
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/v3/files")) {
+      events.push("upload");
+      return Response.json({ code: 0, data: { file_token: "file_test" } });
+    }
+    if (url.endsWith("/generation/image-to-multiview")) {
+      events.push("submit");
+      assert.deepEqual(JSON.parse(String(init?.body)), { input: "file_test" });
+      return Response.json({ code: 0, data: { task_id: "task_test" } });
+    }
+    if (url.endsWith("/tasks/task_test")) {
+      events.push("poll");
+      return Response.json({
+        code: 0,
+        data: {
+          status: "success",
+          progress: 100,
+          output: {
+            front_view_url: "https://cdn.tripo3d.ai/front.png",
+            left_view_url: "https://cdn.tripo3d.ai/left.png",
+            back_view_url: "https://cdn.tripo3d.ai/back.png",
+            right_view_url: "https://cdn.tripo3d.ai/right.png",
+          },
+        },
+      });
+    }
+    if (url.startsWith("https://cdn.tripo3d.ai/")) {
+      events.push(`download:${url.split("/").pop()}`);
+      return new Response(png, { headers: { "content-type": "image/png", "content-length": String(png.length) } });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
   };
 
-  const generated = await requestGeminiReferenceImage(client, "gemini-3.1-flash-image", [{ text: "front view" }], "front reference view");
-  assert.equal(generated.widthPx, 1024);
-  assert.equal(generated.heightPx, 1024);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0].config.responseModalities, ["IMAGE", "TEXT"]);
-  assert.deepEqual(calls[1].config.responseModalities, ["IMAGE"]);
+  try {
+    const provider = new TripoReferenceImageProvider();
+    const result = await provider.generateMultiview({
+      photoBuffer: png,
+      photoMimeType: "image/png",
+      onProviderTaskCreated: async (handle) => {
+        assert.equal(handle, "tripo-multiview:task_test");
+        events.push("persisted");
+      },
+    }, "photo");
+    assert.equal(result.provider, "tripo");
+    assert.deepEqual(result.views.map((view) => view.viewKind), ["front", "left", "right", "rear"]);
+    assert.equal(result.views[0].isSynthesized, false);
+    assert.equal(result.views.slice(1).every((view) => view.isSynthesized), true);
+    assert.ok(events.indexOf("persisted") < events.indexOf("poll"));
+    assert.equal(events.filter((event) => event === "submit").length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.TRIPO_API_KEY;
+    else process.env.TRIPO_API_KEY = originalKey;
+  }
 });

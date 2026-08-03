@@ -51,6 +51,8 @@ export interface PetGlbServiceDeps {
     sessionId?: number;
   }) => Promise<{
     sessionId: number;
+    sessionUuid?: string;
+    sourceAttemptCount?: number;
     signedManifest: PetModelGenerationInput;
     durableManifest: PetModelGenerationInput;
   }>;
@@ -729,7 +731,7 @@ export class PetGlbService {
     try {
       let job;
       if (attempt.stage === "base") {
-        const references = await this.resolveOrderReferenceManifest(order);
+        const references = (await this.resolveOrderReferenceContext(order)).manifest;
         if (!references) {
           throw new PetGenerationError("REFERENCES_MISSING", "Approved references are missing");
         }
@@ -866,7 +868,8 @@ export class PetGlbService {
     const current = currentOverride === undefined
       ? await this.stages.findCurrent(order.id)
       : currentOverride;
-    const referenceManifest = await this.resolveOrderReferenceManifest(order);
+    const referenceContext = await this.resolveOrderReferenceContext(order);
+    const referenceManifest = referenceContext.manifest;
     return {
       order: {
         ...order,
@@ -881,19 +884,30 @@ export class PetGlbService {
       quote: productQuote(order),
       meshPolicy: meshProfilePolicy(order.meshProfile),
       facialRig: FACIAL_RIG_POLICY,
+      referenceSession: referenceContext.sessionUuid
+        ? {
+            sessionUuid: referenceContext.sessionUuid,
+            attemptsUsed: referenceContext.sourceAttemptCount || 0,
+            canRegenerate: (referenceContext.sourceAttemptCount || 0) < 2,
+          }
+        : null,
     };
   }
 
-  private async resolveOrderReferenceManifest(
+  private async resolveOrderReferenceContext(
     order: PetGlbOrder,
-  ): Promise<PetModelGenerationInput | null> {
+  ): Promise<{ manifest: PetModelGenerationInput | null; sessionUuid?: string; sourceAttemptCount?: number }> {
     if (order.referenceSessionId && this.deps.resolveReferenceSession) {
       const resolved = await this.deps.resolveReferenceSession({
         ownerPhone: order.ownerPhone,
         ttlSeconds: DOWNLOAD_TTL_SECONDS,
         sessionId: order.referenceSessionId,
       });
-      return resolved.signedManifest;
+      return {
+        manifest: resolved.signedManifest,
+        sessionUuid: resolved.sessionUuid,
+        sourceAttemptCount: resolved.sourceAttemptCount,
+      };
     }
     if (order.referenceManifest && this.deps.refreshLegacyReferenceManifest) {
       const refreshed = await this.deps.refreshLegacyReferenceManifest(
@@ -901,12 +915,12 @@ export class PetGlbService {
         order.ownerPhone,
         DOWNLOAD_TTL_SECONDS,
       );
-      if (refreshed) return refreshed;
+      if (refreshed) return { manifest: refreshed };
     }
     if (!order.referenceManifest || containsEphemeralReferenceUrl(order.referenceManifest)) {
-      return null;
+      return { manifest: null };
     }
-    return order.referenceManifest as unknown as PetModelGenerationInput;
+    return { manifest: order.referenceManifest as unknown as PetModelGenerationInput };
   }
 
   // ── 1. Order creation + credit reservation ────────────────────────────────
@@ -1213,6 +1227,7 @@ export interface PetGlbOrderView {
   quote: ReturnType<typeof productQuote>;
   meshPolicy: ReturnType<typeof meshProfilePolicy>;
   facialRig: typeof FACIAL_RIG_POLICY;
+  referenceSession: { sessionUuid: string; attemptsUsed: number; canRegenerate: boolean } | null;
 }
 
 export function newRequestId(): string {

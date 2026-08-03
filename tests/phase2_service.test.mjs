@@ -145,7 +145,7 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     assert.equal(session.retry_count, 0);
   });
 
-  await t.test("2. startOrRetryAttempt generates 5 canonical reference views and consistency report", async () => {
+  await t.test("2. startOrRetryAttempt prepares 4 canonical reference views and consistency report", async () => {
     const ownerId = "+15551113333";
     const session = await service.createSession(ownerId, {
       inputMode: "text",
@@ -164,7 +164,7 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     assert.equal(attempt.state, "ready");
 
     const publicData = await service.getSessionPublic(session.session_uuid, ownerId, false);
-    assert.equal(publicData.views.length, 5);
+    assert.equal(publicData.views.length, 4);
     const viewKinds = publicData.views.map((v) => v.viewKind);
     assert.deepEqual(viewKinds, ORDERED_VIEW_KINDS);
 
@@ -292,7 +292,7 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
     }
   });
 
-  await t.test("4. approveManifest approves session with matching 5-view manifest hash and enters terminal state", async () => {
+  await t.test("4. approveManifest approves session with matching 4-view manifest hash and enters terminal state", async () => {
     const ownerId = "+15551113333";
     const session = await service.createSession(ownerId, { inputMode: "text", prompt: "A husky dog" });
     await service.startOrRetryAttempt(ownerId, session.session_uuid, "idem_husky");

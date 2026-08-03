@@ -233,23 +233,26 @@ test("humanoid selection maps to a biped rig type without claiming embedded AI",
   assert.doesNotMatch(studio, /facialRig:\s*true/);
 });
 
-test("model studio accepts one photo or four explicit angles and requires exact-artifact approval", () => {
+test("model studio accepts one photo, includes one free view remake, and requires exact-artifact approval", () => {
   const studio = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
   const routes = fs.readFileSync("server/pet-generation/routes.ts", "utf8");
   assert.match(studio, /createReferenceSession/);
   assert.match(studio, /startReferenceAttempt/);
-  assert.match(studio, /Four angles required/);
+  assert.match(studio, /Choose one pet photo/);
+  assert.match(studio, /retryReferenceAttempt/);
+  assert.match(studio, /Remake these views once — free/);
+  assert.match(studio, /useState<MeshProfile>\("smart_mesh"\)/);
   assert.match(studio, /approveCustomerStage/);
   assert.match(studio, /stages\/\$\{stage\.stage\}\/approve/);
   assert.doesNotMatch(studio, /Check stage progress|Load secure 3D preview|Back to model builds/);
-  assert.match(routes, /requiredSourceUploads:\s*4/);
-  assert.match(routes, /generatedForApproval:\s*\["front", "left", "right", "rear", "three_quarter"\]/);
+  assert.match(routes, /requiredSourceUploads:\s*1/);
+  assert.match(routes, /generatedForApproval:\s*\["left", "right", "rear"\]/);
 });
 
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  assert.equal(CURRENT_SCHEMA_VERSION, 47);
+  assert.equal(CURRENT_SCHEMA_VERSION, 48);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);

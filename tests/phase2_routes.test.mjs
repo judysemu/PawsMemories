@@ -130,7 +130,7 @@ test("Phase 2 API Router Suite (/api/reference-sessions)", async (t) => {
     });
     const startBody = await startRes.json();
     assert.equal(startRes.status, 201);
-    assert.equal(startBody.session.views.length, 5);
+    assert.equal(startBody.session.views.length, 4);
     const manifestHash = startBody.session.manifestHash;
 
     // C. Non-owner cannot access or approve

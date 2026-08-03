@@ -150,11 +150,13 @@ export class ModelBuildService {
       }
     }
 
-    // 6. Verify five canonical views
+    // 6. Verify Tripo's four canonical views
     const views = await findRefViews(pool, attempt.id);
-    const requiredKinds = ["front", "left", "right", "rear", "front_three_quarter"];
+    const requiredKinds = ["front", "left", "right", "rear"];
     const viewManifestItems: { viewKind: ViewKind; assetUuid: string; sha256: string }[] = [];
-    if (views.length !== requiredKinds.length) errors.push("Approved attempt must contain exactly five views");
+    if (requiredKinds.some((kind) => !views.some((view) => view.view_kind === kind))) {
+      errors.push("Approved attempt must contain front, left, right, and rear views");
+    }
     for (const kind of requiredKinds) {
       const view = views.find(v => v.view_kind === kind);
       if (!view) {
@@ -184,7 +186,7 @@ export class ModelBuildService {
       if (!reportAsset || !reportVersion || reportAsset.owner_id !== ownerId || reportVersion.asset_id !== reportAsset.id || reportVersion.sha256 !== report.report_hash) {
         errors.push("Reference report canonical identity is invalid");
       }
-      if (viewManifestItems.length === 5) {
+      if (viewManifestItems.length === 4) {
         try {
           if (computeOrderedManifestHash(viewManifestItems, report.report_hash) !== approval.manifest_hash) {
             errors.push("Approved manifest hash no longer matches its views and report");
@@ -407,7 +409,7 @@ export class ModelBuildService {
       let providerName = attempt.provider;
       if (isNewSubmission) {
         const views = await findRefViews(pool, job.reference_attempt_id);
-        const viewUrls: ModelBuildProviderInput = { frontUrl: "", leftUrl: "", rightUrl: "", rearUrl: "", threeQuarterUrl: "" };
+        const viewUrls: ModelBuildProviderInput = { frontUrl: "", leftUrl: "", rightUrl: "", rearUrl: "" };
         for (const view of views) {
           const asset = await findAssetById(pool, view.asset_id);
           const version = await findVersionById(pool, view.asset_version_id);
@@ -420,8 +422,8 @@ export class ModelBuildService {
           else if (view.view_kind === "rear") viewUrls.rearUrl = url;
           else if (view.view_kind === "front_three_quarter") viewUrls.threeQuarterUrl = url;
         }
-        if (Object.values(viewUrls).some((url) => !url)) {
-          await this.failJob(jobUuid, attemptId, "REFERENCE_URL_FAILED", "All five approved reference URLs are required", leaseOwner);
+        if ([viewUrls.frontUrl, viewUrls.leftUrl, viewUrls.rightUrl, viewUrls.rearUrl].some((url) => !url)) {
+          await this.failJob(jobUuid, attemptId, "REFERENCE_URL_FAILED", "All four approved reference URLs are required", leaseOwner);
           return;
         }
         try {

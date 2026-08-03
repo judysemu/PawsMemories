@@ -15,9 +15,9 @@ export function evaluateReferenceConsistency(
   inputMode: "text" | "photo",
   declaredScale?: string | null,
 ): { payload: ConsistencyReportPayload; hash: string } {
-  const required = ["front", "left", "right", "rear", "front_three_quarter"];
+  const required = ["front", "left", "right", "rear"];
   const viewKinds = new Set(views.map((v) => v.viewKind));
-  const hasAllFive = views.length === 5 && required.every((kind) => viewKinds.has(kind as any));
+  const hasAllViews = views.length === 4 && required.every((kind) => viewKinds.has(kind as any));
   const dimensionsValid = views.every((view) => view.widthPx >= 1024 && view.heightPx >= 1024);
 
   let scaleConfidence: ScaleConfidence = "unknown";
@@ -26,9 +26,9 @@ export function evaluateReferenceConsistency(
   const metrics = [
     {
       name: "Required View Coverage",
-      status: (hasAllFive ? "pass" : "fail") as ReportStatus,
-      score: hasAllFive ? 1 : 0,
-      details: hasAllFive ? "All five required view kinds are present." : "One or more required view kinds are missing or duplicated.",
+      status: (hasAllViews ? "pass" : "fail") as ReportStatus,
+      score: hasAllViews ? 1 : 0,
+      details: hasAllViews ? "The uploaded front and all three generated views are present." : "One or more required view kinds are missing or duplicated.",
     },
     {
       name: "Decoded Image Resolution",
@@ -45,12 +45,12 @@ export function evaluateReferenceConsistency(
   ];
 
   const payload: ConsistencyReportPayload = {
-    status: hasAllFive && dimensionsValid ? "warn" : "fail",
+    status: hasAllViews && dimensionsValid ? "warn" : "fail",
     scaleConfidence,
     summaryNote:
       inputMode === "photo"
-        ? "Five-view photo set generated. Automated checks cover file validity and resolution only; the user must verify identity before approval."
-        : "Five-view prompt set generated. Automated checks cover file validity and resolution only; the user must verify identity before approval.",
+        ? "Four-view photo set prepared. Automated checks cover file validity and resolution; customer approval accepts the generated views as the build references."
+        : "Four-view reference set prepared. Automated checks cover file validity and resolution; customer approval accepts the generated views as the build references.",
     metrics,
     crossViewIdentityScore: 0,
     cropSuitabilityScore: 0,

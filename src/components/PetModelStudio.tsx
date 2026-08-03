@@ -2,6 +2,7 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "
 import {
   authedFetch,
   createReferenceSession,
+  retryReferenceAttempt,
   startReferenceAttempt,
 } from "../api";
 import PetModelViewer from "./PetModelViewer";
@@ -96,6 +97,7 @@ interface OrderView {
   quote: { base: number; texture: number; rig: number; total: number };
   meshPolicy: { faceLimit: number; maxTriangles: number };
   facialRig: Product["facialRig"];
+  referenceSession: { sessionUuid: string; attemptsUsed: number; canRegenerate: boolean } | null;
 }
 
 interface GeneratedReferenceView {
@@ -184,14 +186,10 @@ const REFERENCE_FIELDS = [
   ["leftUrl", "Left side"],
   ["rearUrl", "Rear"],
   ["rightUrl", "Right side"],
-  ["threeQuarterUrl", "Three-quarter"],
 ] as const;
 
 const UPLOAD_FIELDS = [
   ["frontUrl", "Front photo"],
-  ["leftUrl", "Left photo"],
-  ["rearUrl", "Rear photo"],
-  ["rightUrl", "Right photo"],
 ] as const;
 
 const STYLE_PRESETS = [
@@ -238,14 +236,13 @@ export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
-  const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
+  const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(true);
   const [includeRig, setIncludeRig] = useState(true);
   const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
-  const [inputMode, setInputMode] = useState<"image" | "multi" | "generate" | "text">("image");
   const [collarSizeClass, setCollarSizeClass] = useState<CollarSizeClass>("medium_dog");
   const [neckCircumferenceMm, setNeckCircumferenceMm] = useState(400);
   const [collarWidthMm, setCollarWidthMm] = useState(25);
@@ -254,6 +251,8 @@ export default function PetModelStudio() {
   const [collarJob, setCollarJob] = useState<{ jobUuid?: string; state?: string } | null>(null);
   const [collarReadiness, setCollarReadiness] = useState<CollarReadiness | null>(null);
   const [references, setReferences] = useState<Record<string, string>>({});
+  const [referenceSessionUuid, setReferenceSessionUuid] = useState<string | null>(null);
+  const [referenceAttemptCount, setReferenceAttemptCount] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -286,7 +285,12 @@ export default function PetModelStudio() {
           const requestedView = requestedOrder
             ? orders.find((candidate) => candidate.order.orderUuid === requestedOrder)
             : undefined;
-          if (requestedView) setView(requestedView);
+          if (requestedView) {
+            setView(requestedView);
+            if (requestedView.order.referenceManifest) setReferences(requestedView.order.referenceManifest);
+            setReferenceSessionUuid(requestedView.referenceSession?.sessionUuid || null);
+            setReferenceAttemptCount(requestedView.referenceSession?.attemptsUsed || 0);
+          }
         }
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Model generator is unavailable."));
@@ -364,6 +368,8 @@ export default function PetModelStudio() {
     if (next.order.referenceManifest) {
       setReferences(next.order.referenceManifest);
     }
+    setReferenceSessionUuid(next.referenceSession?.sessionUuid || null);
+    setReferenceAttemptCount(next.referenceSession?.attemptsUsed || 0);
   }, []);
 
   const applyView = useCallback((next: OrderView) => {
@@ -434,35 +440,31 @@ export default function PetModelStudio() {
     setError(null);
     setGenerationMessage("Preparing your reference session…");
     try {
-      const sourceImages = UPLOAD_FIELDS.map(([key]) => references[key]).filter((value): value is string => Boolean(value?.trim()));
-      const sourceImage = sourceImages[0];
-      if (inputMode !== "text" && !sourceImage) {
+      const sourceImage = references.frontUrl;
+      if (!sourceImage) {
         throw new Error("Add one clear pet photo to generate the 360° views.");
       }
-      if (inputMode === "multi" && sourceImages.length < UPLOAD_FIELDS.length) {
-        throw new Error("Add four photos from different angles before generating the reference set.");
-      }
       const session = await createReferenceSession(
-        inputMode === "text" ? "text" : "photo",
-        inputMode === "text" ? selectedStyle : undefined,
+        "photo",
+        undefined,
         subjectProfile,
         sourceImage,
-        inputMode === "multi" ? sourceImages : undefined,
       );
-      setGenerationMessage("Generating the complete 360° view set…");
+      setReferenceSessionUuid(session.sessionUuid);
+      setGenerationMessage("Generating left, right, and rear views…");
       const generated = await startReferenceAttempt(session.sessionUuid, `views_${crypto.randomUUID()}`);
       const generatedViews = (generated.session.views || []) as GeneratedReferenceView[];
       const manifestHash = String(generated.session.manifestHash || "");
-      if (generatedViews.length !== 5 || !manifestHash) {
+      if (generatedViews.length !== 4 || !manifestHash) {
         throw new Error("The image generator did not return a complete 360° view set.");
       }
+      setReferenceAttemptCount(Number(generated.session.retryCount || 1));
       const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
       const generatedManifest = {
         frontUrl: byKind.get("front"),
         leftUrl: byKind.get("left"),
         rightUrl: byKind.get("right"),
         rearUrl: byKind.get("rear"),
-        threeQuarterUrl: byKind.get("front_three_quarter"),
       };
       if (Object.values(generatedManifest).some((value) => !value)) {
         throw new Error("The generated 360° view set is missing a required angle.");
@@ -493,7 +495,7 @@ export default function PetModelStudio() {
       }) as OrderView;
       setReferences(generatedManifest as Record<string, string>);
       applyView(awaitingApproval);
-      setGenerationMessage("Review the five views, then approve the exact set to build.");
+      setGenerationMessage("Review the views, then approve them or request one free remake.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
       setGenerationMessage(null);
@@ -522,14 +524,14 @@ export default function PetModelStudio() {
   });
 
   const loadReferenceFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    const emptyKeys = UPLOAD_FIELDS.map(([key]) => key).filter((key) => !references[key]);
-    files.slice(0, emptyKeys.length).forEach((file, index) => {
+    const file = event.target.files?.[0];
+    if (file) {
       void optimizeReferenceFile(file).then((dataUrl) => {
-        const key = emptyKeys[index];
-        setReferences((current) => ({ ...current, [key]: dataUrl }));
+        setReferences({ frontUrl: dataUrl });
+        setReferenceSessionUuid(null);
+        setReferenceAttemptCount(0);
       }).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not read the reference photo."));
-    });
+    }
     event.target.value = "";
   };
 
@@ -563,9 +565,77 @@ export default function PetModelStudio() {
     }).catch(() => {});
   };
 
+  const regenerateReferenceStage = async () => {
+    const stage = view?.currentStage;
+    if (!view || !stage || stage.stage !== "reference" || stage.state !== "awaiting_customer_approval") return;
+    if (!referenceSessionUuid) {
+      setError("This older reference set cannot be remade in place. Start a new pet build with the source photo.");
+      return;
+    }
+    if (referenceAttemptCount >= 2) {
+      setError("The one free remake has already been used. Start a new build with a different source photo to try again.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setGenerationMessage("Creating your one free reference remake…");
+    try {
+      await requestJson(`/api/pet-glb/orders/${view.order.orderUuid}/stages/reference/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: idempotencyKey(),
+          attemptUuid: stage.attemptUuid,
+          reason: "Customer requested the included reference-view remake.",
+        }),
+      });
+      const retried = await retryReferenceAttempt(
+        referenceSessionUuid,
+        `retry_${crypto.randomUUID()}`,
+        "Generate a new canonical left, right, and rear view set.",
+      );
+      const generatedViews = (retried.session.views || []) as GeneratedReferenceView[];
+      if (generatedViews.length !== 4 || !retried.session.manifestHash) {
+        throw new Error("The remake did not return the complete reference set.");
+      }
+      const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
+      const regeneratedManifest = {
+        frontUrl: byKind.get("front"),
+        leftUrl: byKind.get("left"),
+        rightUrl: byKind.get("right"),
+        rearUrl: byKind.get("rear"),
+      };
+      if (Object.values(regeneratedManifest).some((value) => !value)) {
+        throw new Error("The remake is missing a required view.");
+      }
+      const awaitingApproval = await requestJson(`/api/pet-glb/orders/${view.order.orderUuid}/references`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          references: regeneratedManifest,
+          referenceSessionUuid,
+        }),
+      }) as OrderView;
+      setReferenceAttemptCount(Number(retried.session.retryCount || 2));
+      setReferences(regeneratedManifest as Record<string, string>);
+      applyView(awaitingApproval);
+      setGenerationMessage("Your free remake is ready. Approve these views to start the model build.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The free reference remake could not be completed.");
+      setGenerationMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const rejectCustomerStage = () => {
     const stage = view?.currentStage;
     if (!view || !stage || stage.state !== "awaiting_customer_approval") return;
+    if (stage.stage === "reference") {
+      void regenerateReferenceStage();
+      return;
+    }
     call(`/api/pet-glb/orders/${view.order.orderUuid}/stages/${stage.stage}/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -687,19 +757,11 @@ export default function PetModelStudio() {
         <div className="space-y-4">
           <section>
             <h2 className="text-xs font-black uppercase tracking-[0.16em] text-on-surface-variant">Your pet</h2>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {(["image", "multi"] as const).map((mode) => (
-                <button key={mode} type="button" disabled={Boolean(view)} onClick={() => setInputMode(mode)}
-                  className={inputMode === mode ? "rounded-xl bg-primary px-3 py-2 text-xs font-black text-on-primary" : "rounded-xl border border-outline-variant/35 px-3 py-2 text-xs font-black"}>
-                  {mode === "image" ? "One photo" : "Four angles"}
-                </button>
-              ))}
-            </div>
             <label className="mt-3 flex min-h-24 cursor-pointer items-center justify-center rounded-2xl border-2 border-dashed border-primary/35 bg-primary/5 p-3 text-center">
-              <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={loadReferenceFiles} disabled={Boolean(view)} />
-              <span className="text-xs"><strong className="block text-sm">Choose pet photos</strong>{inputMode === "multi" ? "Four angles required: front, left, rear, and right" : "One clear full-body photo"}</span>
+              <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={loadReferenceFiles} disabled={Boolean(view)} />
+              <span className="text-xs"><strong className="block text-sm">Choose one pet photo</strong>One clear full-body front or near-front photo</span>
             </label>
-            <div className="mt-2 grid grid-cols-4 gap-1.5">
+            <div className="mt-2 grid grid-cols-1 gap-1.5">
               {UPLOAD_FIELDS.map(([key, label]) => (
                 <div key={key} className="relative aspect-square overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container">
                   {references[key]
@@ -749,7 +811,7 @@ export default function PetModelStudio() {
           </section>
 
           {!view ? (
-            <button type="button" onClick={start} disabled={busy || (!primaryReferenceReady && inputMode !== "text")}
+            <button type="button" onClick={start} disabled={busy || !primaryReferenceReady}
               className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-black text-on-primary shadow-lg disabled:opacity-40">
               {busy ? "Starting your pet…" : "Build my pet · up to " + total + " PupCoins"}
             </button>
@@ -851,7 +913,7 @@ export default function PetModelStudio() {
           {stageApprovable && (
             <section className="space-y-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs">
               <strong className="block text-sm">
-                {stage?.stage === "reference" ? "Check all five generated views" : "Review this model before continuing"}
+                {stage?.stage === "reference" ? "Check your pet from every side" : "Review this model before continuing"}
               </strong>
               <p className="text-on-surface-variant">
                 {stage?.stage === "rig"
@@ -871,8 +933,10 @@ export default function PetModelStudio() {
               <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
                 {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
-              <button type="button" onClick={rejectCustomerStage} disabled={busy} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
-                This needs a remake
+              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && (!referenceSessionUuid || referenceAttemptCount >= 2))} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
+                {stage?.stage === "reference"
+                  ? !referenceSessionUuid ? "Start a new build to remake" : referenceAttemptCount >= 2 ? "Free remake already used" : "Remake these views once — free"
+                  : "This needs a remake"}
               </button>
             </section>
           )}

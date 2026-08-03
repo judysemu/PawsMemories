@@ -12,7 +12,7 @@ export interface ModelBuildProviderInput {
   leftUrl: string;
   rightUrl: string;
   rearUrl: string;
-  threeQuarterUrl: string;
+  threeQuarterUrl?: string;
   geometry?: {
     faceLimit: number;
     texture: boolean;
@@ -164,9 +164,7 @@ async function assertPublicDns(hostname: string): Promise<void> {
 
 export class TripoModelBuildAdapter implements ModelBuildProvider {
   async start(input: ModelBuildProviderInput, _configHash: string): Promise<ModelBuildProviderResult> {
-    // Map 5 Phase 2 views to Tripo's 4-slot multiview contract:
-    // [FRONT, LEFT, BACK, RIGHT]. three_quarter is not sent because
-    // Tripo has no fifth slot; it's preserved in canonical assets.
+    // Tripo's canonical multiview contract is [FRONT, LEFT, BACK, RIGHT].
     const tripoInput: TripoJobInput = {
       imageUrl: input.frontUrl,
       views: {

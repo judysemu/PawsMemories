@@ -220,7 +220,7 @@ export async function insertAttempt(
     retryNotes?: string | null;
   },
 ): Promise<ReferenceAttemptRecord> {
-  const provider = data.provider || "gemini";
+  const provider = data.provider || "tripo";
   const [result]: any = await connection.query(
     `INSERT INTO reference_attempts
        (session_id, attempt_number, idempotency_key, provider, model, prompt_config_hash, retry_notes, state)
@@ -349,6 +349,18 @@ export async function updateAttemptProvider(
   model: string,
 ): Promise<void> {
   await connection.query("UPDATE reference_attempts SET provider = ?, model = ? WHERE id = ?", [provider, model, attemptId]);
+}
+
+export async function updateAttemptProviderTaskHandle(
+  connection: mysql.PoolConnection | mysql.Pool,
+  attemptId: number,
+  taskHandle: string,
+): Promise<void> {
+  if (!taskHandle || taskHandle.length > 255) throw new Error("Invalid reference provider task handle.");
+  await connection.query(
+    "UPDATE reference_attempts SET provider_task_handle = ? WHERE id = ? AND provider_task_handle IS NULL",
+    [taskHandle, attemptId],
+  );
 }
 
 export async function insertView(

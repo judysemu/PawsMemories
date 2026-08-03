@@ -12,7 +12,7 @@ test("model generation owns a visible busy state before reference generation sta
   const busy = studio.indexOf("setBusy(true)", start);
   const generation = studio.indexOf("startReferenceAttempt(", start);
   assert.ok(start >= 0 && busy > start && generation > busy);
-  assert.match(studio, /Generating the complete 360° view set/);
+  assert.match(studio, /Generating left, right, and rear views/);
   assert.match(studio, /aria-live="polite"/);
 });
 

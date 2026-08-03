@@ -23,7 +23,7 @@ test("Studio binds orders to durable reference sessions and never treats signed 
 
   assert.match(studio, /referenceSessionUuid:\s*session\.sessionUuid/);
   assert.match(service, /persistedManifest = resolved\.durableManifest/);
-  assert.match(service, /return resolved\.signedManifest/);
+  assert.match(service, /manifest:\s*resolved\.signedManifest/);
   assert.match(wiring, /asset:\/\/\$\{asset\.asset_uuid\}\/versions\/\$\{version\.version_number\}/);
   assert.match(repository, /reference_session_id = COALESCE/);
 });

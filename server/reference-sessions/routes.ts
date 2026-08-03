@@ -12,7 +12,7 @@ import {
   ReplaceSourcePhotoSchema,
 } from "./schemas";
 import { ReferenceSessionService, ReferenceSessionError } from "./service";
-import { GeminiReferenceImageProvider, type ReferenceImageProvider } from "./provider";
+import { TripoReferenceImageProvider, type ReferenceImageProvider } from "./provider";
 
 function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -35,6 +35,13 @@ export function createReferenceSessionsRouter(
     legacyHeaders: false,
     keyGenerator: (req) => getRequestUserPhone(req) || "missing-auth",
     message: { success: false, error: "Too many reference generation requests. Try again shortly.", code: "RATE_LIMITED" },
+  });
+
+  router.use((_req, res, next) => {
+    if (process.env.MULTIVIEW_APPROVAL_ENABLED !== "true") {
+      return res.status(403).json({ success: false, error: "Reference view generation is disabled.", code: "FEATURE_DISABLED" });
+    }
+    next();
   });
 
   /**
@@ -192,5 +199,5 @@ export function createReferenceSessionsRouter(
 }
 
 export const referenceSessionsRouter = createReferenceSessionsRouter({
-  provider: new GeminiReferenceImageProvider(),
+  provider: new TripoReferenceImageProvider(),
 });

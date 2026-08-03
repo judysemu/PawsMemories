@@ -106,8 +106,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
   }
 
   async createBaseJob(input: PetModelGenerationInput): Promise<GenerationJob> {
-    // 5 canonical views -> Tripo's 4-slot contract. threeQuarterUrl is
-    // deliberately not forwarded; see types.ts.
+    // The approved set already matches Tripo's 4-slot canonical contract.
     const providerInput = {
       frontUrl: input.frontUrl,
       leftUrl: input.leftUrl,
@@ -408,7 +407,7 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       input.leftUrl,
       input.rightUrl,
       input.rearUrl,
-      input.threeQuarterUrl,
+      input.threeQuarterUrl || "",
     ].join("|");
     return crypto.createHash("sha256").update(canonical).digest("hex");
   }

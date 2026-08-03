@@ -198,7 +198,7 @@ export default function PetGlbStoreScreen() {
                 {busy ? "Sending photos…" : "Create my pet keepsake"}
               </button>
               {!allRefsPresent && (
-                <p className="text-xs opacity-60">All five views are required before we can start.</p>
+                <p className="text-xs opacity-60">Every required view is needed before we can start.</p>
               )}
             </div>
           )}

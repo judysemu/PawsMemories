@@ -4,6 +4,7 @@ import { useCreateFlow } from "./CreateFlowContext";
 import { ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, ZoomIn, X, CheckCircle, Info } from "lucide-react";
 import {
   authedFetch,
+  approveReferenceManifest,
   createReferenceSession,
   startReferenceAttempt,
   retryReferenceAttempt,
@@ -116,10 +117,19 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
     }
   };
 
-  const continueToCustomize = () => {
+  const continueToCustomize = async () => {
     if (!multiviewSessionUuid || !manifestHash) return;
-    setState((s) => ({ ...s, sessionId: multiviewSessionUuid, candidateImageUrl: multiviewViews[0]?.signedUrl || s.candidateImageUrl }));
-    onNavigate(Screen.CREATE_CUSTOMIZE);
+    setIsGenerating(true);
+    setError(null);
+    try {
+      await approveReferenceManifest(multiviewSessionUuid, manifestHash);
+      setState((s) => ({ ...s, sessionId: multiviewSessionUuid, candidateImageUrl: multiviewViews[0]?.signedUrl || s.candidateImageUrl }));
+      onNavigate(Screen.CREATE_CUSTOMIZE);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const generateLegacyCandidate = async () => {
@@ -199,7 +209,7 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
 
       <div className="text-center mb-8">
         <h1 className="text-3xl font-black text-on-surface mb-2">
-          {multiviewViews.length > 0 ? "Your Pet's 5-View Reference" : "Preparing Your Pet"}
+          {multiviewViews.length > 0 ? "Your Pet From Every Side" : "Preparing Your Pet"}
         </h1>
         <p className="text-on-surface-variant text-lg">
           {multiviewViews.length > 0
@@ -213,10 +223,10 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <RefreshCw className="animate-spin text-primary mb-6" size={48} />
             <h3 className="text-xl font-bold text-on-surface mb-2">
-              Generating 5-View Reference...
+              Generating Three Additional Views...
             </h3>
             <p className="text-on-surface-variant">
-              Synthesizing five high-resolution views and a visual consistency report.
+              Preparing left, right, and rear views from your uploaded front photo.
             </p>
           </div>
         ) : error ? (
@@ -252,8 +262,8 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
           </div>
         ) : multiviewViews.length > 0 ? (
           <div className="w-full flex flex-col gap-6">
-            {/* 5-View Canonical Review Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {/* Front upload plus Tripo-generated left, right, and rear views. */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {multiviewViews.map((v) => (
                 <div
                   key={v.viewKind}
@@ -288,9 +298,9 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
             <div className="flex items-start gap-3 p-4 rounded-2xl bg-surface-variant/40 border border-outline-variant/30 text-xs text-on-surface-variant">
               <Info size={18} className="text-primary flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold text-on-surface mb-0.5">Pre-Build Reference Notice</p>
+                <p className="font-bold text-on-surface mb-0.5">Approve Your Pet Views</p>
                 <p>
-                  Generated hidden views are estimated angles. Pre-build consistency checks evaluate visual suitability but do not guarantee mesh, rig, print, or dimensional accuracy.
+                  If these views look right, approve them and Pawsome3D will use them as the true visual reference for your model.
                 </p>
               </div>
             </div>
@@ -355,10 +365,10 @@ export default function CreateReferenceScreen({ onNavigate }: CreateReferenceScr
             {/* Action Buttons & Pricing Disclaimer */}
             <div className="flex flex-col gap-2 pt-2 border-t border-outline-variant/30">
               <button
-                onClick={continueToCustomize}
+                onClick={() => void continueToCustomize()}
                 className="w-full py-4 px-6 rounded-2xl font-black text-on-primary bg-primary shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform flex items-center justify-center gap-2 text-base"
               >
-                Continue customizing <ChevronRight size={20} />
+                Approve views and continue <ChevronRight size={20} />
               </button>
               <p className="text-center text-xs text-on-surface-variant">
                 The exact reference manifest stays attached to this pet for asset tracking.

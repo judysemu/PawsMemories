@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 47;
+export const CURRENT_SCHEMA_VERSION = 48;
 
 export interface Migration {
   version: number;
@@ -2343,6 +2343,18 @@ export const MIGRATIONS: Migration[] = [
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
       `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pet_glb_orders' AND INDEX_NAME='idx_pet_glb_retry_source'`,
       `SET @stmt=IF(@idx_exists=0,'ALTER TABLE pet_glb_orders ADD KEY idx_pet_glb_retry_source (retry_source_order_id, created_at)','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 48,
+    name: "tripo_reference_multiview_tasks",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reference_attempts' AND COLUMN_NAME='provider_task_handle'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE reference_attempts ADD COLUMN provider_task_handle VARCHAR(255) NULL AFTER model','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @idx_exists FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reference_attempts' AND INDEX_NAME='idx_reference_provider_task'`,
+      `SET @stmt=IF(@idx_exists=0,'ALTER TABLE reference_attempts ADD KEY idx_reference_provider_task (provider, provider_task_handle)','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },

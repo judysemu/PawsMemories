@@ -77,8 +77,8 @@ test("credit recovery and reference retry preserve the current Create branch", a
   ]);
   assert.match(checkout, /onClick=\{\(\) => onNavigate\(Screen\.STORE\)\}/);
   assert.match(reference, /automaticStartRef/);
-  assert.match(reference, /if \(multiviewEnabled\) void initMultiviewSession\(\);\s*else void generateLegacyCandidate\(\);/);
   assert.match(reference, /multiviewSessionUuid \? handleMultiviewRetry\(\) : initMultiviewSession\(\)/);
   assert.match(reference, /Replace Source Photo/);
-  assert.match(reference, /multiviewEnabled \? "Generating 5-View Reference/);
+  assert.match(reference, /approveReferenceManifest\(multiviewSessionUuid, manifestHash\)/);
+  assert.match(reference, /Generating Three Additional Views/);
 });

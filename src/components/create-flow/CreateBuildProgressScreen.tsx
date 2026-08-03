@@ -111,7 +111,7 @@ export default function CreateBuildProgressScreen({ onNavigate }: CreateBuildPro
 
   const stateLabels: Record<string, { title: string; desc: string }> = {
     draft: { title: "Drafting", desc: "Initializing build job..." },
-    preflight: { title: "Preflight Checks", desc: "Verifying approved 5-view reference session..." },
+    preflight: { title: "Preflight Checks", desc: "Verifying the approved 4-view reference session..." },
     reserving: { title: "Reserving Credits", desc: "Authorizing PupCoins reservation..." },
     queued: { title: "Queued", desc: "Build request queued for provider execution..." },
     submitted: { title: "Submitted", desc: "Sent to 3D generation worker..." },
