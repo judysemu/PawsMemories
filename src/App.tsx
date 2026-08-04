@@ -1147,10 +1147,11 @@ export default function App() {
       {isAuthed && [Screen.DASHBOARD, Screen.ALBUMS, Screen.EDIT_MEMORY, Screen.REQUEST_MEMORY, Screen.SHARE_MEMORY, Screen.ALBUM_VIEW, Screen.MODELS, Screen.STORE, Screen.VOICE_TEST, Screen.BIM, Screen.PROFILE, Screen.COMMUNITY, Screen.ANIMATOR, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.PAWLISHER, Screen.FURBIN, Screen.CREATE, Screen.WAGS_INBOX].includes(currentScreen) && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 grid gap-1 rounded-t-2xl border-t border-outline-variant/30 bg-surface-container-lowest/90 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_0_rgba(68,42,34,0.08)] backdrop-blur-xl dark:bg-surface-dim/90 md:hidden"
-          // Column count follows the nav length (+1 for Help) rather than being
-          // hard-coded, so trimming MOBILE_NAV can't leave a stretched or
-          // overflowing grid again.
-          style={{ gridTemplateColumns: `repeat(${MOBILE_NAV.length + 1}, minmax(0, 1fr))` }}
+          // Column count follows the nav length rather than being hard-coded,
+          // so trimming MOBILE_NAV can't leave a stretched or overflowing grid.
+          // Help was moved to the profile overflow menu (LIVE-1 follow-up) so a
+          // paid module (Fur Reels) outranks a help link for primary navigation.
+          style={{ gridTemplateColumns: `repeat(${MOBILE_NAV.length}, minmax(0, 1fr))` }}
         >
           {MOBILE_NAV.map((item) => {
             const NavIcon = SHELL_NAV_ICONS[item.id] || HelpCircle;
@@ -1167,10 +1168,6 @@ export default function App() {
               </button>
             );
           })}
-          <button onClick={() => setShowHelpModal(true)} className="flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-on-surface-variant hover:bg-surface-variant/50">
-            <HelpCircle size={20} strokeWidth={1.9} aria-hidden="true" />
-            <span className="w-full truncate text-center text-[9px] font-bold">Help</span>
-          </button>
         </div>
       )}
 

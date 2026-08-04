@@ -43,11 +43,24 @@ test("mobile shell derives its column count from MOBILE_NAV", () => {
   // length: six items (nav + Help) rendered into five columns and squeezed
   // every label. The grid now sizes itself, so this asserts the derivation is
   // present rather than pinning a magic number that has to be edited in lockstep.
+  //
+  // LIVE-1 follow-up: Help was moved to the profile overflow menu, so the bar
+  // is now MOBILE_NAV.length columns with no trailing Help button.
   assert.match(source, /MOBILE_NAV\.map/);
   assert.match(
     source,
+    /gridTemplateColumns:\s*`repeat\(\$\{MOBILE_NAV\.length\}/,
+    "bottom bar column count must be derived from MOBILE_NAV.length"
+  );
+  assert.match(
+    source,
+    /Help was moved to the profile overflow menu/,
+    "the rationale for removing the Help button should be documented in code"
+  );
+  assert.doesNotMatch(
+    source,
     /gridTemplateColumns:\s*`repeat\(\$\{MOBILE_NAV\.length \+ 1\}/,
-    "bottom bar column count must be derived from MOBILE_NAV.length + 1 (the Help button)"
+    "bottom bar must not add a +1 column for the removed Help button"
   );
   assert.doesNotMatch(
     source,

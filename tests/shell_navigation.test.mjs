@@ -23,11 +23,14 @@ test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () 
   ]);
   // MOBILE_NAV is NOT "sidebar + Profile". Profile and Voice Test both have a
   // permanent one-tap route in the header (SHELL_ICON_NAV), so repeating them
-  // in the bottom bar spent two of five slots on duplicates — and with the Help
-  // button the row rendered six items into a five-column grid.
+  // in the bottom bar spent two of five slots on duplicates. Fur Reels
+  // (ANIMATOR) was restored to the bottom bar by LIVE-1 — it is a paid module
+  // with no other mobile entry point. Help was moved to the profile overflow
+  // menu so the bar stays at five slots.
   assert.deepEqual(MOBILE_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.PAWPRINTS,
+    Screen.ANIMATOR,
     Screen.FURBIN,
     Screen.WAGS_INBOX,
   ]);
@@ -45,12 +48,14 @@ test("mobile bottom bar only duplicates the requested Pawprints destination", ()
   );
 });
 
-test("mobile bottom bar fits its grid alongside the Help button", () => {
-  // App.tsx renders MOBILE_NAV plus a trailing Help button. Five total is the
-  // most that stays legible at phone widths.
+test("mobile bottom bar stays at five slots with Fur Reels included", () => {
+  // App.tsx renders MOBILE_NAV as the bottom bar. Help was moved to the profile
+  // overflow menu (already present in SHELL_MENU_ITEMS) so the bar no longer
+  // adds a trailing Help column. Five is the most that stays legible at phone
+  // widths, and Fur Reels — a paid module — outranks a help link.
   assert.ok(
-    MOBILE_NAV.length + 1 <= 5,
-    `bottom bar would render ${MOBILE_NAV.length + 1} columns; 5 is the maximum`
+    MOBILE_NAV.length <= 5,
+    `bottom bar would render ${MOBILE_NAV.length} columns; 5 is the maximum`
   );
 });
 

@@ -73,12 +73,8 @@ export const SIDEBAR_NAV: ShellNavigationItem[] = [
  *
  * Deliberately NOT `SIDEBAR_NAV + Profile`. Profile and Voice Test are both
  * reachable from the header's SHELL_ICON_NAV on every screen, so repeating them
- * in the bottom bar spent two of five slots on duplicates — and with the Help
- * button the row was rendering six items into a five-column grid, squeezing
- * every label. Bottom bar now carries only destinations that have no other
- * one-tap route.
- */
-/**
+ * in the bottom bar spent two of five slots on duplicates.
+ *
  * LIVE-1 (2026-08-04 deployment review): Fur Reels was being filtered out here.
  *
  * The exclusion rule above is "drop destinations that already have a one-tap
@@ -91,6 +87,11 @@ export const SIDEBAR_NAV: ShellNavigationItem[] = [
  * `item.screen === Screen.ANIMATOR ? openAnimationStudio() : ...` branch, which
  * was dead code while this filter excluded it — good evidence the removal was
  * accidental rather than intended.
+ *
+ * LIVE-1 follow-up: Help was moved from a trailing button in the bottom bar to
+ * the profile overflow menu (it was already listed in SHELL_MENU_ITEMS). A paid
+ * module (Fur Reels) outranks a help link for primary navigation, and keeping
+ * the bar at five slots preserves label legibility at 390 px.
  */
 export const MOBILE_NAV: ShellNavigationItem[] = SIDEBAR_NAV.filter(
   (item) => item.screen !== Screen.PROFILE && item.screen !== Screen.VOICE_TEST
