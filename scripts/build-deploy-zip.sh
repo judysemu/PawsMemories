@@ -22,6 +22,16 @@ node -e "import('./scripts/release-manifest-lib.mjs').then(m => { if (!m.validat
   exit 1
 }
 
+# The manifest records npmVersion but nothing validated it, so a release could
+# be cut with an npm older than package.json's engines floor and still be
+# stamped engineCompatible. Check it here for the same reason the Node line is
+# checked: the recorded provenance should be true.
+NPM_VERSION=$(npm --version)
+if [ "${NPM_VERSION%%.*}" -lt 11 ]; then
+  echo "npm $NPM_VERSION is incompatible; package.json engines require >=11."
+  exit 1
+fi
+
 COMMIT_SHA=$(git rev-parse HEAD)
 BRANCH=$(git branch --show-current)
 if [ -z "$BRANCH" ]; then BRANCH="detached"; fi

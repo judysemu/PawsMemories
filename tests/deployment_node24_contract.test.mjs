@@ -14,6 +14,30 @@ test("deployment is pinned to the supported Node 24 LTS line", () => {
   assert.equal(packageJson.overrides.sharp, "$sharp");
 });
 
+test("release packaging validates both pinned runtime versions", () => {
+  // The manifest records npmVersion; without this guard a release could be cut
+  // on npm 10 and still be stamped engineCompatible, which is how the
+  // 2026-08-04 archive ended up claiming npm 10.8.2 against an engines floor
+  // of >=11.
+  assert.match(deployScript, /validateEngineVersion\(process\.version\)/);
+  assert.match(deployScript, /engines require >=11/);
+  assert.equal(packageJson.engines.npm, ">=11");
+});
+
+test("unknown /api routes answer with JSON 404 rather than the SPA shell", () => {
+  // app.get("*") would otherwise serve index.html with a 200 for a mistyped or
+  // retired endpoint, so a failing fetch() looked successful until .json() threw.
+  const apiFallbackIndex = serverSource.indexOf('app.use("/api", (_req, res) => {');
+  const spaCatchAllIndex = serverSource.indexOf('app.get("*", serveSpaShell)');
+
+  assert.notEqual(apiFallbackIndex, -1, "the /api 404 fallback is missing");
+  assert.notEqual(spaCatchAllIndex, -1, "the SPA catch-all is missing");
+  assert.ok(
+    apiFallbackIndex < spaCatchAllIndex,
+    "the /api 404 fallback must be registered before the SPA catch-all",
+  );
+});
+
 test("Hostinger archive uses the verified local build instead of rebuilding on the host", () => {
   assert.match(deployScript, /cp -Rp dist\/\. \"\$STAGING_DIR\/dist\/\"/);
   assert.match(deployScript, /Pre-built artifact verified/);

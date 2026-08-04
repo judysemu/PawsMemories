@@ -7958,6 +7958,16 @@ async function startServer() {
   app.get("/legal/terms", (_req, res) => { legalHeaders(res); res.send(termsHtml()); });
   app.get("/legal/sms", (_req, res) => { legalHeaders(res); res.send(smsTermsHtml()); });
 
+  // Every real /api route is registered above this line. Anything still
+  // unmatched under /api is a genuine 404, and it must be answered as JSON:
+  // falling through to the SPA catch-all below returned "200 OK" with an HTML
+  // document, so a fetch() for a mistyped or retired endpoint looked like a
+  // success and then threw inside .json(). Registered before the static/SPA
+  // handlers so it applies to the vite dev middleware and production alike.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
   // Serve static assets or mount Vite middleware
   // Auto-detect production: if dist/index.html exists we're running from a build
   const distPath = path.join(process.cwd(), 'dist');
