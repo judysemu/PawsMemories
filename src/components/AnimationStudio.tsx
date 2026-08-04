@@ -181,7 +181,12 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
           <section data-dashboard-region="center" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface-container-lowest p-4 shadow-sm [scrollbar-width:thin] sm:p-5">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
               <h2 className="text-sm font-black text-on-surface">What works best</h2>
-              <ul className="mt-2 space-y-1 text-xs leading-relaxed text-on-surface-variant"><li>• One main pet and one clear action</li><li>• Four simple two-second beats</li><li>• Slow movement and one smooth camera move</li><li>• Consistent setting, lighting, and pet identity</li></ul>
+              {/* VG-6: this guidance previously said "Four simple two-second
+                  beats" and "Slow movement and one smooth camera move", which
+                  pushed people toward writing the minimal, stiff prompts the
+                  model then faithfully rendered. Safety guidance below is
+                  unchanged; the motion guidance now asks for continuity. */}
+              <ul className="mt-2 space-y-1 text-xs leading-relaxed text-on-surface-variant"><li>• One main pet and one clear action</li><li>• Describe continuous, lifelike motion — what the pet does, how it moves, and how the environment reacts</li><li>• One smooth, motivated camera move (slow push-in, arc, or parallax) — avoid static shots</li><li>• Let motion flow between beats rather than freezing between them</li><li>• Consistent setting, lighting, and pet identity</li></ul>
               <p className="mt-2 text-xs font-bold text-primary">Avoid rapid cuts, crowds, costume changes, collisions, tiny props, and complex choreography.</p>
             </div>
             <div>

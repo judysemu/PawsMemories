@@ -36,6 +36,23 @@ const HISTORIC_ROLES = [
   ["tennis-champion", "Tennis Champion", "an elegant original white tennis outfit on a grass court"],
 ] as const;
 
+/**
+ * PP-2/PP-3: the allowlisted role ids, in the exact order they appear in the
+ * 5-across x 4-down contact sheet at
+ * `/collections/historic-pawprints/historic-pawprints-20-v1.webp`.
+ *
+ * The UI slices that one sheet into per-role thumbnails by index, so this order
+ * is load-bearing — adding or reordering a role here without regenerating the
+ * sheet will show customers the wrong picture for a title.
+ *
+ * Documented counts should be derived from `HISTORIC_ROLE_IDS.length`, never
+ * hard-coded (the README previously claimed fifteen roles while this array held
+ * twenty).
+ */
+export const HISTORIC_ROLE_IDS: string[] = HISTORIC_ROLES.map(([id]) => id);
+export const HISTORIC_ROLE_SHEET_COLUMNS = 5;
+export const HISTORIC_ROLE_SHEET_ROWS = 4;
+
 export const HISTORIC_PHYSICAL_TEMPLATE_IDS = [
   "the-composer",
   "joan-of-arc",

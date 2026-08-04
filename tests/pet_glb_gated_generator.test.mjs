@@ -254,7 +254,9 @@ test("model studio accepts one photo, supports Tripo view remakes, and requires 
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  assert.equal(CURRENT_SCHEMA_VERSION, 48);
+  // MG-9 added migration 49 (avatars.resume_attempts) as the idempotency
+  // record for the legacy resumeStalledBuilds sweep.
+  assert.equal(CURRENT_SCHEMA_VERSION, 49);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);
@@ -332,11 +334,39 @@ test("the primary signed-in Create route opens the gated studio and retires wiza
 });
 
 test("the legacy PETSIM rig cap cannot silently close the separately priced pet GLB body-rig product", () => {
-  const envWithCap0 = { ...process.env, PETSIM_RIG_GLOBAL_DAILY_CAP: "0" };
+  // MG-4 made this gate fail-CLOSED, so the product must be opted into
+  // explicitly. The contract under test is unchanged: the legacy PETSIM cap
+  // must not close this separately priced product.
+  const envWithCap0 = {
+    ...process.env,
+    PET_GLB_BODY_RIG_ENABLED: "true",
+    PETSIM_RIG_GLOBAL_DAILY_CAP: "0",
+  };
   const availability = rigGenerationAvailability(envWithCap0);
   assert.equal(availability.available, true);
   assert.equal(availability.requestCap, null);
   assert.equal(availability.reason, null);
+});
+
+test("PET_GLB_BODY_RIG_ENABLED fails closed when unset (MG-4)", () => {
+  // A deploy with the variable missing must NOT silently open a paid rig path
+  // that has never passed a live verification run. This matches how
+  // MODEL_BUILD_V3_ENABLED and RIG_PIPELINE_V4_ENABLED already behave.
+  const env = { ...process.env };
+  delete env.PET_GLB_BODY_RIG_ENABLED;
+  const availability = rigGenerationAvailability(env);
+  assert.equal(availability.available, false);
+  assert.match(availability.reason, /PET_GLB_BODY_RIG_ENABLED/);
+});
+
+test("PET_GLB_BODY_RIG_ENABLED only opens on the exact string \"true\" (MG-4)", () => {
+  for (const value of ["", "1", "yes", "TRUE", "enabled", "false"]) {
+    const availability = rigGenerationAvailability({
+      ...process.env,
+      PET_GLB_BODY_RIG_ENABLED: value,
+    });
+    assert.equal(availability.available, false, `expected ${JSON.stringify(value)} to stay closed`);
+  }
 });
 
 test("PET_GLB_BODY_RIG_ENABLED=false explicitly closes the pet GLB rig product", () => {

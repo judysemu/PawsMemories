@@ -12,7 +12,17 @@ import {
 } from "../server/model-builds/types.ts";
 import { ModelBuildProviderError } from "../server/model-builds/provider.ts";
 
-test("polling uses the full ten-minute contract without real waits", async () => {
+/**
+ * MG-2 / MG-13 changed this contract deliberately:
+ *  - MG-2 raised MAX_POLL_ATTEMPTS from 120 (~10 min) to 240 (~20 min), because
+ *    multiview_to_model / texture_model / animate_rig routinely exceed ten
+ *    minutes and were being failed AND refunded while still running.
+ *  - MG-2 also adds one final poll after the loop, so a task that completed in
+ *    the last interval is not refunded as a timeout.
+ *  - MG-13 skips the sleep before the FIRST poll, so an already-successful task
+ *    no longer waits ~5s for nothing.
+ */
+test("polling uses the full twenty-minute contract without real waits", async () => {
   const sleeps = [];
   let polls = 0;
 
@@ -34,10 +44,39 @@ test("polling uses the full ten-minute contract without real waits", async () =>
     (error) => error.code === "PROVIDER_TIMEOUT",
   );
 
-  assert.equal(polls, MAX_POLL_ATTEMPTS);
-  assert.equal(sleeps.length, MAX_POLL_ATTEMPTS);
-  assert.equal(sleeps.reduce((sum, value) => sum + value, 0), 10 * 60 * 1000);
+  // MG-2: every in-loop attempt, plus the one final confirming poll.
+  assert.equal(polls, MAX_POLL_ATTEMPTS + 1);
+  // MG-13: no sleep before the first poll.
+  assert.equal(sleeps.length, MAX_POLL_ATTEMPTS - 1);
+  assert.equal(
+    sleeps.reduce((sum, value) => sum + value, 0),
+    (MAX_POLL_ATTEMPTS - 1) * POLL_INTERVAL_MS,
+  );
   assert.equal(POLL_INTERVAL_MS, 5000);
+  // MG-2: the ceiling must comfortably exceed the ten minutes that was
+  // prematurely failing legitimate Tripo tasks.
+  assert.ok(MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS >= 19 * 60 * 1000);
+});
+
+test("a task that finishes in the final interval is returned, not timed out (MG-2)", async () => {
+  let polls = 0;
+
+  const result = await pollProviderWithLease(
+    {
+      async poll() {
+        polls += 1;
+        // Never done inside the loop; completes exactly at the ceiling.
+        if (polls <= MAX_POLL_ATTEMPTS) return { done: false, progress: 99 };
+        return { done: true, glbUrl: "https://provider.invalid/late-but-valid" };
+      },
+    },
+    "tripo:task-safe-id",
+    async () => true,
+    { sleep: async () => {}, random: () => 0 },
+  );
+
+  assert.equal(result.done, true);
+  assert.equal(result.glbUrl, "https://provider.invalid/late-but-valid");
 });
 
 test("polling stops before a provider call when the lease is no longer valid", async () => {
@@ -90,7 +129,9 @@ test("documented provider throttling is retried with bounded backoff and jitter"
 
   assert.equal(result.done, true);
   assert.equal(polls, 3);
-  assert.deepEqual(sleeps, [5500, 10500, 20500]);
+  // MG-13: the leading 5500ms sleep is gone — the first poll now fires
+  // immediately. Backoff after each throttled response is unchanged.
+  assert.deepEqual(sleeps, [10500, 20500]);
   assert.ok(sleeps.every((value) => value <= 31_000));
 });
 

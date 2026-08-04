@@ -132,6 +132,9 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
       providerId: result.provider,
       providerVersion: this.providerVersion,
       providerTaskHandle: result.providerTaskHandle,
+      // MG-11: the base task IS the generation task, so it seeds the handle
+      // that every downstream rig stage must submit to Tripo.
+      baseModelTaskHandle: result.providerTaskHandle,
       model: result.model,
       configHash,
       cancelled: false,
@@ -158,16 +161,29 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
     });
   }
 
+  /**
+   * MG-11: Tripo's rig endpoints take the task id of a 3D GENERATION task, so
+   * a chained record must submit its base handle rather than its own — which,
+   * after a texture stage, is a `texture_model` handle Tripo will reject.
+   */
+  private rigSourceHandle(source: ProviderJobRecord): string {
+    if (source.stage === "base" || !source.stage) return source.providerTaskHandle;
+    if (source.baseModelTaskHandle) return source.baseModelTaskHandle;
+    throw new Error(
+      `Cannot start a rig stage from a ${source.stage} task without the originating base model task handle`,
+    );
+  }
+
   async createRigCheckJob(sourceJobId: string): Promise<GenerationJob> {
     const source = await this.requireRecord(sourceJobId);
-    const taskHandle = await startPreRigCheck(source.providerTaskHandle);
+    const taskHandle = await startPreRigCheck(this.rigSourceHandle(source));
     return this.persistChainedJob(source, taskHandle, "rig_check", {});
   }
 
   async createRigJob(sourceJobId: string, subjectProfile: SubjectProfile): Promise<GenerationJob> {
     const source = await this.requireRecord(sourceJobId);
     const rigType = rigTypeForSubject(subjectProfile);
-    const taskHandle = await this.ops.startRig(source.providerTaskHandle, rigType);
+    const taskHandle = await this.ops.startRig(this.rigSourceHandle(source), rigType);
     const job = await this.persistChainedJob(source, taskHandle, "rig", { subjectProfile, rigType, animations: ["idle", "walk"] });
     // A purchased rig is also the source for Tripo's native idle and walk
     // presets. Persisting this handle lets ordinary staged polling continue
@@ -388,6 +404,9 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
         ? process.env.TRIPO_RIG_MODEL_VERSION || "v2.5-20260210"
         : source.providerVersion,
       providerTaskHandle,
+      // MG-11: carry the originating generation task id down the whole chain.
+      baseModelTaskHandle: source.baseModelTaskHandle
+        || (source.stage === "base" ? source.providerTaskHandle : undefined),
       model: source.model,
       configHash,
       cancelled: false,

@@ -238,12 +238,15 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
         throw new Error(`Download failed: HTTP ${res.status}`);
       }
 
-      // Validate content type
+      // MG-12: content-type is advisory only. Tripo does not reliably set it,
+      // so the authoritative check is the GLB magic-byte validation performed
+      // after download. Log the mismatch rather than pretending to branch on it.
       const contentType = res.headers.get("content-type") || "";
       const validMimeTypes = ["model/gltf-binary", "application/octet-stream", "binary/octet-stream"];
       if (!validMimeTypes.some(m => contentType.includes(m))) {
-        // Tripo may not always set the right content type, so check magic bytes instead
-        // Don't fail here - we'll validate magic bytes after download
+        console.warn(
+          `[model-build] Unexpected GLB content-type "${contentType}"; relying on magic-byte validation.`,
+        );
       }
 
       // Stream with byte limit

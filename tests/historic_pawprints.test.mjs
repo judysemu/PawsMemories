@@ -38,12 +38,22 @@ test("Pawprints begins with the two approved historic products", () => {
   assert.doesNotMatch(studio, />Digital \+ Printed</);
 });
 
-test("historic chooser is a title-only click-through instead of template cards", () => {
+/**
+ * PP-2 replaced the flat twenty-item <select> (plus a decorative,
+ * non-interactive contact sheet) with a searchable, thumbnail-backed grid.
+ * The contract worth protecting is that a role is chosen from the SHIPPED
+ * owned artwork and that the chooser is filterable — not that it is a <select>.
+ */
+test("historic chooser is a searchable thumbnail grid over the owned contact sheet", () => {
   const studio = fs.readFileSync("src/components/PawprintsStudio.tsx", "utf8");
-  assert.match(studio, /historic-role-select/);
+  assert.match(studio, /historic-role-search/);
   assert.match(studio, /Choose a portrait title/);
   assert.match(studio, /historic-pawprints-20-v1\.webp/);
-  assert.doesNotMatch(studio, /categoryTemplates\.map\([\s\S]{0,500}aspect-\[16\/9\]/);
+  // Every card is a slice of the one owned sheet, keyed by allowlisted role id.
+  assert.match(studio, /HISTORIC_ROLE_IDS/);
+  assert.match(studio, /roleSheetStyle\(item\.layoutId\)/);
+  // Selecting a card still goes through the same allowlisted template chooser.
+  assert.match(studio, /onClick=\{\(\) => chooseTemplate\(item\)\}/);
 });
 
 test("historic generation sends the chosen role and user photo to the server", () => {

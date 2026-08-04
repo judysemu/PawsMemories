@@ -19,8 +19,24 @@ test("the create-video route forwards the normalized selection instead of a squa
   const end = serverSource.indexOf('app.post("/api/create-talking-video"', start);
   const route = serverSource.slice(start, end);
   assert.match(route, /normalizeVideoAspectRatio\(req\.body\?\.aspectRatio\)/);
-  assert.match(route, /config: \{ aspectRatio, durationSeconds: 8, numberOfVideos: 1 \}/);
+  // VG-1 widened this config with motion-quality levers (enhancePrompt,
+  // negativePrompt, personGeneration). The contract being protected here is
+  // that the NORMALIZED ratio is forwarded and the duration/count stay fixed —
+  // not the exact shape of the object literal, which was over-specified.
+  assert.match(route, /config:\s*\{[\s\S]*?\baspectRatio\b,[\s\S]*?\}/);
+  assert.match(route, /durationSeconds:\s*8/);
+  assert.match(route, /numberOfVideos:\s*1/);
   assert.doesNotMatch(route, /aspectRatio:\s*["']1:1["']/);
+});
+
+test("the create-video route steers Veo away from frozen output (VG-1)", () => {
+  const start = serverSource.indexOf('app.post("/api/create-video"');
+  const end = serverSource.indexOf('app.post("/api/create-talking-video"', start);
+  const route = serverSource.slice(start, end);
+  // Veo has no camera-motion parameter; the negative prompt is the only lever
+  // that constrains stiff, static, slideshow-like renders.
+  assert.match(route, /negativePrompt:\s*VEO_MOTION_NEGATIVE_PROMPT/);
+  assert.match(route, /enhancePrompt:\s*true/);
 });
 
 test("the create-video route validates a remote image and preserves its actual MIME type", () => {

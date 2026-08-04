@@ -103,6 +103,18 @@ export interface ProviderJobRecord {
    * Absent on single-shot (non-animated) jobs.
    */
   stage?: "base" | "texture" | "rig_check" | "rig" | "idle" | "walk" | "ready";
+  /**
+   * MG-11: Tripo's `animate_prerigcheck` / `animate_rig` accept a task id from
+   * a 3D GENERATION task (text_to_model, image_to_model, multiview_to_model) —
+   * not from a `texture_model` task. Chaining rig off the approved source
+   * stage's own handle therefore submitted a texture task id whenever a texture
+   * stage was purchased, which Tripo rejects (or binds to the wrong mesh).
+   *
+   * Every chained record carries the originating base-model task handle so the
+   * rig stages always submit the generation task id regardless of how many
+   * texture stages sit in between.
+   */
+  baseModelTaskHandle?: string;
   rigTaskHandle?: string;
   idleTaskHandle?: string;
   walkTaskHandle?: string;

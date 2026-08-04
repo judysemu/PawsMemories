@@ -67,7 +67,11 @@ export type ProviderEventType =
 export const MAX_BUILD_CORRECTION_ATTEMPTS = 3;
 export const MAX_GLB_DOWNLOAD_BYTES = 200 * 1024 * 1024; // 200 MB
 export const DEFAULT_LEASE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
-export const MAX_POLL_ATTEMPTS = 120;
+// MG-2: 120 attempts x 5s was a ~10 minute ceiling, which multiview_to_model,
+// texture_model and animate_rig/animate_retarget routinely exceed. Exhausting
+// the loop failed + refunded builds whose Tripo task was still running and
+// likely to succeed, orphaning the provider task. ~20 minutes on the happy path.
+export const MAX_POLL_ATTEMPTS = 240;
 export const POLL_INTERVAL_MS = 5000;
 export const POLL_JITTER_MS = 1000;
 export const MAX_PROVIDER_RETRY_DELAY_MS = 30_000;

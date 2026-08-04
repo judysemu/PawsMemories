@@ -35,7 +35,9 @@ import BimPreviewScreen from "./components/BimPreviewScreen";
 import ProfileScreen from "./components/ProfileScreen";
 import Community from "./components/Community";
 import HelpModal from "./components/HelpModal";
-const PawprintsScreen = lazy(() => import("./components/PawprintsScreen"));
+// PP-16: import the real component directly. PawprintsScreen was a 3-line
+// re-export shim, which made it easy to open the wrong file when editing.
+const PawprintsScreen = lazy(() => import("./components/PawprintsStudio"));
 const FidosStylesScreen = lazy(() => import("./components/FidosStylesScreen"));
 const FurBinScreen = lazy(() => import("./components/FurBinScreen"));
 const PrintShopScreen = lazy(() => import("./components/PrintShopScreen"));

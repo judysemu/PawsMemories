@@ -328,6 +328,33 @@ export async function findExpiredLeases(
   return rows;
 }
 
+/**
+ * MG-7: attempts stranded in `queued` with no lease.
+ *
+ * processAttempt is launched fire-and-forget. If it threw before claiming a
+ * lease — pool exhaustion on getConnection()/beginTransaction() being the
+ * realistic case — the rejection was swallowed at the call site and the row
+ * stayed `queued` forever. findExpiredLeases deliberately does not cover
+ * `queued`, so nothing re-entered processing.
+ *
+ * The age floor keeps this sweep away from jobs whose in-process worker is
+ * simply still starting up; lease claiming is transactional, so a race with a
+ * live worker is safe regardless — only one side wins the claim.
+ */
+export async function findStaleQueuedAttempts(
+  conn: mysql.PoolConnection | mysql.Pool,
+  minimumAgeSeconds = 120,
+): Promise<BuildAttemptRecord[]> {
+  const [rows] = await conn.query(
+    `SELECT * FROM model_build_attempts
+     WHERE state = 'queued'
+       AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at < NOW())
+       AND started_at < (NOW() - INTERVAL ? SECOND)`,
+    [minimumAgeSeconds],
+  ) as any;
+  return rows;
+}
+
 export async function findAmbiguousSubmissions(
   conn: mysql.PoolConnection | mysql.Pool,
 ): Promise<BuildAttemptRecord[]> {

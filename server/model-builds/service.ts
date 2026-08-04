@@ -41,6 +41,7 @@ import {
   insertAcceptance,
   findAcceptanceByJobId,
   findExpiredLeases,
+  findStaleQueuedAttempts,
   findAmbiguousSubmissions,
   findRefundPendingJobs,
   markRefundPending,
@@ -341,7 +342,27 @@ export class ModelBuildService {
 
   // ── Background Processing ─────────────────────────────────────────────
 
+  /**
+   * MG-7: processAttempt is invoked fire-and-forget, and its callers only
+   * `.catch` and log. Connection acquisition used to sit OUTSIDE the try, so a
+   * pool-exhaustion throw from getConnection()/beginTransaction() escaped
+   * before any lease was claimed and left the attempt in `queued` with no
+   * lease and no worker — invisible to findExpiredLeases and therefore
+   * unrecoverable. Everything now runs inside a guard, and stale `queued`
+   * attempts are picked up by the recurring recovery sweep (see MG-1).
+   */
   async processAttempt(ownerId: string, jobUuid: string, attemptId: number): Promise<void> {
+    try {
+      await this.processAttemptGuarded(ownerId, jobUuid, attemptId);
+    } catch (error: any) {
+      console.error(
+        `[model-build] processAttempt failed before/outside lease ownership for job ${jobUuid} attempt ${attemptId}:`,
+        error?.message || error,
+      );
+    }
+  }
+
+  private async processAttemptGuarded(ownerId: string, jobUuid: string, attemptId: number): Promise<void> {
     const pool = this.getPoolFn();
     const leaseOwner = `worker-${process.pid}-${Date.now()}`;
 
@@ -1527,8 +1548,13 @@ export class ModelBuildService {
     await this.recoverAmbiguousSubmissions();
     await this.recoverPendingRefunds();
     const expired = await findExpiredLeases(pool);
+    // MG-7: also re-enter attempts stranded in `queued` with no lease, which
+    // findExpiredLeases does not match.
+    const staleQueued = await findStaleQueuedAttempts(pool);
+    const seenAttemptIds = new Set(expired.map((attempt) => attempt.id));
+    const recoverable = [...expired, ...staleQueued.filter((attempt) => !seenAttemptIds.has(attempt.id))];
     const recoveredJobs: string[] = [];
-    for (const attempt of expired) {
+    for (const attempt of recoverable) {
       const [rows]: any = await pool.query("SELECT job_uuid, owner_id FROM model_build_jobs WHERE id = ?", [attempt.job_id]);
       if (!rows[0]) continue;
       await this.processAttempt(String(rows[0].owner_id), String(rows[0].job_uuid), attempt.id);
@@ -1780,7 +1806,41 @@ export class ModelBuildService {
     );
   }
 
+  /**
+   * MG-8: the five standard review renders are mandatory, and a single failed
+   * call used to fail AND refund the whole build — discarding an already
+   * validated GLB plus the Tripo credits that produced it. The realistic
+   * trigger is a cold or briefly unavailable Render instance, or five 1024²
+   * renders simply taking longer than the old 60s timeout. Retry with
+   * exponential backoff before giving up.
+   */
   private async renderStandardViewsWithWorker(
+    glbBuffer: Buffer,
+    maxAttempts = 3,
+  ): Promise<Record<Extract<ArtifactRole, `render_${string}`>, Buffer> | null> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let result: Record<Extract<ArtifactRole, `render_${string}`>, Buffer> | null = null;
+      try {
+        result = await this.renderStandardViewsWithWorkerOnce(glbBuffer);
+      } catch (error: any) {
+        console.warn(
+          `[model-build] Blender worker render attempt ${attempt}/${maxAttempts} threw: ${error?.message || error}`,
+        );
+      }
+      if (result && Object.keys(result).length === 5) return result;
+      if (attempt < maxAttempts) {
+        const backoffMs = 2000 * (2 ** (attempt - 1));
+        console.warn(
+          `[model-build] Blender worker render attempt ${attempt}/${maxAttempts} incomplete; retrying in ${backoffMs}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+    console.error(`[model-build] Blender worker renders failed after ${maxAttempts} attempts`);
+    return null;
+  }
+
+  private async renderStandardViewsWithWorkerOnce(
     glbBuffer: Buffer,
   ): Promise<Record<Extract<ArtifactRole, `render_${string}`>, Buffer> | null> {
     const rawWorkerUrl = String(process.env.BLENDER_WORKER_URL || "").trim().replace(/\/render$/, "").replace(/\/$/, "");
@@ -1828,10 +1888,14 @@ export class ModelBuildService {
         views: ["front", "back", "left", "right", "front_right"],
         resolution: 1024,
       }),
-      signal: AbortSignal.timeout(60000),
+      // MG-8: five 1024² renders regularly exceed 60s on a cold Render dyno.
+      signal: AbortSignal.timeout(180_000),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[model-build] Blender worker render-views returned HTTP ${res.status}`);
+      return null;
+    }
 
     const contentLength = Number(res.headers.get("content-length") || "0");
     if (contentLength > 50 * 1024 * 1024) {

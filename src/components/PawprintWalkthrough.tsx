@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MousePointer2, X, Sparkles } from "lucide-react";
 
 /**
@@ -81,20 +81,84 @@ function PetPhoto({ className = "" }: { className?: string }) {
   );
 }
 
+/**
+ * PP-14: the overlay auto-advanced every 2.1s regardless of the user's motion
+ * preference. Respect `prefers-reduced-motion: reduce` — for someone with
+ * vestibular sensitivity a self-driving animation is the exact thing the
+ * setting exists to stop.
+ */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!query) return;
+    setReduced(query.matches);
+    const listener = (event: MediaQueryListEvent) => setReduced(event.matches);
+    query.addEventListener("change", listener);
+    return () => query.removeEventListener("change", listener);
+  }, []);
+  return reduced;
+}
+
 export default function PawprintWalkthrough({ onClose, onStart }: Props) {
   const [i, setI] = useState(0);
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [playing, setPlaying] = useState(true);
   const step = STEPS[i];
   const last = i === STEPS.length - 1;
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!playing || last) return;
+    if (!playing || last || prefersReducedMotion) return;
     const t = setTimeout(
       () => setI((n) => Math.min(n + 1, STEPS.length - 1)),
       2100,
     );
     return () => clearTimeout(t);
-  }, [i, playing, last]);
+  }, [i, playing, last, prefersReducedMotion]);
+
+  /**
+   * PP-14: this was a modal in appearance only — no role, no Escape handler,
+   * and no focus containment, so keyboard and screen-reader users could tab
+   * straight out into the page behind it with no way to dismiss it.
+   */
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const container = dialogRef.current;
+    const focusables = () => Array.from(
+      container?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ) || [],
+    ).filter((element) => !element.hasAttribute("disabled"));
+
+    focusables()[0]?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last_ = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last_.focus();
+      } else if (!event.shiftKey && document.activeElement === last_) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      previouslyFocused?.focus?.();
+    };
+  }, [onClose]);
 
   const chips = [
     { e: "🕊️", l: "Loss" },
@@ -216,19 +280,28 @@ export default function PawprintWalkthrough({ onClose, onStart }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pawprint-walkthrough-title"
+      className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in"
+    >
       <button
         onClick={onClose}
+        aria-label="Close walkthrough"
         className="absolute top-4 right-4 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10"
       >
         <X size={22} />
       </button>
-      <div className="text-white/90 font-extrabold mb-3 flex items-center gap-2">
+      <div id="pawprint-walkthrough-title" className="text-white/90 font-extrabold mb-3 flex items-center gap-2">
         <Sparkles size={16} /> Make a Happy Birthday Pawprint
       </div>
 
-      {/* Phone mockup stage */}
-      <div className="relative w-[300px] h-[520px] rounded-[2rem] bg-surface border-4 border-black/30 shadow-2xl overflow-hidden">
+      {/* PP-13: a fixed 300px-wide mockup overflowed 320px devices once side
+          padding was accounted for. Clamp to the viewport and hold the aspect
+          ratio so it scales down instead of clipping. */}
+      <div className="relative w-[min(300px,calc(100vw-2rem))] aspect-[300/520] rounded-[2rem] bg-surface border-4 border-black/30 shadow-2xl overflow-hidden">
         <div className="h-9 bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">
           Pawprints — Digital Stationery
         </div>
@@ -265,16 +338,24 @@ export default function PawprintWalkthrough({ onClose, onStart }: Props) {
 
       {/* Controls */}
       <div className="mt-4 flex items-center gap-3">
-        <div className="flex gap-1.5">
+        {/* PP-14: the step dots were unlabelled 8px buttons — invisible to a
+            screen reader and below any reasonable touch target. */}
+        <div className="flex gap-1.5" role="tablist" aria-label="Walkthrough steps">
           {STEPS.map((_, k) => (
             <button
               key={k}
+              type="button"
+              role="tab"
+              aria-selected={k === i}
+              aria-label={`Step ${k + 1} of ${STEPS.length}`}
               onClick={() => {
                 setPlaying(false);
                 setI(k);
               }}
-              className={`w-2 h-2 rounded-full ${k === i ? "bg-white" : "bg-white/40"}`}
-            />
+              className="grid h-11 w-6 place-items-center"
+            >
+              <span aria-hidden className={`block w-2 h-2 rounded-full ${k === i ? "bg-white" : "bg-white/40"}`} />
+            </button>
           ))}
         </div>
       </div>

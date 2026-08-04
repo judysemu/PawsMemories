@@ -63,6 +63,18 @@ interface PetModelViewerProps {
    * on mobile when a poster is available; pass explicitly to force either way.
    */
   thumbnail?: boolean;
+  /**
+   * MG-5: report whether <model-viewer> actually fetched and parsed the GLB.
+   * The load state used to be private to this component, so a parent could
+   * offer a customer-facing "approve" action over a blank preview. Parents
+   * that gate a paid or irreversible action on the model being visible must
+   * consume this instead of assuming a rendered viewer.
+   *
+   * `loaded` is only ever true after the component's own `load` event. In
+   * thumbnail mode no WebGL context is created, so `loaded` stays false and
+   * `thumbnail` is reported true — a poster is not proof the GLB is valid.
+   */
+  onLoadStateChange?: (state: { loaded: boolean; failed: boolean; thumbnail: boolean }) => void;
 }
 
 /**
@@ -78,11 +90,13 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
   autoPlayAnimation = false,
   autoRotate = false,
   thumbnail,
+  onLoadStateChange,
 }) => {
   const [ready, setReady] = useState(
     typeof window !== "undefined" && !!(window as any).customElements?.get("model-viewer")
   );
   const [loadFailed, setLoadFailed] = useState(false);
+  const [loadSucceeded, setLoadSucceeded] = useState(false);
   const viewerRef = useRef<HTMLElement | null>(null);
   const [lowPower] = useState(() => isLowPowerDevice());
 
@@ -110,8 +124,9 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
     if (poster) viewer.setAttribute("poster", poster);
     else viewer.removeAttribute("poster");
     setLoadFailed(false);
-    const failed = () => setLoadFailed(true);
-    const loaded = () => setLoadFailed(false);
+    setLoadSucceeded(false);
+    const failed = () => { setLoadFailed(true); setLoadSucceeded(false); };
+    const loaded = () => { setLoadFailed(false); setLoadSucceeded(true); };
     viewer.addEventListener("error", failed);
     viewer.addEventListener("load", loaded);
     return () => {
@@ -119,6 +134,17 @@ const PetModelViewer: React.FC<PetModelViewerProps> = ({
       viewer.removeEventListener("load", loaded);
     };
   }, [poster, ready, src]);
+
+  // MG-5: publish the load state so a parent can gate approval on the model
+  // being genuinely on screen. Reported for thumbnail mode too, where the GLB
+  // is never fetched and `loaded` must therefore stay false.
+  useEffect(() => {
+    onLoadStateChange?.({
+      loaded: !useThumbnail && loadSucceeded,
+      failed: loadFailed,
+      thumbnail: useThumbnail,
+    });
+  }, [loadFailed, loadSucceeded, onLoadStateChange, useThumbnail]);
 
   if (useThumbnail) {
     return poster ? (

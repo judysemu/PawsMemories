@@ -16,8 +16,23 @@ test("photo scaling is bounded and offloaded with a safe fallback", () => {
 });
 
 test("selected exports prefer WebP and release large canvases", () => {
-  assert.match(studio, /canvasDataUrl\(canvas, "image\/webp", 0\.92\)/);
+  // PP-1 parameterised renderPawprint so the live preview can render the same
+  // pipeline at a lower resolution/quality. The paid full-size render keeps the
+  // original WebP-at-0.92 default.
+  assert.match(studio, /canvasDataUrl\(canvas, input\.mimeType \?\? "image\/webp", input\.quality \?\? 0\.92\)/);
   assert.match(studio, /canvas\.width = 1; canvas\.height = 1/);
+});
+
+test("the live preview renders below print resolution and never replaces the paid render (PP-1)", () => {
+  // A preview cheap enough to re-run on every edit is the entire point; if it
+  // ever rendered at print size it would be as expensive as the paid Save.
+  assert.match(studio, /const PREVIEW_WIDTH = \d+;/);
+  assert.match(studio, /const PREVIEW_HEIGHT = \d+;/);
+  const previewWidth = Number(studio.match(/const PREVIEW_WIDTH = (\d+);/)[1]);
+  const fullWidth = Number(studio.match(/const FULL_PRINT_WIDTH = (\d+);/)[1]);
+  assert.ok(previewWidth < fullWidth, "preview must be smaller than the print canvas");
+  // The paid path still renders at full print size.
+  assert.match(studio, /renderPawprint\(\{ variation, photos, title: title\.trim\(\)/);
 });
 
 test("WebGL2 compositor is progressive and never removes the 2D fallback", () => {

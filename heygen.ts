@@ -72,6 +72,21 @@ export interface HeyGenJobInput {
  * Start a HeyGen talking-photo video generation.
  * Returns the prefixed handle to store in generation_jobs.operation_name.
  */
+/**
+ * VG-7: this is a lip-sync path, not an animation path.
+ *
+ * HeyGen's `talking_photo` character animates the mouth and face over an
+ * otherwise still photograph. There is no body motion, no gesture, and no
+ * background motion available through this request shape, so output is
+ * inherently stiff by construction — that is the product, not a defect, and no
+ * prompt or config change here will make the pet move.
+ *
+ * Customers who want actual motion belong on the Veo "Fur Reels" path
+ * (POST /api/ai-video/*), which drives real camera and subject movement. If
+ * this path ever needs to feel less static, the correct lever is a subtle
+ * Ken Burns push/parallax applied in the existing ffmpeg worker after HeyGen
+ * returns, not a change to this request.
+ */
 export async function startTalkingVideo(input: HeyGenJobInput): Promise<string> {
   const voiceId = input.voiceId || process.env.HEYGEN_DEFAULT_VOICE_ID;
   if (!voiceId) {

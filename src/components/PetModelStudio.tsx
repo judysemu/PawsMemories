@@ -256,6 +256,18 @@ export default function PetModelStudio() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [rigReviewConfirmed, setRigReviewConfirmed] = useState(false);
+  // MG-5: the live P0 from the production sweep — the preview stayed blank but
+  // the customer could still approve (and pay for) the stage. Approval is now
+  // bound to <model-viewer> actually having fetched and parsed the GLB.
+  const [viewerLoaded, setViewerLoaded] = useState(false);
+  const [viewerFailed, setViewerFailed] = useState(false);
+  const handleViewerLoadState = useCallback(
+    (state: { loaded: boolean; failed: boolean; thumbnail: boolean }) => {
+      setViewerLoaded((current) => (current === state.loaded ? current : state.loaded));
+      setViewerFailed((current) => (current === state.failed ? current : state.failed));
+    },
+    [],
+  );
   const [busy, setBusy] = useState(false);
   const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -721,7 +733,19 @@ export default function PetModelStudio() {
     && stage.artifactSha256
     && stage.validationReport?.operatorReady !== false
   );
-  const canApprove = stageApprovable && (stage?.stage !== "rig" || rigReviewConfirmed);
+  // MG-5: every stage except `reference` is approved against a 3D model, so the
+  // model must be visible before approval is offered. The reference stage
+  // renders a still-image grid and has no GLB to load.
+  const requiresModelPreview = Boolean(stage && stage.stage !== "reference");
+  const modelPreviewVisible = Boolean(previewUrl) && viewerLoaded && !viewerFailed;
+  const canApprove = stageApprovable
+    && (!requiresModelPreview || modelPreviewVisible)
+    && (stage?.stage !== "rig" || rigReviewConfirmed);
+  const approvalBlockedReason = !stageApprovable || !requiresModelPreview || modelPreviewVisible
+    ? null
+    : viewerFailed
+      ? "This model could not be loaded in the viewer, so it cannot be approved yet. Try refreshing, or request a remake."
+      : "Waiting for the 3D preview to finish loading — approval unlocks once the model is on screen.";
   const selectedStages: StageKind[] = [
     "reference",
     "base",
@@ -837,6 +861,7 @@ export default function PetModelStudio() {
                 autoPlayAnimation={stage?.stage === "rig" && stage.state === "awaiting_customer_approval"}
                 autoRotate={false}
                 thumbnail={false}
+                onLoadStateChange={handleViewerLoadState}
                 className="h-full w-full"
               />
             </div>
@@ -930,7 +955,12 @@ export default function PetModelStudio() {
                   <span>I checked the neutral pose and idle/walk motion from multiple angles. No limb is bent, splayed, detached, or clipping through the body.</span>
                 </label>
               )}
-              <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
+              {approvalBlockedReason && (
+                <p role="status" className="rounded-lg border border-outline-variant/40 bg-surface/70 p-2 font-semibold text-on-surface-variant">
+                  {approvalBlockedReason}
+                </p>
+              )}
+              <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} title={approvalBlockedReason || undefined} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
                 {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
               <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !referenceSessionUuid)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">

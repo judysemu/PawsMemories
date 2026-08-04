@@ -1,5 +1,6 @@
 import type { BuildJobState } from "./types";
 import {
+  DEFAULT_LEASE_DURATION_MS,
   HANDLE_PERSIST_RETRY_BASE_MS,
   MAX_HANDLE_PERSIST_ATTEMPTS,
   MAX_POLL_ATTEMPTS,
@@ -92,6 +93,37 @@ function providerStartRetryDelayMs(failures: number, random: () => number): numb
   return base + Math.floor(boundedRandom * PROVIDER_START_RETRY_BASE_MS);
 }
 
+/**
+ * MG-3: renew the worker lease on a timer for the duration of `operation`.
+ *
+ * A failed renewal stops the heartbeat but never rejects — the caller's normal
+ * post-submission path (handle persistence / lockCurrentAttempt) already routes
+ * a lost lease to `recovery_required`, and throwing here would discard a
+ * provider task handle that the provider may well have accepted.
+ */
+export async function withLeaseHeartbeat<T>(
+  renewLease: () => Promise<boolean>,
+  operation: () => Promise<T>,
+  intervalMs: number = Math.max(1000, Math.floor(DEFAULT_LEASE_DURATION_MS / 3)),
+): Promise<T> {
+  let stopped = false;
+  const timer = setInterval(() => {
+    if (stopped) return;
+    void renewLease().then(
+      (held) => { if (!held) stopped = true; },
+      () => { /* transient renewal error: keep trying until the operation ends */ },
+    );
+  }, intervalMs);
+  if (typeof (timer as any).unref === "function") (timer as any).unref();
+
+  try {
+    return await operation();
+  } finally {
+    stopped = true;
+    clearInterval(timer);
+  }
+}
+
 export async function startProviderWithLease(
   provider: Pick<ModelBuildProvider, "start">,
   input: ModelBuildProviderInput,
@@ -108,7 +140,13 @@ export async function startProviderWithLease(
     }
 
     try {
-      return await provider.start(input, configHash);
+      // MG-3: the lease was previously only asserted at the top of each retry
+      // iteration, never while provider.start() was in flight. Multiview
+      // submissions upload four reference images sequentially, which on a slow
+      // network can outlast the 10 minute lease — the lease then expired
+      // mid-submission and the job was marked recovery_required even though
+      // Tripo had accepted the task. Renew on a heartbeat until start resolves.
+      return await withLeaseHeartbeat(assertLease, () => provider.start(input, configHash));
     } catch (error) {
       if (!(error instanceof ModelBuildProviderError)) throw error;
       const safeThrottle = error.retryable &&
@@ -138,7 +176,9 @@ export async function pollProviderWithLease(
   let retryableFailures = 0;
 
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
-    await sleep(pollDelayMs(retryableFailures, random));
+    // MG-13: don't burn a full poll interval before the first poll — a task
+    // that is already `success` used to wait ~5s for nothing.
+    if (attempt > 0) await sleep(pollDelayMs(retryableFailures, random));
     if (!await assertLease()) {
       throw new DurableModelBuildError("Build worker lease was lost", "LEASE_LOST");
     }
@@ -158,6 +198,17 @@ export async function pollProviderWithLease(
         providerError.code,
       );
     }
+  }
+
+  // MG-2: one last poll before declaring PROVIDER_TIMEOUT. The task very often
+  // completes in the window between the final in-loop poll and the ceiling
+  // being hit; refunding it there orphans a provider task that actually
+  // succeeded and produced a valid asset.
+  try {
+    const finalResult = await provider.poll(taskHandle);
+    if (finalResult.done) return finalResult;
+  } catch {
+    // Fall through to the timeout below — the poll error tells us nothing new.
   }
 
   throw new DurableModelBuildError("Provider polling timed out", "PROVIDER_TIMEOUT");

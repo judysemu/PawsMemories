@@ -149,13 +149,17 @@ export function rigGenerationAvailability(env: Record<string, string | undefined
   // CUSTOM_RIGGED_PET_GLB_V1 has its own priced stage plus durable debit,
   // provider-handle, and refund evidence. PETSIM_RIG_* belongs to the legacy
   // pet simulator and must not silently close this body-rig product.
-  const available = env.PET_GLB_BODY_RIG_ENABLED !== "false";
+  // MG-4: fail CLOSED, matching MODEL_BUILD_V3_ENABLED and RIG_PIPELINE_V4_ENABLED.
+  // Treating "anything that isn't the literal string 'false'" as enabled meant a
+  // deploy with the env var unset silently opened a paid (35 PupCoin) rig path
+  // that has never passed a live verification run.
+  const available = env.PET_GLB_BODY_RIG_ENABLED === "true";
   return {
     available,
     requestCap: null,
     costCapMicroUsd: null,
     reason: available
       ? null
-      : "Animation-ready body rigging is disabled by PET_GLB_BODY_RIG_ENABLED=false.",
+      : "Animation-ready body rigging is disabled until PET_GLB_BODY_RIG_ENABLED=true.",
   } as const;
 }

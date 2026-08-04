@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 48;
+export const CURRENT_SCHEMA_VERSION = 49;
 
 export interface Migration {
   version: number;
@@ -2357,6 +2357,22 @@ export const MIGRATIONS: Migration[] = [
       `SET @stmt=IF(@idx_exists=0,'ALTER TABLE reference_attempts ADD KEY idx_reference_provider_task (provider, provider_task_handle)','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
+  },
+  {
+    // MG-9: the legacy resumeStalledBuilds sweep re-submitted stalled avatars to
+    // Tripo every 3 minutes with no idempotency record, so repeated process
+    // recycles could fan out several duplicate paid tasks for one avatar.
+    // resume_attempts is a dedicated budget claimed atomically by that sweep.
+    // It is deliberately NOT avatars.retry_count, which is user-facing
+    // regeneration pricing state.
+    version: 49,
+    name: "avatar_resume_attempt_budget",
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='avatars' AND COLUMN_NAME='resume_attempts'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE avatars ADD COLUMN resume_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER retry_count','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+    skipWhenTableMissing: "avatars",
   },
 ];
 

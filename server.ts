@@ -41,7 +41,7 @@ import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
-import { AiVideoScriptSchema, compileEightSecondPrompt } from "./server/ai-video/scripts";
+import { AiVideoScriptSchema, compileEightSecondPrompt, VEO_MOTION_NEGATIVE_PROMPT } from "./server/ai-video/scripts";
 import { isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
 import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
@@ -113,7 +113,7 @@ import { runBuildPipeline } from "./agent/graph/orchestrator";
 import { analyzePetImage, type PetAnalysis } from "./ollama-agent";
 import { getBlenderClient } from "./agent/tools/blender_client";
 import { startTalkingVideo, pollTalkingVideo, fetchMp4AsDataUrl, isHeyGenHandle } from "./heygen";
-import { startImageTo3D, pollImageTo3D, isTripoHandle, startRig, pollTripoTask, isTripoInsufficientCredit } from "./tripo";
+import { startImageTo3D, pollImageTo3D, isTripoHandle, startRig, pollTripoTask, isTripoInsufficientCredit, TripoError } from "./tripo";
 import { checkBudget, needsRetargetFallback, type BakeStats } from "./server/rigBudget";
 import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
@@ -1083,14 +1083,42 @@ async function startServer() {
     setInterval(() => void sweepPetGlbRecovery(), 60 * 1000).unref();
     console.log("[pet-glb] mounted at /api/pet-glb");
   if (isModelBuildV3Enabled()) {
-    void modelBuildService.recoverStaleBuilds().catch((error) => {
-      console.error("[model-build recovery] Startup recovery failed:", error.message);
-    });
+    // MG-1: recovery must run on a recurring interval, not only at startup.
+    // A process recycle that kills a build worker mid-job leaves the lease to
+    // expire with nothing ever calling recovery again, stranding the job in
+    // processing/downloading/validating with credits already charged.
+    let modelBuildRecoveryActive = false;
+    const sweepModelBuildRecovery = async () => {
+      if (modelBuildRecoveryActive) return;
+      modelBuildRecoveryActive = true;
+      try {
+        await modelBuildService.recoverStaleBuilds();
+      } catch (error: any) {
+        console.error("[model-build recovery] sweep failed:", error?.message || error);
+      } finally {
+        modelBuildRecoveryActive = false;
+      }
+    };
+    void sweepModelBuildRecovery();
+    setInterval(() => void sweepModelBuildRecovery(), 60 * 1000).unref();
   }
   if (isRigPipelineV4Enabled()) {
-    void new RigPipelineService(getPool).recoverStaleRigJobs().catch((error) => {
-      console.error("[rig-pipeline recovery] Startup recovery failed:", error.message);
-    });
+    // MG-1: same recurring sweep for the V4 rig pipeline.
+    const rigRecoveryService = new RigPipelineService(getPool);
+    let rigRecoveryActive = false;
+    const sweepRigPipelineRecovery = async () => {
+      if (rigRecoveryActive) return;
+      rigRecoveryActive = true;
+      try {
+        await rigRecoveryService.recoverStaleRigJobs();
+      } catch (error: any) {
+        console.error("[rig-pipeline recovery] sweep failed:", error?.message || error);
+      } finally {
+        rigRecoveryActive = false;
+      }
+    };
+    void sweepRigPipelineRecovery();
+    setInterval(() => void sweepRigPipelineRecovery(), 60 * 1000).unref();
   }
   if (isInhouseSpatialGeneratorEnabled()) {
     startSpatialGeneratorScheduler();
@@ -4488,6 +4516,11 @@ async function startServer() {
   // past the point a healthy build would take, and NOT locked in this process —
   // and restarts the pipeline from Tripo (same path as /retry). The 45-minute
   // reaper above remains the terminal backstop if resumes keep failing.
+  // MG-9: hard ceiling on automated re-submissions per avatar. Each resume
+  // spends real Tripo credits, so the sweep gets a small budget and then defers
+  // to the 45-minute reaper / the user's explicit /retry.
+  const MAX_LEGACY_RESUME_ATTEMPTS = 2;
+
   async function resumeStalledBuilds() {
     // PHASE BO-0: retired when MODEL_BUILD_V3_ENABLED is true
     if (isModelBuildV3Enabled()) return;
@@ -4511,6 +4544,31 @@ async function startServer() {
       const avatarId = Number(row.id);
       if (avatarBuildLocks.has(avatarId)) continue; // actively building in this process
       if (!row.image_url) continue;                 // nothing to restart from
+
+      // MG-9: claim a resume slot atomically BEFORE calling startImageTo3D.
+      // Without this, every 3-minute pass (and every process recycle) could
+      // submit a brand-new Tripo task for the same avatar and spend platform
+      // credits again. The conditional UPDATE is the idempotency record: only
+      // the pass that actually increments the counter is allowed to submit.
+      let resumeClaimed = false;
+      try {
+        const [claim]: any = await getPool().query(
+          `UPDATE avatars
+              SET resume_attempts = resume_attempts + 1
+            WHERE id = ?
+              AND resume_attempts < ?
+              AND model_url IS NULL
+              AND (meshy_handle IS NULL OR meshy_handle = '')
+              AND generation_status IN ('rigging','retargeting','baking_clips','baking_sprites')`,
+          [avatarId, MAX_LEGACY_RESUME_ATTEMPTS],
+        );
+        resumeClaimed = Number(claim?.affectedRows || 0) > 0;
+      } catch (err: any) {
+        console.warn(`[Resume] Could not claim resume slot for avatar ${avatarId}: ${err?.message || err}`);
+        continue;
+      }
+      if (!resumeClaimed) continue; // budget spent, or another worker won the claim
+
       try {
         let imageUrl: string = row.image_url;
         if (imageUrl.startsWith("data:image")) {
@@ -5238,11 +5296,37 @@ async function startServer() {
     }
   });
 
-  // Poll a Tripo task (rig/retarget/gen) until done or attempts exhausted.
-  const pollTripoUntilDone = async (handle: string, tries = 60, delayMs = 5000) => {
-    for (let i = 0; i < tries; i++) {
-      const r = await pollTripoTask(handle);
-      if (r.done) return r;
+  // Poll a Tripo task (rig/retarget/gen) until done or the deadline passes.
+  //
+  // MG-10: pollTripoTask throws TripoError on a rate limit (code 2000 / HTTP
+  // 429) or any non-zero response code. This loop had no try/catch, so one
+  // transient 429 aborted the entire poll and failed a task that was still
+  // running. It also had a 60 x 5s = 5 minute ceiling, far too short for rig
+  // and retarget tasks. Retryable errors are now swallowed and retried against
+  // a wall-clock deadline, mirroring the V3 pollProviderWithLease pattern.
+  const pollTripoUntilDone = async (handle: string, tries = 240, delayMs = 5000) => {
+    const deadline = Date.now() + tries * delayMs;
+    let consecutiveErrors = 0;
+    let lastError = "Tripo task timed out.";
+
+    for (let i = 0; i < tries && Date.now() < deadline; i++) {
+      try {
+        const r = await pollTripoTask(handle);
+        consecutiveErrors = 0;
+        if (r.done) return r;
+      } catch (err: any) {
+        consecutiveErrors += 1;
+        lastError = err?.message || String(err);
+        const retryable = err instanceof TripoError
+          ? (err.retryable || err.status >= 500)
+          : true;
+        if (!retryable || consecutiveErrors >= 10) {
+          return { done: true, error: lastError, failureCode: "PROVIDER_POLL_FAILED" } as Awaited<ReturnType<typeof pollTripoTask>>;
+        }
+        // Back off harder while the provider is throttling us.
+        await new Promise((resolve) => setTimeout(resolve, delayMs * Math.min(consecutiveErrors, 4)));
+        continue;
+      }
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     return { done: false, error: "Tripo task timed out." } as Awaited<ReturnType<typeof pollTripoTask>>;
@@ -6585,7 +6669,22 @@ async function startServer() {
         // Veo 3 generates native sound. Its public API does not accept the old
         // generateAudio flag, so sound and the optional short voice line are
         // directed through the structured prompt.
-        config: { aspectRatio, durationSeconds: 8, numberOfVideos: 1 },
+        //
+        // VG-1: the config previously carried only aspectRatio/duration/count
+        // and omitted every motion-quality lever the API exposes. Veo has no
+        // dedicated camera-motion parameter — motion comes from the prompt and
+        // is constrained by the negative prompt — so an empty negativePrompt
+        // left nothing steering the model away from frozen, stiff output. This
+        // is the single highest-impact fix for "stiff and rigid" videos.
+        config: {
+          aspectRatio,
+          durationSeconds: 8,
+          numberOfVideos: 1,
+          enhancePrompt: true,
+          negativePrompt: VEO_MOTION_NEGATIVE_PROMPT,
+          // Fur Reels animates a customer's pet, never a person.
+          personGeneration: "dont_allow",
+        },
       });
 
       const operationName = (op as any).name || (op as any).operation?.name;

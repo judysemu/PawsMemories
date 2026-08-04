@@ -530,12 +530,67 @@ export interface TripoPollResult {
 /** Poll any Tripo task (generation, rig, or retarget) for its GLB output. */
 export const pollTripoTask = pollImageTo3D;
 
+/**
+ * MG-6: Tripo does not consistently flatten task output.
+ *
+ * `generate_multiview_image` was already found to namespace its results under
+ * `output.generate_multiview_image.*` (fixed for the multiview poller in
+ * c077ec0). The same shape can apply to `texture_model`, `image_to_model`,
+ * `multiview_to_model`, `animate_rig` and `animate_retarget`. Reading only the
+ * flat keys returns undefined for a namespaced payload, so a build that
+ * genuinely produced a valid GLB fails with PROVIDER_OUTPUT_MISSING.
+ *
+ * Prefer the namespaced shape, then fall back to flat.
+ */
+const TRIPO_OUTPUT_NAMESPACES = [
+  "texture_model",
+  "image_to_model",
+  "multiview_to_model",
+  "animate_rig",
+  "animate_retarget",
+] as const;
+
+function tripoOutputNamespaces(output: Record<string, unknown>): Record<string, unknown>[] {
+  const namespaces: Record<string, unknown>[] = [];
+  for (const key of TRIPO_OUTPUT_NAMESPACES) {
+    const nested = output[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      namespaces.push(nested as Record<string, unknown>);
+    }
+  }
+  return namespaces;
+}
+
 export function selectTripoGlbUrl(output: Record<string, unknown>): string | undefined {
   // Texture tasks may return both their untouched source under `model` and
   // their baked material result under `pbr_model`. Always retain the richest
   // artifact so a successful texture stage cannot quietly save the blank mesh.
-  for (const candidate of [output.pbr_model, output.model, output.model_url, output.base_model]) {
-    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  const scopes = [...tripoOutputNamespaces(output), output];
+  for (const scope of scopes) {
+    for (const candidate of [scope.pbr_model, scope.model, scope.model_url, scope.base_model]) {
+      if (typeof candidate === "string" && candidate.length > 0) return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * MG-6: the pre-rig capability check has the same namespacing exposure —
+ * `riggable` / `rig_type` may arrive under `output.animate_prerigcheck.*`.
+ */
+export function selectTripoRigCapability(
+  output: Record<string, unknown>,
+): { riggable: boolean; rigType: unknown } | undefined {
+  const prerig = output.animate_prerigcheck;
+  const scopes: Record<string, unknown>[] = [];
+  if (prerig && typeof prerig === "object" && !Array.isArray(prerig)) {
+    scopes.push(prerig as Record<string, unknown>);
+  }
+  scopes.push(output);
+  for (const scope of scopes) {
+    if (typeof scope.riggable === "boolean") {
+      return { riggable: scope.riggable, rigType: scope.rig_type };
+    }
   }
   return undefined;
 }
@@ -594,15 +649,18 @@ export async function pollImageTo3D(operationName: string): Promise<TripoPollRes
 
   if (status === "success") {
     const output = json?.data?.output || {};
-    if (typeof output.riggable === "boolean") {
+    const capability = selectTripoRigCapability(output);
+    if (capability) {
       const knownRigTypes = new Set([
         "biped", "quadruped", "hexapod", "octopod", "avian", "serpentine", "aquatic",
       ]);
-      const rigType = knownRigTypes.has(output.rig_type) ? output.rig_type : null;
+      const rigType = knownRigTypes.has(capability.rigType as string)
+        ? (capability.rigType as NonNullable<TripoPollResult["capability"]>["rigType"])
+        : null;
       return {
         done: true,
         progress: 100,
-        capability: { riggable: output.riggable, rigType },
+        capability: { riggable: capability.riggable, rigType },
       };
     }
     // Try multiple possible field names for the GLB download URL
