@@ -774,7 +774,18 @@ export default function PetModelStudio() {
       metrics={[
         { label: "Stage", value: currentStatus, tone: buildActive ? "active" : view ? "success" : "neutral" },
         { label: "Overall progress", value: view ? String(progressPercent) + "%" : "Not started", tone: buildActive ? "active" : "neutral" },
-        { label: "PupCoins", value: view ? view.order.creditsReserved : total, tone: "neutral" },
+        // LIVE-3 (2026-08-04 deployment review): this tile was labelled
+        // "PupCoins" and sat in a row with "Saved builds", so it read
+        // unmistakably as the customer's wallet balance — a shopper holding
+        // 10,005 PupCoins saw "88" and could reasonably think their balance had
+        // collapsed. It is in fact the quoted cost of the configured build
+        // (base 45 + texture 8 + rig 35), or the amount reserved once an order
+        // exists. Label it as the cost it is.
+        {
+          label: view ? "Reserved for this build" : "This build costs",
+          value: (view ? view.order.creditsReserved : total) + " PupCoins",
+          tone: "neutral",
+        },
         { label: "Saved builds", value: recentOrders.length, tone: "neutral" },
       ]}
       left={(

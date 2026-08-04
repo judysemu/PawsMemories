@@ -959,8 +959,12 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   ) : null;
 
   // Step 1: choose the keepsake first, in plain customer language.
+  // LIVE-5 (2026-08-04 deployment review): these four step containers were
+  // <main> elements rendered INSIDE App's own <main>, producing nested main
+  // landmarks. Only one main landmark may exist per page (WCAG 1.3.1 / ARIA),
+  // and a screen reader jumping "to main" landed ambiguously.
   if (!intent) return (
-    <main className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
       <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p><h1 className="mt-2 text-3xl font-black text-on-surface">How will you celebrate your pet?</h1><p className="mt-2 text-on-surface-variant">Choose a portrait you can share online, or a physical keepsake delivered to your door.</p></div>
@@ -976,13 +980,13 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
           <span className="mt-2 block text-sm leading-relaxed text-on-surface-variant">{digitalPrintedAvailable ? "Create a historic pet portrait and order it as a lasting printed keepsake." : "Physical ordering will appear here as soon as the configured print size is available."}</span>
         </button>
       </div>
-    </main>
+    </div>
   );
 
   // Step 2: choose one title from a compact click-through control. The master
   // image shows the visual range without turning the page into twenty cards.
   if (!template) return (
-    <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-8">
+    <div className="mx-auto w-full max-w-5xl px-4 pb-28 pt-8">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
       <button onClick={() => { setIntent(""); setCategory(""); }} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Keepsake type</button>
@@ -1070,12 +1074,12 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
           )}
         </>
       )}
-    </main>
+    </div>
   );
 
   // Step 3: add the pet photo after choosing the portrait title.
   if (!photosConfirmed) return (
-    <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
+    <div className="mx-auto w-full max-w-3xl px-4 pb-28 pt-8">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
       <button onClick={() => setTemplate(null)} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Portrait title</button>
@@ -1106,11 +1110,11 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
       <button type="button" onClick={() => setPhotosConfirmed(true)} disabled={photos.length === 0} className="mt-6 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-6 font-black text-on-primary disabled:opacity-40 sm:w-auto">
         Continue <ArrowRight size={18} />
       </button>
-    </main>
+    </div>
   );
 
   return (
-    <main className="mx-auto w-full max-w-[1500px] px-3 pb-28 pt-4 sm:px-5">
+    <div className="mx-auto w-full max-w-[1500px] px-3 pb-28 pt-4 sm:px-5">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
       <header className="mb-4 flex items-center gap-3 border-b border-outline-variant/30 pb-4"><button onClick={() => setTemplate(null)} className="grid h-11 w-11 place-items-center rounded-full border border-outline-variant" aria-label="Back to portrait titles"><ChevronLeft size={19} /></button><div><p className="text-xs font-bold text-primary">{CATEGORY_META[category]?.label}</p><h1 className="font-black text-on-surface">{template.name}</h1></div><span className="ml-auto hidden text-xs font-bold text-on-surface-variant sm:block">Select a variation, then save</span></header>
@@ -1323,6 +1327,6 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
           </div>
         </aside>
       </div>
-    </main>
+    </div>
   );
 }

@@ -3612,9 +3612,22 @@ async function startServer() {
   app.post("/api/streak/claim", requireAuth, async (req: AuthedRequest, res) => {
     try {
       const result = await claimDailyStreak(req.user!.phone);
-      if (!result.success) return res.status(400).json({ success: false, error: "Streak already claimed today" });
       const user = await findUserByPhone(req.user!.phone);
-      res.json({ success: true, user: toPublicUser(user) });
+      // LIVE-2 (2026-08-04 deployment review): the client fires this once per
+      // page load, so for every visit after the first each day the browser
+      // logged a red 400 and error monitoring recorded a client fault. Already
+      // having claimed today is the expected, benign, idempotent outcome — not
+      // a malformed request. Report it as a successful no-op and let the client
+      // branch on `alreadyClaimed`.
+      if (!result.success) {
+        return res.json({
+          success: true,
+          alreadyClaimed: true,
+          message: "Streak already claimed today",
+          user: toPublicUser(user),
+        });
+      }
+      res.json({ success: true, alreadyClaimed: false, user: toPublicUser(user) });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to claim streak" });
     }

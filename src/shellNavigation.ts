@@ -78,6 +78,20 @@ export const SIDEBAR_NAV: ShellNavigationItem[] = [
  * every label. Bottom bar now carries only destinations that have no other
  * one-tap route.
  */
+/**
+ * LIVE-1 (2026-08-04 deployment review): Fur Reels was being filtered out here.
+ *
+ * The exclusion rule above is "drop destinations that already have a one-tap
+ * route from the header" — which is true of Profile and Voice Test, both of
+ * which appear in SHELL_ICON_NAV. It is NOT true of ANIMATOR: SHELL_ICON_NAV is
+ * [Create, Voice Test, Pawprints, Profile], so filtering ANIMATOR left the
+ * 100-PupCoin Fur Reels module with NO entry point at all on small screens.
+ *
+ * The bottom-bar renderer in App.tsx still carries a dedicated
+ * `item.screen === Screen.ANIMATOR ? openAnimationStudio() : ...` branch, which
+ * was dead code while this filter excluded it — good evidence the removal was
+ * accidental rather than intended.
+ */
 export const MOBILE_NAV: ShellNavigationItem[] = SIDEBAR_NAV.filter(
-  (item) => item.screen !== Screen.PROFILE && item.screen !== Screen.VOICE_TEST && item.screen !== Screen.ANIMATOR
+  (item) => item.screen !== Screen.PROFILE && item.screen !== Screen.VOICE_TEST
 );

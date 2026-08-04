@@ -201,7 +201,10 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
               {field("Characters and identity", "characters")}
               {field("Motions", "motions")}
               <fieldset className="space-y-2">
-                <legend className="text-xs font-bold text-on-surface">Four timed stage directions</legend>
+                {/* LIVE-4: VG-3 relaxed the schema from a fixed 4-tuple to 3-6
+                    beats and stripped the literal 0-2s/2-4s timestamps, but this
+                    copy still promised "four timed" directions. */}
+                <legend className="text-xs font-bold text-on-surface">Stage directions, in order</legend>
                 {script.stageDirections.map((direction, index) => (
                   <input key={index} value={direction} onChange={(event) => updateStageDirection(index, event.target.value)} className="w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" aria-label={`Stage direction ${index + 1}`} />
                 ))}
@@ -230,7 +233,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
                 <button type="button" onClick={() => setAspect("9:16")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "9:16" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Portrait</button>
                 <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
               </div>
-              <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Exactly 8 seconds · four directed beats · native sound · identity protection</div>
+              <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Exactly 8 seconds · directed beats that flow together · native sound · identity protection</div>
               <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">Your finished Fur Reels are saved to your account and appear here when you return.</p>
               {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
               <button type="button" onClick={() => void generate()} disabled={!selected} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 font-extrabold text-on-primary disabled:opacity-50">

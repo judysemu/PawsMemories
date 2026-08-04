@@ -777,7 +777,20 @@ export default function App() {
 
       {/* Main Content Router viewport */}
       <CreateFlowProvider>
-      <main className={`flex min-w-0 flex-grow flex-col items-center justify-center pt-16 pb-24 md:pb-0 ${isAuthed ? 'relative w-full md:ml-56 md:w-[calc(100%-14rem)]' : 'w-full'}`}>
+      {/*
+        LIVE-6 (2026-08-04 deployment review): a keyboard or screen-reader user
+        previously had to tab through the whole header plus every sidebar
+        destination on every route change before reaching page content. WCAG
+        2.4.1 (Bypass Blocks) asks for a way past repeated navigation. The link
+        is visually hidden until focused, so it costs sighted users nothing.
+      */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-primary focus:px-4 focus:py-3 focus:font-black focus:text-on-primary focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
+      <main id="main-content" tabIndex={-1} className={`flex min-w-0 flex-grow flex-col items-center justify-center pt-16 pb-24 md:pb-0 ${isAuthed ? 'relative w-full md:ml-56 md:w-[calc(100%-14rem)]' : 'w-full'}`}>
         {/* Render public screens regardless of auth state */}
         {[Screen.DASHBOARD, Screen.LANDING_MODELS, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING].includes(currentScreen) && (
           <HomePage
