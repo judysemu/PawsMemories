@@ -200,11 +200,20 @@ export async function pollTripoImageToMultiview(handle: string): Promise<TripoMu
   }
   if (task.status !== "success") return { done: false, progress };
 
+  // Tripo namespaces multiview outputs under a sub-object keyed by the task
+  // type — output.generate_multiview_image.{front,left,back,right}_view_url —
+  // rather than flattening them onto `output` directly (confirmed against the
+  // official tripo3d Python SDK's TaskOutput.from_dict). Reading the flat
+  // fields here always returned undefined, so every generation looked like a
+  // "success with incomplete output" regardless of the source photo. Prefer
+  // the namespaced shape; fall back to a flat shape in case a future/older
+  // API version stops nesting it.
   const output = task.output || {};
-  const frontUrl = output.front_view_url;
-  const leftUrl = output.left_view_url;
-  const backUrl = output.back_view_url;
-  const rightUrl = output.right_view_url;
+  const namespaced = output.generate_multiview_image || {};
+  const frontUrl = namespaced.front_view_url || output.front_view_url;
+  const leftUrl = namespaced.left_view_url || output.left_view_url;
+  const backUrl = namespaced.back_view_url || output.back_view_url;
+  const rightUrl = namespaced.right_view_url || output.right_view_url;
   if (![frontUrl, leftUrl, backUrl, rightUrl].every((value) => typeof value === "string" && value.length > 0)) {
     return { done: true, progress: 100, error: "Tripo returned an incomplete reference set", failureCode: "PROVIDER_OUTPUT_MISSING" };
   }

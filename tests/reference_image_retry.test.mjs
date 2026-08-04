@@ -27,16 +27,27 @@ test("one Tripo task returns the uploaded front plus three generated views", asy
     }
     if (url.endsWith("/task/task_test")) {
       events.push("poll");
+      // Tripo namespaces multiview outputs under a sub-object keyed by the
+      // task type, per the official tripo3d Python SDK's TaskOutput.from_dict
+      // (output.generate_multiview_image.{front,left,back,right}_view_url) —
+      // NOT flattened onto `output` directly. This fixture previously used
+      // the flat shape, which let pollTripoImageToMultiview's bug (reading
+      // output.front_view_url instead of
+      // output.generate_multiview_image.front_view_url) go undetected: every
+      // real Tripo call returned "success" with an "incomplete reference
+      // set" regardless of the source photo.
       return Response.json({
         code: 0,
         data: {
           status: "success",
           progress: 100,
           output: {
-            front_view_url: "https://cdn.tripo3d.ai/front.png",
-            left_view_url: "https://cdn.tripo3d.ai/left.png",
-            back_view_url: "https://cdn.tripo3d.ai/back.png",
-            right_view_url: "https://cdn.tripo3d.ai/right.png",
+            generate_multiview_image: {
+              front_view_url: "https://cdn.tripo3d.ai/front.png",
+              left_view_url: "https://cdn.tripo3d.ai/left.png",
+              back_view_url: "https://cdn.tripo3d.ai/back.png",
+              right_view_url: "https://cdn.tripo3d.ai/right.png",
+            },
           },
         },
       });
