@@ -82,6 +82,21 @@ Full three-VM layout after H100 quota approval:
 CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh full
 ```
 
+The pinned source and model set is recorded in
+`models/trellis2.lock.json`. While gated model access is pending, the public
+subset can be staged on any Azure disk without claiming readiness:
+
+```bash
+TRELLIS_STAGE_ROOT=/opt/paws-model-staging ./infra/azure/scripts/stage-trellis-models.sh public-only
+```
+
+This explicit partial mode writes an `incomplete` hash manifest. After DINOv3
+and RMBG access is granted, provide a read-only `HF_TOKEN` only to the install
+process and rerun with `complete`. The token is neither written to the manifest
+nor needed by the offline serving container. The bundle location is an install
+artifact rather than an application contract; generation and finalization stay
+behind provider-neutral ports.
+
 For the verified 80 GB A100 fallback, run preflight and deployment with the
 same explicit size. The worker image compiles CUDA extensions for A100
 (SM 8.0), A10 (SM 8.6), and H100 (SM 9.0):

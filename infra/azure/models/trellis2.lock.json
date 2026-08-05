@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/microsoft/TRELLIS.2.git",
+    "revision": "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
+  },
+  "models": [
+    {
+      "repoId": "microsoft/TRELLIS.2-4B",
+      "revision": "af44b45f2e35a493886929c6d786e563ec68364d",
+      "localDir": "TRELLIS.2-4B",
+      "access": "public"
+    },
+    {
+      "repoId": "microsoft/TRELLIS-image-large",
+      "revision": "25e0d31ffbebe4b5a97464dd851910efc3002d96",
+      "localDir": "TRELLIS-image-large",
+      "access": "public",
+      "files": [
+        "README.md",
+        "ckpts/ss_dec_conv3d_16l8_fp16.json",
+        "ckpts/ss_dec_conv3d_16l8_fp16.safetensors"
+      ]
+    },
+    {
+      "repoId": "facebook/dinov3-vitl16-pretrain-lvd1689m",
+      "revision": "ea8dc2863c51be0a264bab82070e3e8836b02d51",
+      "localDir": "dinov3-vitl16-pretrain-lvd1689m",
+      "access": "manual",
+      "files": [
+        "LICENSE.md",
+        "README.md",
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json"
+      ]
+    },
+    {
+      "repoId": "briaai/RMBG-2.0",
+      "revision": "5df4c9c76d8170882c34f6986e848ee07fd0ba43",
+      "localDir": "RMBG-2.0",
+      "access": "auto",
+      "files": [
+        "BiRefNet_config.py",
+        "README.md",
+        "birefnet.py",
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json"
+      ]
+    }
+  ]
+}
