@@ -12,7 +12,8 @@ import {
   CancelBuildSchema,
 } from "./schemas";
 import { ModelBuildService, ModelBuildServiceError } from "./service";
-import { TripoModelBuildAdapter, type ModelBuildProvider } from "./provider";
+import type { ModelBuildProvider } from "./provider";
+import { createConfiguredModelBuildProvider } from "./configuredProvider";
 
 function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -231,7 +232,7 @@ export function createModelBuildsRouter(
   return router;
 }
 
-const productionProvider = new TripoModelBuildAdapter();
+const productionProvider = createConfiguredModelBuildProvider();
 export const modelBuildService = new ModelBuildService(productionProvider);
 export const modelBuildsRouter = createModelBuildsRouter({ provider: productionProvider, service: modelBuildService });
 

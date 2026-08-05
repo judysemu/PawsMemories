@@ -286,12 +286,15 @@ export function validatePetGlb(
     walk_present: by("walk_clip_exists") === true,
     animation_targets_valid: by("animation_targets_resolve") === true,
     buffers_self_contained: by("buffers_resolve") === true,
+    rig_joint_coverage: by("rig_joint_coverage") === true,
   };
 
-  // An UNMEASURED critical check BLOCKS. It is never treated as a pass.
-  const unmeasuredCritical = checks.filter((c) => c.critical && c.passed === null);
-  const operatorReady =
-    Object.values(hardGates).every(Boolean) && unmeasuredCritical.length === 0;
+  // Every critical check must pass. A false or UNMEASURED rig-profile check
+  // must not be bypassed merely because it was omitted from an older hard-gate
+  // aggregate.
+  const criticalNotReady = checks.filter((c) => c.critical && c.passed !== true);
+  const unmeasuredCritical = criticalNotReady.filter((c) => c.passed === null);
+  const operatorReady = Object.values(hardGates).every(Boolean) && criticalNotReady.length === 0;
 
   if (unmeasuredCritical.length) reasonCodes.push("REPEATED_UNKNOWN");
 

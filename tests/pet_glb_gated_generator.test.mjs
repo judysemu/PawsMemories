@@ -15,7 +15,7 @@ const {
 } = await import("../server/pet-generation/contracts.ts");
 const { TripoPetGenerationAdapter } = await import("../server/pet-generation/tripoAdapter.ts");
 const { InMemoryJobStore } = await import("../server/pet-generation/provider.ts");
-const { validatePetGlbStage } = await import("../server/pet-generation/validation.ts");
+const { validatePetGlb, validatePetGlbStage } = await import("../server/pet-generation/validation.ts");
 const { PetGlbStageRepository } = await import("../server/pet-generation/stageRepository.ts");
 const { PET_GLB_STAGE_PRICES, petGlbTotalCost } = await import("../src/pricing.ts");
 const { MIGRATIONS, CURRENT_SCHEMA_VERSION } = await import("../server/migrations/runner.ts");
@@ -213,6 +213,17 @@ test("rig validation blocks missing promised animation evidence", () => {
   });
   assert.equal(report.operatorReady, false);
   assert.ok(report.reasonCodes.includes("ANIM_RETARGET"));
+});
+
+test("full delivery validation blocks a rig that misses the selected joint profile", () => {
+  const report = validatePetGlb(
+    modelGlb({ triangles: 8000, texture: true, rig: true }),
+    { rigProfileJoints: ["root", "spine", "tail_required"] },
+  );
+  assert.equal(report.checks.find((check) => check.id === "rig_joint_coverage").passed, false);
+  assert.equal(report.hardGates.rig_joint_coverage, false);
+  assert.equal(report.operatorReady, false);
+  assert.ok(report.reasonCodes.includes("RIG_HIERARCHY"));
 });
 
 test("SmartMesh triangle target is advisory when Tripo chooses topology", () => {

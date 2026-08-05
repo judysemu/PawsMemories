@@ -74,8 +74,21 @@ Full three-VM layout after H100 quota approval:
 CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh full
 ```
 
-The script uses `/Users/robert/.ssh/id_ed25519.pub` by default and restricts SSH
-to the current public IP. Override with `AZURE_SSH_PUBLIC_KEY_FILE` or
+For the verified 80 GB A100 fallback, run preflight and deployment with the
+same explicit size. The worker image compiles CUDA extensions for A100
+(SM 8.0), A10 (SM 8.6), and H100 (SM 9.0):
+
+```bash
+AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 ./infra/azure/scripts/preflight.sh
+CONFIRM_AZURE_SPEND=YES AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 ./infra/azure/scripts/deploy.sh full
+```
+
+The A100 and H100 families both require quota. A failed self-service quota
+request is terminal, even when the portal previously showed it as processing;
+open an Azure Support quota request or select another verified region/SKU.
+
+The script uses `$HOME/.ssh/id_ed25519.pub` by default and restricts SSH to the
+current public IPv4 address. Override with `AZURE_SSH_PUBLIC_KEY_FILE` or
 `AZURE_ADMIN_IP` when necessary.
 
 ## Service readiness contract
@@ -85,7 +98,12 @@ ready, verify separately:
 
 - Core liveness and authenticated backend readiness.
 - GPU driver, CUDA 12.4-compatible runtime, and `nvidia-smi`.
-- TRELLIS.2 model load and a real image-to-GLB job.
+- TRELLIS.2 model load and a real image-to-GLB job. Model installation also
+  downloads the pinned TRELLIS-image-large decoder, DINOv3, and RMBG-2.0
+  dependencies. The DINOv3 and RMBG repositories require accepted Hugging Face
+  access and an `HF_TOKEN` in `/opt/paws-gpu/secrets/model-download.env`.
+  Keep that install-only token out of `trellis.env`; serving stays offline after
+  installation and needs only its worker authentication secret.
 - GLB geometry, PBR textures, finite transforms, and no external URIs.
 - Blender worker health plus a real rig/animation fixture.
 - Private core-to-GPU connectivity and rejection from the public internet.

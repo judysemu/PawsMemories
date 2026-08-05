@@ -23,6 +23,8 @@ MAX_UPLOAD_BYTES = int(os.environ.get("TRELLIS_MAX_UPLOAD_BYTES", str(25 * 1024 
 MAX_IMAGE_PIXELS = int(os.environ.get("TRELLIS_MAX_IMAGE_PIXELS", "40000000"))
 WORKER_SECRET = os.environ.get("WORKER_SHARED_SECRET", "").strip()
 PRELOAD_MODEL = os.environ.get("TRELLIS_PRELOAD", "true").lower() == "true"
+MODEL_REVISION = os.environ.get("TRELLIS_MODEL_REVISION", "unknown")
+SOURCE_REVISION = os.environ.get("TRELLIS_SOURCE_REVISION", "unknown")
 
 if not WORKER_SECRET:
     raise RuntimeError("WORKER_SHARED_SECRET is required")
@@ -216,14 +218,20 @@ def readyz():
     except Exception:
         cuda_ready = False
         gpu_name = None
-    ready = cuda_ready and MODEL_PATH.is_dir() and pipeline_error is None
+    ready = (
+        cuda_ready
+        and MODEL_PATH.is_dir()
+        and pipeline is not None
+        and pipeline_error is None
+    )
     body = {
         "status": "ready" if ready else "not_ready",
         "cuda": cuda_ready,
         "gpu": gpu_name,
         "modelPresent": MODEL_PATH.is_dir(),
         "modelLoaded": pipeline is not None,
-        "modelRevision": "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+        "modelRevision": MODEL_REVISION,
+        "sourceRevision": SOURCE_REVISION,
         "error": pipeline_error,
     }
     return JSONResponse(status_code=200 if ready else 503, content=body)

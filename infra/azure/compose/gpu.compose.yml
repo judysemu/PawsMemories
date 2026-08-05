@@ -5,29 +5,53 @@ services:
       context: ../../../trellis-worker
       args:
         TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+        TORCH_CUDA_ARCH_LIST: "8.0;8.6;9.0"
     image: paws-trellis2:75fbf018
     user: "10001:10001"
+    env_file:
+      - /opt/paws-gpu/secrets/model-download.env
     environment:
       HF_HOME: /models/huggingface
     volumes:
       - /opt/paws-gpu/models:/models
     command:
-      - /opt/conda/bin/conda
-      - run
-      - --no-capture-output
-      - -n
-      - trellis2
-      - huggingface-cli
-      - download
-      - microsoft/TRELLIS.2-4B
-      - --local-dir
-      - /models/TRELLIS.2-4B
+      - /bin/bash
+      - -euo
+      - pipefail
+      - -c
+      - |
+        hf_download() {
+          /opt/conda/bin/conda run --no-capture-output -n trellis2 \
+            huggingface-cli download "$@"
+        }
+        hf_download microsoft/TRELLIS.2-4B \
+          --revision af44b45f2e35a493886929c6d786e563ec68364d \
+          --local-dir /models/TRELLIS.2-4B
+        hf_download microsoft/TRELLIS-image-large \
+          ckpts/ss_dec_conv3d_16l8_fp16.json \
+          ckpts/ss_dec_conv3d_16l8_fp16.safetensors \
+          --revision 25e0d31ffbebe4b5a97464dd851910efc3002d96 \
+          --local-dir /models/TRELLIS-image-large
+        hf_download facebook/dinov3-vitl16-pretrain-lvd1689m \
+          --revision ea8dc2863c51be0a264bab82070e3e8836b02d51 \
+          --local-dir /models/dinov3-vitl16-pretrain-lvd1689m
+        hf_download briaai/RMBG-2.0 \
+          --revision 5df4c9c76d8170882c34f6986e848ee07fd0ba43 \
+          --local-dir /models/RMBG-2.0
+        patched_pipeline="$(mktemp /models/TRELLIS.2-4B/pipeline.json.XXXXXX)"
+        jq \
+          '.args.models.sparse_structure_decoder = "../TRELLIS-image-large/ckpts/ss_dec_conv3d_16l8_fp16"
+           | .args.image_cond_model.args.model_name = "/models/dinov3-vitl16-pretrain-lvd1689m"
+           | .args.rembg_model.args.model_name = "/models/RMBG-2.0"' \
+          /models/TRELLIS.2-4B/pipeline.json > "$${patched_pipeline}"
+        mv "$${patched_pipeline}" /models/TRELLIS.2-4B/pipeline.json
 
   trellis-api:
     build:
       context: ../../../trellis-worker
       args:
         TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+        TORCH_CUDA_ARCH_LIST: "8.0;8.6;9.0"
     image: paws-trellis2:75fbf018
     restart: unless-stopped
     env_file:
@@ -37,6 +61,8 @@ services:
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
       TRELLIS_MODEL_PATH: /models/TRELLIS.2-4B
+      TRELLIS_MODEL_REVISION: af44b45f2e35a493886929c6d786e563ec68364d
+      TRELLIS_SOURCE_REVISION: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
       TRELLIS_JOBS_DIR: /jobs
       TRELLIS_PRELOAD: "true"
     ports:

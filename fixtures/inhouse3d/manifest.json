@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "paws-valid-mesh-no-production-features",
+      "root": "paws",
+      "path": "fixtures/1m-cube.glb",
+      "expected": { "parse": true, "mesh": true, "texture": false, "rig": false, "animation": false }
+    },
+    {
+      "id": "paws-valid-container-missing-mesh",
+      "root": "synthetic",
+      "path": "valid-empty",
+      "expected": { "parse": true, "mesh": false, "texture": false, "rig": false, "animation": false }
+    },
+    {
+      "id": "gibi-good-rig-texture-animations",
+      "root": "gibi",
+      "path": "assets/source-models/ammo-dog.glb",
+      "optional": true,
+      "expected": { "parse": true, "mesh": true, "texture": true, "rig": true, "animation": true }
+    },
+    {
+      "id": "gibi-good-rig-texture-no-animation",
+      "root": "gibi",
+      "path": "assets/source-models/shiba-in.glb",
+      "optional": true,
+      "expected": { "parse": true, "mesh": true, "texture": true, "rig": true, "animation": false }
+    },
+    {
+      "id": "gibi-good-static-textured-mesh",
+      "root": "gibi",
+      "path": "assets/source-models/luxurydoghouse.glb",
+      "optional": true,
+      "expected": { "parse": true, "mesh": true, "texture": true, "rig": false, "animation": false }
+    },
+    {
+      "id": "synthetic-malformed-glb",
+      "root": "synthetic",
+      "path": "malformed",
+      "expected": { "parse": false, "mesh": false, "texture": false, "rig": false, "animation": false }
+    }
+  ]
+}

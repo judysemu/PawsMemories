@@ -18,7 +18,8 @@ subscription_id="${AZURE_SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
 location="${AZURE_LOCATION:-eastus}"
 resource_group="${AZURE_RESOURCE_GROUP:-Trellis}"
 prefix="${AZURE_PREFIX:-pawstrellis}"
-ssh_key_file="${AZURE_SSH_PUBLIC_KEY_FILE:-/Users/robert/.ssh/id_ed25519.pub}"
+gpu_vm_size="${AZURE_GPU_VM_SIZE:-Standard_NC40ads_H100_v5}"
+ssh_key_file="${AZURE_SSH_PUBLIC_KEY_FILE:-${HOME}/.ssh/id_ed25519.pub}"
 
 if [[ ! -f "$ssh_key_file" ]]; then
   echo "Missing SSH public key: $ssh_key_file"
@@ -26,10 +27,17 @@ if [[ ! -f "$ssh_key_file" ]]; then
 fi
 
 admin_ip="${AZURE_ADMIN_IP:-$(curl -fsSL https://api.ipify.org)}"
-if [[ ! "$admin_ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
-  echo "Could not resolve a safe administrator IP address"
+if [[ ! "$admin_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  echo "Could not resolve a valid IPv4 administrator address"
   exit 1
 fi
+IFS='.' read -r octet1 octet2 octet3 octet4 <<< "$admin_ip"
+for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+  if (( 10#$octet > 255 )); then
+    echo "Could not resolve a valid IPv4 administrator address"
+    exit 1
+  fi
+done
 admin_cidr="${admin_ip}/32"
 ssh_public_key="$(<"$ssh_key_file")"
 
@@ -54,6 +62,7 @@ az deployment sub create \
     location="$location" \
     resourceGroupName="$resource_group" \
     prefix="$prefix" \
+    gpuVmSize="$gpu_vm_size" \
     sshPublicKey="$ssh_public_key" \
     adminSourceCidr="$admin_cidr" \
     deployGpuVm="$deploy_gpu" \

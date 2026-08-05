@@ -152,6 +152,19 @@ resource coreNsg 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
           destinationPortRange: '443'
         }
       }
+      {
+        name: 'DenyVnetInbound'
+        properties: {
+          priority: 200
+          access: 'Deny'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+        }
+      }
     ]
   }
 }
@@ -176,6 +189,19 @@ resource gpuNsg 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
             '8000'
             '10000'
           ]
+        }
+      }
+      {
+        name: 'DenyOtherVnetInbound'
+        properties: {
+          priority: 200
+          access: 'Deny'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
         }
       }
     ]
@@ -214,6 +240,19 @@ resource gibiWorldNsg 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
             '80'
             '443'
           ]
+        }
+      }
+      {
+        name: 'DenyVnetInbound'
+        properties: {
+          priority: 200
+          access: 'Deny'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
         }
       }
     ]
