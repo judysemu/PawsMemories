@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:24 MDT
+Last updated: 2026-08-05 10:30 MDT
 
 ## Definition of done
 
@@ -21,15 +21,16 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 - The gated DINOv3/RMBG bundle contains 9 scanned text/code/config files with zero private-key, live-token, Azure-connection-string, credential-URL, or email-shaped flags. No candidate values or filenames were printed.
 - The first full worker image `7a3dbcc` compiled successfully but is rejected: `pip check` failed and importing Transformers raised an error because Hugging Face Hub 0.34.4 was incompatible with Transformers 5.14.1.
 - Commit `ab389ca` pins the compatible runtime pair, adds a mandatory `pip check`, and separates the expensive CUDA-extension layer from the small runtime layer. Its persistent Azure build passed and produced the candidate image `paws-trellis2:75fbf018-ab389ca` at 9,112,738,036 bytes with no broken package requirements. The candidate is rejected pending repair because offline smoke tests found the TRELLIS source missing from Python's import path and CuMesh loading an older Conda `libstdc++` without `GLIBCXX_3.4.30`.
+- Commit `b74ca0c` applies the verified runtime-only repair while preserving the cached CUDA-extension layer. Persistent Azure build unit `paws-trellis-build-b74ca0c` exited successfully and produced `paws-trellis2:75fbf018-b74ca0c` at 9,112,739,312 bytes. No deployability is claimed until it passes offline smoke tests; provenance currently rests on the immutable build-context check and tag because the image has no source-revision label.
 - Existing Azure Blender proof for an imported textured pet remains valid: 16-bone rig, 16,085 weighted vertices, zero unweighted islands, 15 clips, and saved `idle` and `walk` animations. This proves rig/animation for an existing GLB, not image-to-mesh generation.
 - Local strict mode blocks known Tripo/fal calls and legacy external-generation routes before their handlers. Production still runs the older external-provider release and has not been cut over.
 - The active worktree is expected to remain clean after each checkpoint. Local `main` is intentionally ahead of `origin/main`; nothing in this handoff claims a production deployment.
 
 ## Current blocker and next action
 
-1. Finish and smoke-test the corrected `ab389ca` worker image without a GPU.
-2. Package the accepted image into the private Azure cache with hash readback.
-3. Obtain compatible Azure GPU quota and allocate the private GPU worker.
+1. Package the CPU-accepted `b74ca0c` image into the private Azure cache with hash readback.
+2. Obtain 24 `NCADS_A100_v4` family vCPUs in East US and allocate the private GPU worker.
+3. Prove the remaining `o_voxel`/FlexGEMM imports on the NVIDIA driver.
 4. Load all four local models with outbound model access disabled.
 5. Run one real pet image through TRELLIS, Blender rigging, animation bake, and final GLB validation.
 6. Only after that proof, deploy the strict in-house customer path and verify production with external provider calls disabled.
@@ -57,6 +58,13 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:21 MDT — MIXED — Ephemeral C++ runtime repair probe: redirecting Conda's `libstdc++.so.6` to Ubuntu's installed runtime cleared the `GLIBCXX_3.4.30` error and allowed TRELLIS, FlashAttention, nvdiffrast, and CuMesh imports to proceed. Importing FlexGEMM then reached Triton and correctly stopped because the core VM has zero active GPU drivers. The library repair is viable; FlexGEMM still requires a real GPU import test.
 - 2026-08-05 10:24 MDT — PASS — Runtime repair regression test: 3/3 immutable model/runtime/security tests passed and the full TypeScript check passed. The worker now exposes `/opt/trellis2` on Python's import path and verifies then selects Ubuntu's `GLIBCXX_3.4.30` C++ runtime after the reusable CUDA-extension layer.
 - 2026-08-05 10:24 MDT — PASS — Runtime repair checkpoint pre-commit TypeScript verification passed with clean types. The repair, its regression assertions, and all accumulated handoff evidence were staged together.
+- 2026-08-05 10:26 MDT — PASS — Active Azure billing classification check: the CLI-selected subscription is enabled under the Sponsored offer with its spending limit off. The Marketplace page labeled “Free trial” is not proof that the active Trellis subscription is a free-trial subscription; compatible GPU-family quota remains the actual provisioning gate.
+- 2026-08-05 10:27 MDT — PASS — Immutable Azure build-context transfer: committed revision `b74ca0c` was archived into its own remote directory, and the worker Dockerfile SHA-256 matched the committed local source exactly. No uncommitted handoff content entered the image context.
+- 2026-08-05 10:28 MDT — PASS — Corrected worker image build: persistent unit result `success` with exit status 0; image export, naming, and unpack completed. Candidate size is 9,112,739,312 bytes. The core host retained about 152 GB disk and 30.6 GB memory available with zero swap use.
+- 2026-08-05 10:29 MDT — MIXED / GPU TEST REQUIRED — Offline all-module import with Docker networking disabled passed the repaired Python path, C++ symlink, and package dependency check. Import progressed through TRELLIS and the compiled libraries until `o_voxel` loaded FlexGEMM; Triton then reported zero active drivers on the CPU-only core host. This is the expected GPU boundary, not evidence of a passing GPU runtime; `o_voxel`/FlexGEMM must import again on the allocated NVIDIA worker.
+- 2026-08-05 10:29 MDT — PASS — CPU-safe offline import smoke with Docker networking disabled: TRELLIS, FlashAttention, nvdiffrast, and CuMesh imported successfully. Exact assertions passed for PyTorch `2.6.0+cu124`, Transformers `5.14.1`, Hugging Face Hub `1.26.0`, and CUDA build `12.4`.
+- 2026-08-05 10:30 MDT — PASS — Offline worker service/auth smoke: with no Docker network, no model mount, and preload disabled, `/healthz` returned 200; unauthenticated `/readyz` returned 401; authenticated `/readyz` returned 503 with `not_ready`. This proves startup and fail-closed authorization/readiness behavior on the CPU host without falsely claiming GPU/model readiness.
+- 2026-08-05 10:30 MDT — PASS — Simple status tracker readback: the local HTTP page serves the corrected image result, exact candidate byte count, and the 24-vCPU `NCADS_A100_v4` quota action. Three expected sections matched the live response.
 
 ## Operational references
 
@@ -66,4 +74,4 @@ All entries record evidence, not intent. Secret values are never included.
 - Model lock: `infra/azure/models/trellis2.lock.json`
 - Secure gated staging helper: `infra/azure/scripts/complete-trellis-gated-staging.sh`
 - Worker Dockerfile: `trellis-worker/Dockerfile`
-- Active corrected build unit: `paws-trellis-build-ab389ca`
+- Active corrected build unit: `paws-trellis-build-b74ca0c`
