@@ -70,6 +70,7 @@ test("staging code never embeds a Hugging Face credential", () => {
     path.join(ROOT, "infra/azure/scripts/stage_trellis_models.py"),
     path.join(ROOT, "infra/azure/scripts/complete-trellis-gated-staging.sh"),
     path.join(ROOT, "infra/azure/scripts/scan-model-sensitive-strings.sh"),
+    path.join(ROOT, "infra/azure/scripts/cache-trellis-worker-image.sh"),
   ];
   const combined = stagingFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
   assert.doesNotMatch(combined, /hf_[A-Za-z0-9]{20,}/);
@@ -77,4 +78,20 @@ test("staging code never embeds a Hugging Face credential", () => {
   assert.match(combined, /IFS= read -r HF_TOKEN/);
   assert.match(combined, /--interactive/);
   assert.doesNotMatch(combined, /docker_environment\+?=.*--env HF_TOKEN/);
+});
+
+test("worker image cache uses managed identity and verifies a private readback", () => {
+  const cacheScript = fs.readFileSync(
+    path.join(ROOT, "infra/azure/scripts/cache-trellis-worker-image.sh"),
+    "utf8",
+  );
+
+  assert.match(cacheScript, /AZCOPY_AUTO_LOGIN_TYPE=MSI/);
+  assert.match(cacheScript, /--from-to=LocalBlob --overwrite=false/);
+  assert.match(cacheScript, /--from-to=BlobLocal --overwrite=true/);
+  assert.match(cacheScript, /sha256sum "\$archive_part"/);
+  assert.match(cacheScript, /cmp --silent "\$manifest_path" "\$manifest_part"/);
+  assert.match(cacheScript, /valuesPrinted: false/);
+  assert.doesNotMatch(cacheScript, /[?&](?:sig|se|sp|sv)=/i);
+  assert.doesNotMatch(cacheScript, /echo .*storage_account/);
 });

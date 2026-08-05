@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:30 MDT
+Last updated: 2026-08-05 10:36 MDT
 
 ## Definition of done
 
@@ -65,6 +65,10 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:29 MDT — PASS — CPU-safe offline import smoke with Docker networking disabled: TRELLIS, FlashAttention, nvdiffrast, and CuMesh imported successfully. Exact assertions passed for PyTorch `2.6.0+cu124`, Transformers `5.14.1`, Hugging Face Hub `1.26.0`, and CUDA build `12.4`.
 - 2026-08-05 10:30 MDT — PASS — Offline worker service/auth smoke: with no Docker network, no model mount, and preload disabled, `/healthz` returned 200; unauthenticated `/readyz` returned 401; authenticated `/readyz` returned 503 with `not_ready`. This proves startup and fail-closed authorization/readiness behavior on the CPU host without falsely claiming GPU/model readiness.
 - 2026-08-05 10:30 MDT — PASS — Simple status tracker readback: the local HTTP page serves the corrected image result, exact candidate byte count, and the 24-vCPU `NCADS_A100_v4` quota action. Three expected sections matched the live response.
+- 2026-08-05 10:32 MDT — INCONCLUSIVE — Initial CLI quota/SKU verification used an Azure response-name filter that returned no matching rows for either region and therefore did not independently confirm the portal result. The portal shows a request for 24 `NCADS_A100_v4` family vCPUs in East US 2; a broader read-only quota lookup was required before provisioning.
+- 2026-08-05 10:33 MDT — CONFIRMED PENDING — Broader live quota lookup found `StandardNCADSA100v4Family` in East US 2 at current 0 / limit 0, while `Standard_NC24ads_A100_v4` is listed as a 24-vCPU regional size. Azure has received the 24-vCPU request but has not approved/applied it. No GPU VM will be created until the live limit becomes 24.
+- 2026-08-05 10:34 MDT — PASS — Private image-cache preflight on the core host: AzCopy, Zstandard, and SHA-256 tooling are installed; the accepted `b74ca0c` image is present; and more than 100 GB of `/opt` disk headroom remains. No archive or upload was started by this test.
+- 2026-08-05 10:36 MDT — PASS — Private image-cache helper validation: shell syntax passed, 4/4 immutable model/runtime/cache security tests passed, and the full TypeScript check passed. The helper uses managed identity, refuses credential query strings, keeps transfer details out of standard output, and requires SHA-256 plus manifest byte comparison after a fresh private Blob readback.
 
 ## Operational references
 
