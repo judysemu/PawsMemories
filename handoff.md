@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:11 MDT
+Last updated: 2026-08-05 10:13 MDT
 
 ## Definition of done
 
@@ -48,6 +48,7 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:06 MDT — PASS — Fresh private Blob readback: 113 transfers, 18,482,650,117 transferred bytes including cache metadata, zero transfer failures; all 37 manifest files and 18,482,646,202 tracked bytes rehashed with zero failures; lock passed.
 - 2026-08-05 10:08 MDT — PASS — Runtime alignment tests: 3/3 model-lock tests and full TypeScript check passed for commit `5b458ab`; Hugging Face Hub 1.26.0 and Transformers 5.14.1 are pinned and `pip check` is mandatory.
 - 2026-08-05 10:10 MDT — PASS — Cache-layer refactor: 3/3 model-lock tests and full TypeScript check passed for commit `ab389ca`.
+- 2026-08-05 10:13 MDT — PASS — Category-only model scanner validation: shell syntax, 3/3 model-lock/security tests, and the full TypeScript check passed. The scanner emits counts only and never matching filenames or values.
 
 ## Operational references
 
