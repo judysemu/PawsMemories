@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:14 MDT
+Last updated: 2026-08-05 10:24 MDT
 
 ## Definition of done
 
@@ -20,7 +20,7 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 - Hugging Face was used only to download the two approved gated repositories. The token was streamed through standard input, was not printed or written to Docker metadata/disk by the staging tools, and is no longer required. Runtime serving is configured offline.
 - The gated DINOv3/RMBG bundle contains 9 scanned text/code/config files with zero private-key, live-token, Azure-connection-string, credential-URL, or email-shaped flags. No candidate values or filenames were printed.
 - The first full worker image `7a3dbcc` compiled successfully but is rejected: `pip check` failed and importing Transformers raised an error because Hugging Face Hub 0.34.4 was incompatible with Transformers 5.14.1.
-- Commit `ab389ca` pins the compatible runtime pair, adds a mandatory `pip check`, and separates the expensive CUDA-extension layer from the small runtime layer. Its persistent Azure build is currently running.
+- Commit `ab389ca` pins the compatible runtime pair, adds a mandatory `pip check`, and separates the expensive CUDA-extension layer from the small runtime layer. Its persistent Azure build passed and produced the candidate image `paws-trellis2:75fbf018-ab389ca` at 9,112,738,036 bytes with no broken package requirements. The candidate is rejected pending repair because offline smoke tests found the TRELLIS source missing from Python's import path and CuMesh loading an older Conda `libstdc++` without `GLIBCXX_3.4.30`.
 - Existing Azure Blender proof for an imported textured pet remains valid: 16-bone rig, 16,085 weighted vertices, zero unweighted islands, 15 clips, and saved `idle` and `walk` animations. This proves rig/animation for an existing GLB, not image-to-mesh generation.
 - Local strict mode blocks known Tripo/fal calls and legacy external-generation routes before their handlers. Production still runs the older external-provider release and has not been cut over.
 - The active worktree is expected to remain clean after each checkpoint. Local `main` is intentionally ahead of `origin/main`; nothing in this handoff claims a production deployment.
@@ -51,6 +51,12 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:10 MDT — PASS — Cache-layer refactor: 3/3 model-lock tests and full TypeScript check passed for commit `ab389ca`.
 - 2026-08-05 10:13 MDT — PASS — Category-only model scanner validation: shell syntax, 3/3 model-lock/security tests, and the full TypeScript check passed. The scanner emits counts only and never matching filenames or values.
 - 2026-08-05 10:14 MDT — PASS — Gated DINOv3/RMBG sensitive-string scan: 9 text/code/config files; zero private-key, live-token, Azure connection-string, credential-URL, or email-shaped flags; values printed `false`.
+- 2026-08-05 10:18 MDT — PASS — Corrected worker image build: persistent Azure unit exited cleanly, produced `paws-trellis2:75fbf018-ab389ca` at 9,112,738,036 bytes, and mandatory `pip check` reported no broken requirements.
+- 2026-08-05 10:19 MDT — MIXED / REJECTED — Offline image smoke: dependency check passed; PyTorch 2.6.0+cu124, Transformers 5.14.1, Hub 1.26.0, and CUDA build 12.4 imported. `trellis2` import failed because `/opt/trellis2` was absent from Python's path. Extension import failed because Conda's `libstdc++.so.6` lacked `GLIBCXX_3.4.30`. Candidate `ab389ca` must not be deployed.
+- 2026-08-05 10:20 MDT — FAIL — Environment-only repair probe: adding `PYTHONPATH=/opt/trellis2` allowed the TRELLIS import to proceed, but prepending the system library directory to `LD_LIBRARY_PATH` did not override Conda Python's own `libstdc++` resolution. A real library repair is required; no image change was accepted.
+- 2026-08-05 10:21 MDT — MIXED — Ephemeral C++ runtime repair probe: redirecting Conda's `libstdc++.so.6` to Ubuntu's installed runtime cleared the `GLIBCXX_3.4.30` error and allowed TRELLIS, FlashAttention, nvdiffrast, and CuMesh imports to proceed. Importing FlexGEMM then reached Triton and correctly stopped because the core VM has zero active GPU drivers. The library repair is viable; FlexGEMM still requires a real GPU import test.
+- 2026-08-05 10:24 MDT — PASS — Runtime repair regression test: 3/3 immutable model/runtime/security tests passed and the full TypeScript check passed. The worker now exposes `/opt/trellis2` on Python's import path and verifies then selects Ubuntu's `GLIBCXX_3.4.30` C++ runtime after the reusable CUDA-extension layer.
+- 2026-08-05 10:24 MDT — PASS — Runtime repair checkpoint pre-commit TypeScript verification passed with clean types. The repair, its regression assertions, and all accumulated handoff evidence were staged together.
 
 ## Operational references
 

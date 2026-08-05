@@ -42,6 +42,16 @@ RUN printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
     bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate base && cd /opt/trellis2 && source ./setup.sh --basic --flash-attn --nvdiffrast --nvdiffrec --cumesh --o-voxel --flexgemm' && \
     rm /usr/local/bin/nvidia-smi
 
+# Miniconda bundles an older C++ runtime than the CUDA extensions require. Keep
+# the compiled layer reusable, then select Ubuntu's verified runtime at launch.
+RUN test -L /opt/conda/lib/libstdc++.so.6 && \
+    test -e /usr/lib/x86_64-linux-gnu/libstdc++.so.6 && \
+    strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep -qx GLIBCXX_3.4.30 && \
+    rm /opt/conda/lib/libstdc++.so.6 && \
+    ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /opt/conda/lib/libstdc++.so.6
+
+ENV PYTHONPATH=/opt/trellis2
+
 RUN /opt/conda/bin/pip install \
       fastapi==0.116.1 \
       huggingface-hub==1.26.0 \
