@@ -15,10 +15,19 @@ Endpoints:
 - `POST /v1/jobs`: authenticated multipart image submission.
 - `GET /v1/jobs/{id}`: authenticated durable status.
 - `GET /v1/jobs/{id}/artifact`: authenticated GLB download.
+- `POST /v1/jobs/{id}/finalize`: queue the internal Blender rig and clip bake.
+- `GET /v1/jobs/{id}/final-artifact`: authenticated final rigged/animated GLB.
 
 The model weights are downloaded once to a persistent volume, then the serving
 container runs with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Runtime
 inference therefore makes no call to Hugging Face or another model API.
 
-This worker creates geometry and PBR material. It does not claim rigging or
-animation; those are separate, verified Blender stages.
+This worker creates geometry and PBR material, then durably coordinates the
+separate Blender rig and animation stages. TRELLIS job bytes stay on the GPU
+host: Blender reads only a hash-verified `master.glb` from the shared read-only
+job volume, and authenticated container-network calls return the measured rig
+and baked clips. A final result is accepted only when the rig rules pass and
+the saved GLB bytes themselves contain `idle` and `walk` animations.
+
+`WORKER_SHARED_SECRET` must have the same value in the TRELLIS and Blender
+secret files. Do not place its value in Compose or this repository.

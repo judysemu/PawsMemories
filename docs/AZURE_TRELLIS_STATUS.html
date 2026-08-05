@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge work">IN PROGRESS</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 08:06 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 08:18 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -135,17 +135,17 @@
       <thead><tr><th>Status</th><th>Gate</th><th>What must be proven</th></tr></thead>
       <tbody>
         <tr><td><span class="badge pass">PASS</span></td><td>Audited Azure foundation</td><td>Private GPU lane, managed identities, Key Vault, storage, cost guard, reproducible Bicep.</td></tr>
-        <tr><td><span class="badge pass">PASS</span></td><td>TRELLIS worker contract</td><td>Pinned source, direct authenticated image upload, durable status, GLB artifact endpoint, runtime offline flags.</td></tr>
+        <tr><td><span class="badge pass">PASS</span></td><td>TRELLIS worker contract</td><td>Pinned source, direct authenticated image upload, durable base/finalization status, verified GLB artifact endpoints, runtime offline flags.</td></tr>
         <tr><td><span class="badge blocked">BLOCKED</span></td><td>GPU capacity</td><td>Azure Support must grant 24 A100 or 40 H100 family vCPUs before the private GPU VM can be allocated.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Upstream compatibility audit</td><td>The install manifest pins the model dependency graph and configures A100/A10/H100 CUDA architectures. An actual image build and loaded model remain separate pending gates.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Model readiness</td><td>Local TRELLIS.2 weights load on the VM; no model API call during serving.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Provider boundary + kill switch</td><td>Both model-build and paid-pet factories can select a replaceable TRELLIS adapter; in-house-only mode rejects configured external providers without fallback.</td></tr>
-        <tr><td><span class="badge work">PARTIAL</span></td><td>Customer-path cutover</td><td>The paid path now has a TRELLIS base adapter. Texture, rig-check, and Blender rig/animation deliberately fail closed with <code>INHOUSE_STAGE_NOT_READY</code> until their internal worker contracts pass live.</td></tr>
-        <tr><td><span class="badge pass">PASS</span></td><td>Fixture matrix + Drive intake</td><td>Six baseline samples distinguish independent gates. All 76 dropped GLBs parse as self-contained textured meshes: 12 are likely passable after visual review, 3 need joint mapping, 31 need animation, 30 need rigging, and none are structurally unusable. Nothing is being discarded automatically.</td></tr>
+        <tr><td><span class="badge work">PARTIAL</span></td><td>Customer-path cutover</td><td>The replaceable paid adapter now covers TRELLIS base, measured rig-check, rigging, and animation finalization without external fallback. The separate paid texture stage stays closed because TRELLIS already returns PBR texture and a charged no-op is not acceptable. Customer flags remain off until live proof.</td></tr>
+        <tr><td><span class="badge pass">PASS</span></td><td>Fixture matrix + Drive intake</td><td>Six baseline samples distinguish independent gates. All 76 dropped GLBs parse as self-contained textured meshes: 12 are likely passable after visual review, 3 need joint mapping, 31 need animation, 30 need rigging, and none are structurally unusable. One real sample from each bucket also passed the hash-verified internal handoff unchanged. Nothing is being discarded automatically.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Real generation</td><td>A real pet image produces a valid PBR master GLB.</td></tr>
-        <tr><td><span class="badge pending">PENDING</span></td><td>In-house rigging</td><td>Blender worker creates a valid quadruped skeleton and skin weights.</td></tr>
-        <tr><td><span class="badge pending">PENDING</span></td><td>Animation bake</td><td>Idle/walk/tail clips are present, finite, and playable in the final GLB.</td></tr>
-        <tr><td><span class="badge pending">PENDING</span></td><td>Final delivery validation</td><td>GLB magic/version/length, meshes, PBR textures, skin, animations, finite transforms, no external URIs.</td></tr>
+        <tr><td><span class="badge work">LOCAL PASS</span></td><td>In-house rigging</td><td>Authenticated TRELLIS-to-Blender contract, read-only shared source, hash/size checks, and measured rig-result gate pass locally. Real Blender execution remains pending.</td></tr>
+        <tr><td><span class="badge work">LOCAL PASS</span></td><td>Animation bake</td><td>Durable coordinator requires idle/walk in both the Blender manifest and the final GLB bytes. Real clip deformation/playback remains pending.</td></tr>
+        <tr><td><span class="badge work">PARTIAL</span></td><td>Final delivery validation</td><td>Finalizer verifies GLB structure, hashes, byte counts, embedded resources, and required clip names. Full mesh/PBR/skin/finite-transform validation still runs at the paid service boundary and needs a live artifact.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Cold restart + cost guard</td><td>Job recovery is understood and idle GPU is confirmed <code>PowerState/deallocated</code>.</td></tr>
       </tbody>
     </table>
@@ -160,6 +160,8 @@
     <h2>Sensitive-string audit</h2>
     <p><span class="badge pass">PASS</span> No private keys, secret values, access tokens, passwords, connection strings, personal email addresses, subscription IDs, or tenant IDs were found in the tracked Azure/TRELLIS files.</p>
     <p><span class="badge pass">PASS</span> No email-like, private-key, credential-like, connection-string, local-path, or signed-URL strings were detected inside the 76 imported GLBs. The local report shows flag categories only and never prints a detected value.</p>
+    <p><span class="badge work">FLAG</span> The broader tracked repository contains email-shaped strings in 27 text files (15 are test fixtures) and credential-shaped URLs in 6 text files (5 are test fixtures). These are potential-review flags, not confirmed secrets; their values are deliberately not printed here.</p>
+    <p><span class="badge pass">PASS</span> The broader tracked scan found zero private-key markers, zero live-looking cloud token patterns, and zero Azure-style connection strings.</p>
     <p><span class="badge pass">REDACTED</span> Public and private IP addresses plus quota request IDs are omitted from this tracker. Secret variable names remain as configuration references only; values stay outside the repository.</p>
   </section>
 

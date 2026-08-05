@@ -91,6 +91,53 @@ test("TRELLIS provider polls and verifies the worker artifact", async () => {
   assert.deepEqual(await provider.download(`trellis2-artifact:${JOB_ID}`), glb);
 });
 
+test("TRELLIS provider starts, polls, and downloads internal finalization", async () => {
+  const glb = minimalGlb();
+  const digest = crypto.createHash("sha256").update(glb).digest("hex");
+  const calls = [];
+  const provider = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async (request, init = {}) => {
+      const url = new URL(String(request));
+      calls.push({ path: url.pathname, method: init.method || "GET" });
+      assert.equal(url.hostname, "10.42.2.10");
+      assert.equal(init.headers["x-worker-secret"], "test-worker-secret");
+      if (url.pathname.endsWith("/finalize")) {
+        return jsonResponse({ id: JOB_ID, status: "queued" }, 202);
+      }
+      if (url.pathname.endsWith("/final-artifact")) {
+        return new Response(glb, {
+          status: 200,
+          headers: { "content-type": "model/gltf-binary", "x-artifact-sha256": digest },
+        });
+      }
+      return jsonResponse({
+        id: JOB_ID,
+        status: "succeeded",
+        progress: 100,
+        finalization: {
+          status: "succeeded",
+          progress: 100,
+          error: null,
+          clips: ["idle", "walk", "tail_wag"],
+          artifact: { url: `/v1/jobs/${JOB_ID}/final-artifact`, sha256: digest, bytes: glb.length },
+        },
+      });
+    },
+  });
+  const handle = `trellis2:${JOB_ID}`;
+  await provider.startFinalization(handle);
+  assert.deepEqual(await provider.pollFinalization(handle), { done: true, progress: 100 });
+  assert.deepEqual(await provider.downloadFinal(handle), glb);
+  assert.deepEqual(calls, [
+    { path: `/v1/jobs/${JOB_ID}/finalize`, method: "POST" },
+    { path: `/v1/jobs/${JOB_ID}`, method: "GET" },
+    { path: `/v1/jobs/${JOB_ID}/final-artifact`, method: "GET" },
+  ]);
+});
+
 test("TRELLIS provider rejects public workers and unallowlisted references", async () => {
   assert.throws(
     () => new TrellisModelBuildAdapter({ baseUrl: "https://api.example.com", sharedSecret: "secret" }),

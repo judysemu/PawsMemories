@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import sqlite3
 import threading
@@ -14,6 +15,8 @@ from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, UnidentifiedImageError
+
+from finalization import BlenderClient, FinalizationConfig, FinalizationError, finalize_trellis_job
 
 
 MODEL_PATH = Path(os.environ.get("TRELLIS_MODEL_PATH", "/models/TRELLIS.2-4B"))
@@ -66,9 +69,34 @@ def initialize_database() -> None:
             )
             """
         )
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        finalization_columns = {
+            "finalization_status": "TEXT NOT NULL DEFAULT 'not_requested'",
+            "finalization_progress": "INTEGER NOT NULL DEFAULT 0",
+            "finalization_error": "TEXT",
+            "final_artifact_path": "TEXT",
+            "final_artifact_sha256": "TEXT",
+            "final_artifact_bytes": "INTEGER",
+            "rigged_artifact_path": "TEXT",
+            "rigged_artifact_sha256": "TEXT",
+            "rigged_artifact_bytes": "INTEGER",
+            "clip_job_id": "TEXT",
+            "clips_json": "TEXT",
+        }
+        for column, definition in finalization_columns.items():
+            if column not in existing_columns:
+                connection.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
         connection.execute(
             "UPDATE jobs SET status='failed', error='WORKER_RESTARTED', updated_at=? "
             "WHERE status IN ('queued','running')",
+            (time.time(),),
+        )
+        connection.execute(
+            "UPDATE jobs SET finalization_status='failed', finalization_error='WORKER_RESTARTED', updated_at=? "
+            "WHERE finalization_status IN ('queued','running')",
             (time.time(),),
         )
 
@@ -196,6 +224,44 @@ def generate_job(
         input_path.unlink(missing_ok=True)
 
 
+def finalize_job(job_id: str) -> None:
+    try:
+        row = read_job(job_id)
+        if row["status"] != "succeeded" or not row["artifact_sha256"] or not row["artifact_bytes"]:
+            raise FinalizationError("SOURCE_NOT_READY", "TRELLIS base artifact is not ready")
+        update_job(job_id, finalization_status="running", finalization_progress=5, finalization_error=None)
+        client = BlenderClient(FinalizationConfig.from_environment(WORKER_SECRET))
+        result = finalize_trellis_job(
+            job_id=job_id,
+            source_sha256=row["artifact_sha256"],
+            source_bytes=row["artifact_bytes"],
+            job_directory=JOBS_ROOT / job_id,
+            client=client,
+            progress=lambda value: update_job(job_id, finalization_progress=value),
+        )
+        update_job(
+            job_id,
+            finalization_status="succeeded",
+            finalization_progress=100,
+            finalization_error=None,
+            final_artifact_path=result["artifact_path"],
+            final_artifact_sha256=result["artifact_sha256"],
+            final_artifact_bytes=result["artifact_bytes"],
+            rigged_artifact_path=result["rigged_path"],
+            rigged_artifact_sha256=result["rigged_sha256"],
+            rigged_artifact_bytes=result["rigged_bytes"],
+            clip_job_id=result["clip_job_id"],
+            clips_json=json.dumps(result["clips"], separators=(",", ":")),
+        )
+    except Exception as error:
+        code = error.code if isinstance(error, FinalizationError) else type(error).__name__
+        update_job(
+            job_id,
+            finalization_status="failed",
+            finalization_error=f"{code}: {error}"[:1000],
+        )
+
+
 @app.on_event("startup")
 def startup() -> None:
     initialize_database()
@@ -286,6 +352,12 @@ async def create_job(
 @app.get("/v1/jobs/{job_id}", dependencies=[Depends(require_worker_secret)])
 def get_job(job_id: str):
     row = read_job(job_id)
+    clips = []
+    if row["clips_json"]:
+        try:
+            clips = json.loads(row["clips_json"])
+        except json.JSONDecodeError:
+            clips = []
     return {
         "id": row["id"],
         "status": row["status"],
@@ -300,7 +372,45 @@ def get_job(job_id: str):
             if row["status"] == "succeeded"
             else None
         ),
+        "finalization": {
+            "status": row["finalization_status"],
+            "progress": row["finalization_progress"],
+            "error": row["finalization_error"],
+            "clips": clips,
+            "artifact": (
+                {
+                    "url": f"/v1/jobs/{job_id}/final-artifact",
+                    "sha256": row["final_artifact_sha256"],
+                    "bytes": row["final_artifact_bytes"],
+                }
+                if row["finalization_status"] == "succeeded"
+                else None
+            ),
+        },
     }
+
+
+@app.post("/v1/jobs/{job_id}/finalize", status_code=202, dependencies=[Depends(require_worker_secret)])
+def request_finalization(job_id: str):
+    row = read_job(job_id)
+    if row["status"] != "succeeded":
+        raise HTTPException(status_code=409, detail="BASE_ARTIFACT_NOT_READY")
+    if row["finalization_status"] == "succeeded" and row["final_artifact_path"]:
+        return JSONResponse(status_code=200, content={"id": job_id, "status": "succeeded"})
+    now = time.time()
+    with database() as connection:
+        claimed = connection.execute(
+            "UPDATE jobs SET finalization_status='queued', finalization_progress=0, "
+            "finalization_error=NULL, final_artifact_path=NULL, final_artifact_sha256=NULL, "
+            "final_artifact_bytes=NULL, clip_job_id=NULL, clips_json=NULL, updated_at=? "
+            "WHERE id=? AND status='succeeded' AND finalization_status IN ('not_requested','failed')",
+            (now, job_id),
+        ).rowcount
+    if claimed != 1:
+        current = read_job(job_id)
+        return {"id": job_id, "status": current["finalization_status"]}
+    executor.submit(finalize_job, job_id)
+    return {"id": job_id, "status": "queued"}
 
 
 @app.get("/v1/jobs/{job_id}/artifact", dependencies=[Depends(require_worker_secret)])
@@ -316,4 +426,20 @@ def get_artifact(job_id: str):
         media_type="model/gltf-binary",
         filename=f"{job_id}.glb",
         headers={"X-Artifact-SHA256": row["artifact_sha256"]},
+    )
+
+
+@app.get("/v1/jobs/{job_id}/final-artifact", dependencies=[Depends(require_worker_secret)])
+def get_final_artifact(job_id: str):
+    row = read_job(job_id)
+    if row["finalization_status"] != "succeeded" or not row["final_artifact_path"]:
+        raise HTTPException(status_code=409, detail="FINAL_ARTIFACT_NOT_READY")
+    artifact_path = Path(row["final_artifact_path"])
+    if not artifact_path.is_file() or artifact_path.parent != JOBS_ROOT / job_id or artifact_path.name != "final.glb":
+        raise HTTPException(status_code=410, detail="FINAL_ARTIFACT_MISSING")
+    return FileResponse(
+        artifact_path,
+        media_type="model/gltf-binary",
+        filename=f"{job_id}-final.glb",
+        headers={"X-Artifact-SHA256": row["final_artifact_sha256"]},
     )

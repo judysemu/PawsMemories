@@ -65,6 +65,8 @@ services:
       TRELLIS_SOURCE_REVISION: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
       TRELLIS_JOBS_DIR: /jobs
       TRELLIS_PRELOAD: "true"
+      BLENDER_WORKER_URL: http://blender-worker:10000
+      BLENDER_INTERNAL_HOSTS: blender-worker
     ports:
       - "8000:8000"
     volumes:
@@ -94,11 +96,13 @@ services:
     environment:
       PORT: "10000"
       IFC_MAX_CONCURRENT: "1"
+      TRELLIS_SHARED_JOBS_DIR: /trellis-jobs
     ports:
       - "10000:10000"
     volumes:
       - /opt/paws-gpu/blender-checkpoints:/tmp/blender_checkpoints
       - /opt/paws-gpu/blender-viewports:/tmp/blender_viewports
+      - /opt/paws-gpu/jobs:/trellis-jobs:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10000/health"]
       interval: 30s

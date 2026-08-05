@@ -229,6 +229,83 @@ export async function downloadVerifiedAsset(asset, options = {}) {
   }
 }
 
+export function readVerifiedTrellisAsset(asset, options = {}) {
+  let parsed;
+  try {
+    parsed = new URL(asset.signedUrl);
+  } catch {
+    fail("SOURCE_URL_REJECTED", "shared TRELLIS source is invalid", 400);
+  }
+  if (parsed.protocol !== "trellis2:" || parsed.hostname !== "jobs" || parsed.username
+    || parsed.password || parsed.port || parsed.search || parsed.hash) {
+    fail("SOURCE_URL_REJECTED", "shared TRELLIS source must use the internal jobs namespace", 400);
+  }
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    fail("SOURCE_URL_REJECTED", "shared TRELLIS source path is invalid", 400);
+  }
+  const pathParts = decodedPath.split("/");
+  const jobId = pathParts[1];
+  if (pathParts.length !== 3 || !UUID_PATTERN.test(jobId || "") || pathParts[2] !== "master.glb") {
+    fail("SOURCE_URL_REJECTED", "shared TRELLIS source path is not an allowed job artifact", 400);
+  }
+
+  const configuredRoot = options.sharedJobsDirectory || process.env.TRELLIS_SHARED_JOBS_DIR || "";
+  if (!configuredRoot || !path.isAbsolute(configuredRoot)) {
+    fail("SHARED_SOURCE_NOT_CONFIGURED", "shared TRELLIS source storage is not configured", 503);
+  }
+
+  let root;
+  let jobDirectory;
+  let candidate;
+  let descriptor;
+  try {
+    root = fs.realpathSync(configuredRoot);
+    jobDirectory = path.join(root, jobId);
+    candidate = path.join(jobDirectory, "master.glb");
+    if (fs.lstatSync(jobDirectory).isSymbolicLink() || fs.lstatSync(candidate).isSymbolicLink()) {
+      fail("SOURCE_PATH_REJECTED", "shared TRELLIS source cannot use symbolic links", 403);
+    }
+    if (fs.realpathSync(candidate) !== candidate || path.dirname(candidate) !== jobDirectory) {
+      fail("SOURCE_PATH_REJECTED", "shared TRELLIS source escaped the configured job directory", 403);
+    }
+    descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) fail("SOURCE_PATH_REJECTED", "shared TRELLIS source is not a regular file", 403);
+    if (stat.size > RIG_PIPELINE_MAX_ASSET_BYTES || stat.size > asset.sizeBytes) {
+      fail("SOURCE_TOO_LARGE", "shared TRELLIS source exceeded its declared byte count", 413);
+    }
+    if (stat.size !== asset.sizeBytes) fail("SOURCE_SIZE_MISMATCH", "shared TRELLIS source byte count does not match request");
+    const buffer = fs.readFileSync(descriptor);
+    const digest = crypto.createHash("sha256").update(buffer).digest("hex");
+    if (digest !== asset.sha256) fail("SOURCE_HASH_MISMATCH", "shared TRELLIS source SHA-256 does not match request");
+    inspectGlb(buffer);
+    return buffer;
+  } catch (error) {
+    if (error instanceof RigPipelineError) throw error;
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      fail("SOURCE_NOT_FOUND", "shared TRELLIS source is unavailable", 404);
+    }
+    fail("SOURCE_READ_FAILED", "shared TRELLIS source could not be read", 500);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+export function acquireVerifiedAsset(asset, options = {}) {
+  let protocol;
+  try {
+    protocol = new URL(asset.signedUrl).protocol;
+  } catch {
+    fail("SOURCE_URL_REJECTED", "asset URL is invalid", 400);
+  }
+  if (protocol === "trellis2:") return Promise.resolve(readVerifiedTrellisAsset(asset, options));
+  return downloadVerifiedAsset(asset, options.downloadOptions || options);
+}
+
 export function inspectGlb(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 20) fail("MALFORMED_GLB", "GLB is too small");
   if (buffer.toString("ascii", 0, 4) !== "glTF") fail("MALFORMED_GLB", "GLB magic is invalid");
@@ -609,7 +686,10 @@ export function createBlenderPipelineRunner({ bridge, pipelineDirectory = __dirn
 
 export function createRigPipelineProcessor(options = {}) {
   const profileDirectory = options.profileDirectory || path.resolve(__dirname, "..", "profiles");
-  const acquireAsset = options.acquireAsset || ((asset) => downloadVerifiedAsset(asset, options.downloadOptions));
+  const acquireAsset = options.acquireAsset || ((asset) => acquireVerifiedAsset(asset, {
+    downloadOptions: options.downloadOptions,
+    sharedJobsDirectory: options.sharedJobsDirectory,
+  }));
   if (typeof options.runner !== "function") throw new TypeError("runner is required");
   const cache = new Map();
   const maxCacheEntries = options.maxCacheEntries || 128;

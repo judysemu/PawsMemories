@@ -36,6 +36,12 @@ At the 2026-08-05 East US retail rates observed during setup:
 The worker must be deallocated when it is not serving or building. Stopping the
 guest OS is not enough; verify Azure reports `PowerState/deallocated`.
 
+At runtime, TRELLIS and Blender exchange artifacts only within the private GPU
+host. `/opt/paws-gpu/jobs` is writable by TRELLIS and mounted read-only at
+`/trellis-jobs` in Blender. The shared `WORKER_SHARED_SECRET` authenticates the
+container-network calls; its value belongs in both service secret files, never
+in Compose or Git.
+
 ## Deployment gates
 
 1. `Microsoft.Compute`, `Microsoft.Network`, `Microsoft.Storage`,
@@ -126,7 +132,9 @@ PET_GLB_BODY_RIG_ENABLED=false
 ```
 
 `PAWS_3D_INHOUSE_ONLY=true` is the no-fallback safety boundary: a Tripo-bound
-paid SKU is rejected rather than called. The paid adapter currently supports
-the TRELLIS base stage and refuses texture, rig-check, and rig/animation stages
-with `INHOUSE_STAGE_NOT_READY`. Enable the two `PET_GLB_*` switches only after
-those internal stages and the full paid-order refund/recovery path pass live.
+paid SKU is rejected rather than called. The paid adapter supports the TRELLIS
+base stage and the internal rig-check, rig, and animation finalization contract.
+A separate paid texture stage remains closed because TRELLIS already produces
+PBR texture; it must not become a charged no-op. Enable the two `PET_GLB_*`
+switches only after a live GPU run and the full paid-order refund/recovery path
+pass.

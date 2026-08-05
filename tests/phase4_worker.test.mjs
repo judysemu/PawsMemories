@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -9,6 +11,7 @@ import {
   createWorkerAuthMiddleware,
   inspectGlb,
   isPrivateAddress,
+  readVerifiedTrellisAsset,
   validateRigPipelineRequest,
   validateSourceUrl,
 } from "../blender-worker/rig_pipeline/index.js";
@@ -253,6 +256,45 @@ test("source URL checks reject non-HTTPS, unlisted, and private DNS targets", as
   }), (error) => error.code === "SOURCE_HOST_REJECTED");
   assert.equal(isPrivateAddress("10.0.0.1"), true);
   assert.equal(isPrivateAddress("8.8.8.8"), false);
+});
+
+test("shared TRELLIS source reads only a verified job master from the configured volume", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paws-trellis-jobs-"));
+  const source = makeTriangleGlb();
+  const jobDirectory = path.join(root, JOB_UUID);
+  fs.mkdirSync(jobDirectory, { mode: 0o700 });
+  fs.writeFileSync(path.join(jobDirectory, "master.glb"), source, { mode: 0o600 });
+  const asset = {
+    signedUrl: `trellis2://jobs/${JOB_UUID}/master.glb`,
+    sha256: crypto.createHash("sha256").update(source).digest("hex"),
+    sizeBytes: source.length,
+  };
+  try {
+    assert.deepEqual(readVerifiedTrellisAsset(asset, { sharedJobsDirectory: root }), source);
+    assert.throws(
+      () => readVerifiedTrellisAsset({ ...asset, signedUrl: `trellis2://jobs/${JOB_UUID}/../master.glb` }, { sharedJobsDirectory: root }),
+      (error) => error instanceof RigPipelineError && error.code === "SOURCE_URL_REJECTED",
+    );
+    assert.throws(
+      () => readVerifiedTrellisAsset({ ...asset, sha256: "0".repeat(64) }, { sharedJobsDirectory: root }),
+      (error) => error instanceof RigPipelineError && error.code === "SOURCE_HASH_MISMATCH",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shared TRELLIS source fails closed when its volume is not configured", () => {
+  const source = makeTriangleGlb();
+  const asset = {
+    signedUrl: `trellis2://jobs/${JOB_UUID}/master.glb`,
+    sha256: crypto.createHash("sha256").update(source).digest("hex"),
+    sizeBytes: source.length,
+  };
+  assert.throws(
+    () => readVerifiedTrellisAsset(asset, { sharedJobsDirectory: "" }),
+    (error) => error instanceof RigPipelineError && error.code === "SHARED_SOURCE_NOT_CONFIGURED",
+  );
 });
 
 test("full facial output requires A-H/X, jaw, blink, and exactly two renders", async () => {

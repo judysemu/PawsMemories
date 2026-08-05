@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Private model visual review</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0c1220; --panel:#172033; --line:#334155; --text:#f8fafc; --muted:#a8b3c5; --good:#36d399; --repair:#fb923c; --unsure:#fbbf24; }
+    * { box-sizing:border-box; } body { margin:0; overflow:hidden; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    canvas { display:block; width:100vw; height:100vh; } .panel { position:fixed; z-index:2; top:14px; left:14px; width:min(430px,calc(100vw - 28px)); padding:14px; border:1px solid var(--line); border-radius:12px; background:rgba(23,32,51,.94); backdrop-filter:blur(8px); }
+    h1 { margin:0; font-size:1.15rem; } p { margin:5px 0; } .muted { color:var(--muted); overflow-wrap:anywhere; } .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+    button,select,a.button { appearance:none; color:var(--text); background:#26344d; border:1px solid var(--line); border-radius:8px; padding:8px 10px; cursor:pointer; text-decoration:none; font:inherit; }
+    button.good { border-color:var(--good); } button.repair { border-color:var(--repair); } button.unsure { border-color:var(--unsure); } button.active { outline:2px solid currentColor; }
+    #message.error { color:#fda4af; } .help { position:fixed; z-index:2; right:14px; bottom:14px; padding:8px 10px; border-radius:8px; background:rgba(12,18,32,.82); color:var(--muted); }
+    @media(max-width:650px){ .help{display:none} }
+  </style>
+  <script type="importmap">
+    {"imports":{"three":"/node_modules/three/build/three.module.js"}}
+  </script>
+</head>
+<body>
+  <section class="panel">
+    <h1>Private visual review</h1>
+    <p id="filename" class="muted">Loading…</p>
+    <p id="message">Preparing local model.</p>
+    <div class="row">
+      <label for="clips">Motion</label>
+      <select id="clips"><option value="">No motion</option></select>
+      <button id="reset" type="button">Reset view</button>
+    </div>
+    <div class="row" aria-label="Visual decision">
+      <button class="good" data-verdict="good" type="button">Looks good</button>
+      <button class="repair" data-verdict="repair" type="button">Needs repair</button>
+      <button class="unsure" data-verdict="unsure" type="button">Not sure</button>
+    </div>
+    <div class="row">
+      <button id="previous" type="button">← Previous</button>
+      <button id="next" type="button">Next →</button>
+      <a class="button" href="http://127.0.0.1:8765/MODEL_INTAKE_REPORT.html">Back to list</a>
+    </div>
+    <p class="muted">Check anatomy, texture seams, eye/ear/leg shape, scale, orientation, clipping, and whether idle/walk deformation looks natural. Your choice stays in this browser only.</p>
+  </section>
+  <div class="help">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "/node_modules/three/examples/jsm/loaders/GLTFLoader.js";
+    import { OrbitControls } from "/node_modules/three/examples/jsm/controls/OrbitControls.js";
+
+    const params = new URLSearchParams(location.search);
+    const requestedFile = params.get("file") || "";
+    const safeFile = requestedFile && !requestedFile.includes("..") && !requestedFile.includes("\\") && /^[a-z0-9_./ -]+\.glb$/i.test(requestedFile);
+    const message = document.querySelector("#message");
+    const filename = document.querySelector("#filename");
+    const clipSelect = document.querySelector("#clips");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0c1220);
+    const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.001, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    document.body.prepend(renderer.domElement);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x314158, 2.1));
+    const key = new THREE.DirectionalLight(0xffffff, 3.2); key.position.set(4, 6, 5); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x9fc5ff, 1.7); fill.position.set(-4, 3, -3); scene.add(fill);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(8, 64), new THREE.MeshStandardMaterial({ color:0x1b263b, roughness:1 }));
+    floor.rotation.x = -Math.PI / 2; floor.position.y = -0.002; scene.add(floor);
+    let model = null; let mixer = null; let action = null; let animations = []; let home = null; let files = [];
+
+    function frameModel() {
+      if (!model) return;
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.sub(center); model.position.y += size.y / 2;
+      const radius = Math.max(size.x, size.y, size.z, 0.01);
+      camera.position.set(radius * 1.7, radius * 1.15, radius * 2.25);
+      controls.target.set(0, size.y * 0.5, 0);
+      controls.minDistance = radius * 0.45; controls.maxDistance = radius * 8;
+      camera.near = Math.max(radius / 1000, 0.0001); camera.far = radius * 100; camera.updateProjectionMatrix();
+      controls.update();
+      home = { position:camera.position.clone(), target:controls.target.clone() };
+    }
+
+    function setVerdict(value) {
+      if (!requestedFile) return;
+      localStorage.setItem(`paws-model-review:${requestedFile}`, value);
+      document.querySelectorAll("[data-verdict]").forEach(button => button.classList.toggle("active", button.dataset.verdict === value));
+    }
+    document.querySelectorAll("[data-verdict]").forEach(button => button.addEventListener("click", () => setVerdict(button.dataset.verdict)));
+    setVerdict(localStorage.getItem(`paws-model-review:${requestedFile}`) || "");
+    document.querySelector("#reset").addEventListener("click", () => { if (home) { camera.position.copy(home.position); controls.target.copy(home.target); controls.update(); } });
+    clipSelect.addEventListener("change", () => {
+      if (action) action.stop(); action = null;
+      const clip = animations.find(candidate => candidate.name === clipSelect.value);
+      if (clip && mixer) { action = mixer.clipAction(clip); action.reset().play(); }
+    });
+
+    async function loadFileList() {
+      const html = await fetch("MODEL_INTAKE_REPORT.html", { cache:"no-store" }).then(response => response.text());
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      files = [...parsed.querySelectorAll("tr[data-tier=ready],tr[data-tier=remap],tr[data-tier=animate],tr[data-tier=rig]")]
+        .map(row => row.dataset.file).filter(Boolean);
+    }
+    function move(offset) {
+      const index = files.indexOf(requestedFile);
+      if (index < 0 || !files.length) return;
+      const next = files[(index + offset + files.length) % files.length];
+      location.href = `${location.pathname}?file=${encodeURIComponent(next)}`;
+    }
+    document.querySelector("#previous").addEventListener("click", () => move(-1));
+    document.querySelector("#next").addEventListener("click", () => move(1));
+
+    if (!safeFile) {
+      message.textContent = "Choose a model from the intake report."; message.classList.add("error");
+    } else {
+      filename.textContent = requestedFile;
+      await loadFileList().catch(() => {});
+      const modelUrl = new URL(`../fixtures/inhouse3d/imports/${requestedFile}`, location.href);
+      new GLTFLoader().load(modelUrl.href, gltf => {
+        model = gltf.scene; scene.add(model); animations = gltf.animations || [];
+        mixer = animations.length ? new THREE.AnimationMixer(model) : null;
+        for (const clip of animations) { const option = document.createElement("option"); option.value = clip.name; option.textContent = clip.name || "Unnamed motion"; clipSelect.append(option); }
+        const preferred = animations.find(clip => /^(idle|walk)$/i.test(clip.name)) || animations[0];
+        if (preferred) { clipSelect.value = preferred.name; action = mixer.clipAction(preferred); action.play(); }
+        frameModel(); message.textContent = animations.length ? `${animations.length} motion clip(s) found.` : "Static model: no motion clips.";
+      }, undefined, () => { message.textContent = "This model could not be rendered locally."; message.classList.add("error"); });
+    }
+
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => { const delta = Math.min(clock.getDelta(), .05); if (mixer) mixer.update(delta); controls.update(); renderer.render(scene, camera); });
+    addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  </script>
+</body>
+</html>

@@ -188,9 +188,9 @@ function reportHtml(rows: ModelRow[]): string {
       <strong>${counts[tier]}</strong><span>${tierLabels[tier]}</span>
     </button>`).join("");
   const tableRows = rows.map((row) => `
-    <tr data-tier="${row.tier}" data-search="${escapeHtml(`${row.file} ${row.batch} ${tierLabels[row.tier]} ${row.detail}`.toLowerCase())}">
+    <tr data-tier="${row.tier}" data-file="${escapeHtml(row.file)}" data-search="${escapeHtml(`${row.file} ${row.batch} ${tierLabels[row.tier]} ${row.detail}`.toLowerCase())}">
       <td><span class="badge ${row.tier}">${escapeHtml(tierLabels[row.tier])}</span></td>
-      <td><strong>${escapeHtml(path.basename(row.file))}</strong><small>${escapeHtml(row.batch)}</small></td>
+      <td><strong>${escapeHtml(path.basename(row.file))}</strong><small>${escapeHtml(row.batch)}</small><small><a href="http://127.0.0.1:8766/docs/MODEL_VISUAL_REVIEW.html?file=${encodeURIComponent(row.file)}">Open visual review</a></small></td>
       <td>${escapeHtml(row.detail)}</td>
       <td>${row.triangles.toLocaleString()}<small>${row.materials} material(s) · ${row.textures} texture(s)</small></td>
       <td>${row.joints}<small>${row.clips.length ? escapeHtml(row.clips.join(", ")) : "No clips"}</small></td>
@@ -236,6 +236,7 @@ function reportHtml(rows: ModelRow[]): string {
       <div><strong class="reject">${counts.reject}</strong>broken or structurally unusable</div>
     </div>
     <p class="muted">No file is being discarded. Automated checks can confirm structure, textures, rig data, and clip names; they cannot tell whether the animal looks right or moves naturally.</p>
+    <p><strong>Next:</strong> open visual review from a row, rotate the model, play its motion, and record your judgment. The viewer uses only local files.</p>
   </section>
   <div class="metrics">${cards}</div>
   <section class="panel">

@@ -12,6 +12,7 @@ import {
   PROVIDER_CONNECT_TIMEOUT_MS,
   PROVIDER_READ_TIMEOUT_MS,
 } from "./types";
+import type { ModelArtifactFinalizer, ModelFinalizationPollResult } from "./finalizer";
 
 const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,6 +36,13 @@ interface WorkerJobResponse {
   progress?: number;
   error?: string | null;
   artifact?: { url: string; sha256: string; bytes: number } | null;
+  finalization?: {
+    status: "not_requested" | "queued" | "running" | "succeeded" | "failed";
+    progress?: number;
+    error?: string | null;
+    clips?: string[];
+    artifact?: { url: string; sha256: string; bytes: number } | null;
+  };
 }
 
 function privateIpv4(hostname: string): boolean {
@@ -156,7 +164,7 @@ function parseDataImage(raw: string): { bytes: Buffer; mimeType: string } | null
   return { bytes, mimeType };
 }
 
-export class TrellisModelBuildAdapter implements ModelBuildProvider {
+export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifactFinalizer {
   private readonly workerUrl: URL;
   private readonly sharedSecret: string;
   private readonly fetchImpl: FetchImplementation;
@@ -248,7 +256,62 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider {
 
   async download(artifactReference: string): Promise<Buffer> {
     const id = requireJobId(artifactReference, ARTIFACT_PREFIX);
-    const response = await this.workerFetch(`/v1/jobs/${id}/artifact`);
+    return this.downloadWorkerArtifact(`/v1/jobs/${id}/artifact`);
+  }
+
+  async startFinalization(sourceTaskHandle: string): Promise<void> {
+    const id = requireJobId(sourceTaskHandle, TASK_PREFIX);
+    const response = await this.workerFetch(`/v1/jobs/${id}/finalize`, { method: "POST" }, PROVIDER_CONNECT_TIMEOUT_MS);
+    const body = await this.readJson(response);
+    if (![200, 202].includes(response.status) || body.id !== id || !["queued", "running", "succeeded"].includes(body.status)) {
+      throw new ModelBuildProviderError(
+        "TRELLIS finalization could not start",
+        "TRELLIS_FINALIZATION_START_FAILED",
+        response.status >= 500,
+      );
+    }
+  }
+
+  async pollFinalization(sourceTaskHandle: string): Promise<ModelFinalizationPollResult> {
+    const id = requireJobId(sourceTaskHandle, TASK_PREFIX);
+    const response = await this.workerFetch(`/v1/jobs/${id}`);
+    const body = await this.readJson(response);
+    if (!response.ok || body.id !== id || !body.finalization) {
+      throw new ModelBuildProviderError(
+        "TRELLIS finalization polling failed",
+        "TRELLIS_FINALIZATION_POLL_FAILED",
+        response.status >= 500,
+      );
+    }
+    const finalization = body.finalization;
+    if (!["not_requested", "queued", "running", "succeeded", "failed"].includes(finalization.status)) {
+      throw new ModelBuildProviderError("TRELLIS returned an invalid finalization status", "TRELLIS_RESPONSE_INVALID", false);
+    }
+    if (finalization.status === "failed") {
+      return { done: true, error: "In-house rig and animation failed", failureCode: "INHOUSE_FINALIZATION_FAILED" };
+    }
+    if (finalization.status === "succeeded") {
+      if (!finalization.artifact
+        || !/^[0-9a-f]{64}$/i.test(finalization.artifact.sha256)
+        || !Number.isSafeInteger(finalization.artifact.bytes)
+        || finalization.artifact.bytes <= 0
+        || !Array.isArray(finalization.clips)
+        || !finalization.clips.includes("idle")
+        || !finalization.clips.includes("walk")) {
+        throw new ModelBuildProviderError("TRELLIS final artifact metadata is invalid", "TRELLIS_RESPONSE_INVALID", false);
+      }
+      return { done: true, progress: 100 };
+    }
+    return { done: false, progress: Math.max(0, Math.min(99, Number(finalization.progress || 0))) };
+  }
+
+  async downloadFinal(sourceTaskHandle: string): Promise<Buffer> {
+    const id = requireJobId(sourceTaskHandle, TASK_PREFIX);
+    return this.downloadWorkerArtifact(`/v1/jobs/${id}/final-artifact`);
+  }
+
+  private async downloadWorkerArtifact(path: string): Promise<Buffer> {
+    const response = await this.workerFetch(path);
     if (!response.ok) {
       throw new ModelBuildProviderError("TRELLIS artifact download failed", "PROVIDER_DOWNLOAD_FAILED", response.status >= 500);
     }
@@ -296,12 +359,13 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider {
     return { bytes, mimeType: detected };
   }
 
-  private async workerFetch(path: string): Promise<Response> {
+  private async workerFetch(path: string, init: RequestInit = {}, timeoutMs = PROVIDER_READ_TIMEOUT_MS): Promise<Response> {
     try {
       return await this.fetchImpl(new URL(path, this.workerUrl), {
+        ...init,
         headers: { "x-worker-secret": this.sharedSecret },
         redirect: "error",
-        signal: AbortSignal.timeout(PROVIDER_READ_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new ModelBuildProviderError("TRELLIS worker is unavailable", "TRELLIS_WORKER_UNAVAILABLE", true);

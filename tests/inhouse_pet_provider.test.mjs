@@ -88,6 +88,56 @@ test("in-house paid adapter refuses unfinished stages without provider calls", a
   assert.equal(externalCalls, 0);
 });
 
+test("in-house paid adapter uses the internal finalizer for honest rig-check and final GLB", async () => {
+  const artifact = validGlb();
+  const calls = { startFinalization: 0, pollFinalization: 0, downloadFinal: 0 };
+  const provider = {
+    async start() { throw new Error("base start is not used in this fixture"); },
+    async poll() { return { done: true, glbUrl: "trellis2-artifact:00000000-0000-4000-8000-000000000001" }; },
+    async download() { return artifact; },
+    async startFinalization(handle) {
+      calls.startFinalization += 1;
+      assert.equal(handle, "trellis2:00000000-0000-4000-8000-000000000001");
+    },
+    async pollFinalization() {
+      calls.pollFinalization += 1;
+      return { done: true, progress: 100 };
+    },
+    async downloadFinal() {
+      calls.downloadFinal += 1;
+      return artifact;
+    },
+  };
+  const store = new InMemoryJobStore();
+  const sourceJobId = "00000000-0000-4000-8000-000000000002";
+  await store.put({
+    jobId: sourceJobId,
+    providerId: "trellis2",
+    providerVersion: "pinned",
+    providerTaskHandle: "trellis2:00000000-0000-4000-8000-000000000001",
+    model: "pinned",
+    configHash: "0".repeat(64),
+    cancelled: false,
+    stage: "base",
+    createdAt: Date.now(),
+  });
+  const adapter = new InHousePetGenerationAdapter(provider, store, "pinned");
+
+  const checkJob = await adapter.createRigCheckJob(sourceJobId);
+  assert.deepEqual(await adapter.getJob(checkJob.id), {
+    id: checkJob.id,
+    status: "completed",
+    capability: { riggable: true, rigType: "quadruped" },
+  });
+  const rigJob = await adapter.createRigJob(sourceJobId, "pet");
+  assert.equal((await adapter.getJob(rigJob.id)).status, "completed");
+  const final = await adapter.fetchArtifacts(rigJob.id);
+  assert.deepEqual(final.glb.data, artifact);
+  assert.equal(final.metadata.stage, "rig");
+  assert.deepEqual(final.metadata.animations, ["idle", "walk"]);
+  assert.deepEqual(calls, { startFinalization: 2, pollFinalization: 3, downloadFinal: 1 });
+});
+
 test("paid SKU factory selects TRELLIS and rejects Tripo in in-house-only mode", () => {
   const prior = { ...process.env };
   try {
