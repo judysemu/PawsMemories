@@ -43,9 +43,11 @@ RUN printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
     rm /usr/local/bin/nvidia-smi && \
     /opt/conda/bin/pip install \
       fastapi==0.116.1 \
-      huggingface-hub==0.34.4 \
+      huggingface-hub==1.26.0 \
       python-multipart==0.0.20 \
-      uvicorn==0.35.0
+      transformers==5.14.1 \
+      uvicorn==0.35.0 && \
+    /opt/conda/bin/pip check
 
 WORKDIR /app
 COPY app /app

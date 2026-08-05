@@ -48,6 +48,9 @@ test("runtime compose and worker build stay aligned with the model lock", () => 
   assert.match(dockerfile, /torch==2\.6\.0/);
   assert.match(dockerfile, /torchvision==0\.21\.0/);
   assert.match(dockerfile, /download\.pytorch\.org\/whl\/cu124/);
+  assert.match(dockerfile, /huggingface-hub==1\.26\.0/);
+  assert.match(dockerfile, /transformers==5\.14\.1/);
+  assert.match(dockerfile, /pip check/);
   assert.doesNotMatch(dockerfile, /setup\.sh --new-env/);
   for (const model of lock.models) {
     assert.match(compose, new RegExp(model.revision));
