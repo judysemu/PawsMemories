@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { assertExternalGenerativeProviderAllowed } from "./server/externalGenerativePolicy";
 
 const TRIPO_BASE = "https://api.tripo3d.ai/v2/openapi";
 export const TRIPO_PREFIX = "tripo:";
@@ -39,6 +40,7 @@ export function isTripoInsufficientCredit(err: any): boolean {
 }
 
 function apiKey(): string {
+  assertExternalGenerativeProviderAllowed("tripo");
   const key = process.env.TRIPO_API_KEY;
   if (!key) throw new Error("TRIPO_API_KEY is not configured.");
   return key;
@@ -158,6 +160,7 @@ async function uploadBytesToTripo(imageBytes: Buffer): Promise<UploadedImage> {
 
 /** Submit one source image to Tripo's canonical multiview task API. */
 export async function startTripoImageToMultiview(imageBytes: Buffer): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const uploaded = await uploadBytesToTripo(imageBytes);
   const taskHandle = await submitTask({
     type: "generate_multiview_image",
@@ -175,6 +178,7 @@ function tripoMultiviewTaskId(handle: string): string {
 
 /** Poll one current multiview task without exposing provider response bodies. */
 export async function pollTripoImageToMultiview(handle: string): Promise<TripoMultiviewPollResult> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const taskId = tripoMultiviewTaskId(handle);
   const response = await fetch(`${TRIPO_BASE}/task/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey()}` },
@@ -230,6 +234,7 @@ function assertTripoMultiviewOutputUrl(rawUrl: string): URL {
 
 /** Download a provider-generated reference image with an exact-host and byte cap. */
 export async function downloadTripoReferenceImage(rawUrl: string): Promise<Buffer> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const parsed = assertTripoMultiviewOutputUrl(rawUrl);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRIPO_IMAGE_DOWNLOAD_TIMEOUT_MS);
@@ -373,6 +378,7 @@ async function submitTask(body: Record<string, unknown>): Promise<string> {
  * but this pipeline downloads output.model expecting a GLB.
  */
 export async function startImageTo3D(input: TripoJobInput): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const left = input.views?.left;
   const back = input.views?.back;
   const right = input.views?.right;
@@ -438,6 +444,7 @@ export async function startRig(
     rigType?: "biped" | "quadruped" | "hexapod" | "octopod" | "avian" | "serpentine" | "aquatic";
   },
 ): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
     ? tripoTaskId(originalModelTaskId)
     : originalModelTaskId;
@@ -454,6 +461,7 @@ export async function startRig(
 }
 
 export async function startPreRigCheck(originalModelTaskId: string): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
     ? tripoTaskId(originalModelTaskId)
     : originalModelTaskId;
@@ -474,6 +482,7 @@ export async function startTextureModel(
   originalModelTaskId: string,
   opts: TripoTextureOptions = {},
 ): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
     ? tripoTaskId(originalModelTaskId)
     : originalModelTaskId;
@@ -496,6 +505,7 @@ export async function startRetarget(
   originalModelTaskId: string,
   animation: "preset:walk" | "preset:run" | "preset:idle"
 ): Promise<string> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const original = originalModelTaskId.startsWith(TRIPO_PREFIX)
     ? tripoTaskId(originalModelTaskId)
     : originalModelTaskId;
@@ -596,6 +606,7 @@ export function selectTripoRigCapability(
 }
 
 export async function pollImageTo3D(operationName: string): Promise<TripoPollResult> {
+  assertExternalGenerativeProviderAllowed("tripo");
   const taskId = tripoTaskId(operationName);
   const res = await fetch(`${TRIPO_BASE}/task/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey()}` },

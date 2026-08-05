@@ -155,3 +155,9 @@ A separate paid texture stage remains closed because TRELLIS already produces
 PBR texture; it must not become a charged no-op. Enable the two `PET_GLB_*`
 switches only after a live GPU run and the full paid-order refund/recovery path
 pass.
+
+The same boundary is enforced again at the Tripo and fal network entry points,
+so legacy routes, retries, background pollers, and direct imports cannot bypass
+provider selection. Strict mode also refuses historical Tripo polling; there is
+no automatic migration-drain exception. This lets old records remain auditable
+without allowing them to keep the application dependent on an outside modeler.

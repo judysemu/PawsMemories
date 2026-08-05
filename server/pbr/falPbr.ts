@@ -4,6 +4,7 @@ import net from "node:net";
 import sharp from "sharp";
 import { z } from "zod";
 import { WARDROBE_PBR_MAP_KINDS, type WardrobePbrMapKind } from "../../shared/wardrobePbrCatalog";
+import { assertExternalGenerativeProviderAllowed } from "../externalGenerativePolicy";
 
 export const FAL_PBR_ENDPOINT = "fal-ai/patina/material" as const;
 export const FAL_PBR_MAP_KINDS = WARDROBE_PBR_MAP_KINDS;
@@ -260,6 +261,7 @@ export async function generateFalPbrMaterial(
     expectedDimension?: number;
   } = {},
 ): Promise<GeneratedFalPbrMaterial> {
+  assertExternalGenerativeProviderAllowed("fal");
   const normalized = normalizeFalPbrInput(input);
   const apiKey = String(options.apiKey ?? process.env.FAL_KEY ?? "").trim();
   if (!apiKey) {
