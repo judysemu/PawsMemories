@@ -114,6 +114,7 @@ import { analyzePetImage, type PetAnalysis } from "./ollama-agent";
 import { getBlenderClient } from "./agent/tools/blender_client";
 import { startTalkingVideo, pollTalkingVideo, fetchMp4AsDataUrl, isHeyGenHandle } from "./heygen";
 import { startImageTo3D, pollImageTo3D, isTripoHandle, startRig, pollTripoTask, isTripoInsufficientCredit, TripoError } from "./tripo";
+import { rejectLegacyExternal3dRoute } from "./server/externalGenerativePolicy";
 import { checkBudget, needsRetargetFallback, type BakeStats } from "./server/rigBudget";
 import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
@@ -4603,12 +4604,12 @@ async function startServer() {
       }
     }
   }
-  if (!isModelBuildV3Enabled()) {
+  if (!isModelBuildV3Enabled() && process.env.PAWS_3D_INHOUSE_ONLY !== "true") {
     resumeStalledBuilds();
     setInterval(resumeStalledBuilds, 3 * 60 * 1000);
   }
 
-  app.get("/api/avatars/:id/status", requireAuth, async (req: AuthedRequest, res) => {
+  app.get("/api/avatars/:id/status", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     try {
       const avatarId = Number(req.params.id);
       const avatar = await getAvatarById(avatarId, req.user!.phone);
@@ -4812,7 +4813,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/avatars/:id/retry", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/avatars/:id/retry", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
     try {
       const avatarId = Number(req.params.id);
@@ -7004,7 +7005,7 @@ async function startServer() {
     warnings: z.array(z.string()).optional(),
   });
 
-  app.post("/api/create-pipeline/approve", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/create-pipeline/approve", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     try {
       const { sessionId, idempotencyKey } = req.body;
       const userPhone = req.user!.phone;
@@ -7119,7 +7120,7 @@ async function startServer() {
   // a "meshy:" prefix so the shared pollers route it correctly. Output is a GLB
   // model stored on the creation's model_url (media_type 'model').
   const MODEL_COST = CREDIT_PRICES.STATIC_3D_PHOTO;
-  app.post("/api/create-3d-model", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/create-3d-model", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
     try {
       const { creationId } = req.body;
@@ -7257,7 +7258,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/image-to-3d", requireAuth, async (req: AuthedRequest, res) => {
+  app.post("/api/image-to-3d", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
     try {
       const { image, multiview, geometry } = req.body || {};
@@ -7356,7 +7357,7 @@ async function startServer() {
 
   // Status alias — delegates to the existing /api/jobs/:id poller which already
   // handles Tripo handles. This gives the image-to-3d UI a clean URL.
-  app.get("/api/image-to-3d/:jobId/status", requireAuth, async (req: AuthedRequest, res) => {
+  app.get("/api/image-to-3d/:jobId/status", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res) => {
     try {
       const jobId = parseInt(req.params.jobId, 10);
       const job = await getJob(jobId, req.user!.phone);

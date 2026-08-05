@@ -14,6 +14,7 @@ import {
   startTripoImageToMultiview,
 } from "../tripo.ts";
 import { generateFalPbrMaterial } from "../server/pbr/falPbr.ts";
+import { rejectLegacyExternal3dRoute } from "../server/externalGenerativePolicy.ts";
 
 const BLOCKED_CODE = "INHOUSE_EXTERNAL_PROVIDER_BLOCKED";
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -85,4 +86,55 @@ test("example production configuration points at in-house generation and keeps c
   assert.match(example, /^TRELLIS_WORKER_URL=""$/m);
   assert.match(example, /^TRELLIS_WORKER_SHARED_SECRET=""$/m);
   assert.match(example, /^TRIPO_API_KEY=""$/m);
+});
+
+test("legacy route middleware rejects before the route handler in strict mode", (t) => {
+  const previousMode = process.env.PAWS_3D_INHOUSE_ONLY;
+  process.env.PAWS_3D_INHOUSE_ONLY = "true";
+  t.after(() => {
+    if (previousMode === undefined) delete process.env.PAWS_3D_INHOUSE_ONLY;
+    else process.env.PAWS_3D_INHOUSE_ONLY = previousMode;
+  });
+
+  let nextCalls = 0;
+  let responseStatus = 0;
+  let responseBody;
+  rejectLegacyExternal3dRoute(
+    {},
+    {
+      status(code) {
+        responseStatus = code;
+        return { json(value) { responseBody = value; } };
+      },
+    },
+    () => { nextCalls += 1; },
+  );
+  assert.equal(nextCalls, 0);
+  assert.equal(responseStatus, 503);
+  assert.equal(responseBody.code, BLOCKED_CODE);
+});
+
+test("all known legacy customer 3D routes mount the pre-charge strict-mode guard", () => {
+  const server = fs.readFileSync(path.join(ROOT, "server.ts"), "utf8");
+  const snapgen = fs.readFileSync(path.join(ROOT, "server/snapgen.ts"), "utf8");
+  const references = fs.readFileSync(path.join(ROOT, "server/reference-sessions/routes.ts"), "utf8");
+  const petSim = fs.readFileSync(path.join(ROOT, "server/petSimRouter.ts"), "utf8");
+
+  for (const route of [
+    "/api/avatars/:id/status",
+    "/api/avatars/:id/retry",
+    "/api/create-pipeline/approve",
+    "/api/create-3d-model",
+    "/api/image-to-3d",
+    "/api/image-to-3d/:jobId/status",
+  ]) {
+    assert.match(server, new RegExp(`app\\.(?:get|post)\\(\"${route.replaceAll("/", "\\/")}\", requireAuth, rejectLegacyExternal3dRoute`));
+  }
+  assert.match(server, /!isModelBuildV3Enabled\(\) && process\.env\.PAWS_3D_INHOUSE_ONLY !== "true"/);
+  assert.match(snapgen, /app\.post\("\/api\/snapgen\/orders", requireAuth, rejectLegacyExternal3dRoute/);
+  assert.match(snapgen, /app\.get\("\/api\/snapgen\/orders\/:id\/status", requireAuth, rejectLegacyExternal3dRoute/);
+  assert.match(snapgen, /app\.post\("\/api\/snapgen\/orders\/:id\/remake", requireAuth, rejectLegacyExternal3dRoute/);
+  assert.match(references, /router\.post\("\/start", rejectLegacyExternal3dRoute/);
+  assert.match(references, /router\.post\("\/retry", rejectLegacyExternal3dRoute/);
+  assert.match(petSim, /router\.post\("\/api\/pets\/:id\/rig", requireAuth, rejectLegacyExternal3dRoute, paidLimiter/);
 });

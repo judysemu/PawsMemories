@@ -13,6 +13,7 @@ import {
 import { ReferenceSessionService, ReferenceSessionError } from "./service";
 import { TripoReferenceImageProvider, type ReferenceImageProvider } from "./provider";
 import type { ReferenceStorageAdapter } from "./storage";
+import { rejectLegacyExternal3dRoute } from "../externalGenerativePolicy";
 
 function getRequestUserPhone(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -67,7 +68,7 @@ export function createReferenceSessionsRouter(
   /**
    * POST /api/reference-sessions/start
    */
-  router.post("/start", async (req: Request, res: Response) => {
+  router.post("/start", rejectLegacyExternal3dRoute, async (req: Request, res: Response) => {
     try {
       const userPhone = getRequestUserPhone(req);
       if (!userPhone) return res.status(401).json({ success: false, error: "Authentication required" });
@@ -97,7 +98,7 @@ export function createReferenceSessionsRouter(
   /**
    * POST /api/reference-sessions/retry
    */
-  router.post("/retry", async (req: Request, res: Response) => {
+  router.post("/retry", rejectLegacyExternal3dRoute, async (req: Request, res: Response) => {
     try {
       const userPhone = getRequestUserPhone(req);
       if (!userPhone) return res.status(401).json({ success: false, error: "Authentication required" });

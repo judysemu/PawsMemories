@@ -14,6 +14,7 @@ import {
   reserveSnapgenOrder,
   snapgenSha256,
 } from "./snapgenStore";
+import { rejectLegacyExternal3dRoute } from "./externalGenerativePolicy";
 
 /**
  * SnapGen API — pic-to-3D storefront (Phase 0).
@@ -198,7 +199,7 @@ export function registerSnapgenRoutes(app: Express): void {
   });
 
   /** Create an order: verify purchase, upload photo, start Tripo job. */
-  app.post("/api/snapgen/orders", requireAuth, async (req: AuthedRequest, res: Response) => {
+  app.post("/api/snapgen/orders", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res: Response) => {
     let durableOrderId: number | null = null;
     try {
       const userKey = req.user!.phone;
@@ -258,7 +259,7 @@ export function registerSnapgenRoutes(app: Express): void {
   });
 
   /** Poll order status; updates DB from Tripo. */
-  app.get("/api/snapgen/orders/:id/status", requireAuth, async (req: AuthedRequest, res: Response) => {
+  app.get("/api/snapgen/orders/:id/status", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res: Response) => {
     let activeOrderId: number | null = null;
     let activeLeaseOwner: string | null = null;
     try {
@@ -354,7 +355,7 @@ export function registerSnapgenRoutes(app: Express): void {
   });
 
   /** Remake an owned model at 50% off (separate half-price SKU). */
-  app.post("/api/snapgen/orders/:id/remake", requireAuth, async (req: AuthedRequest, res: Response) => {
+  app.post("/api/snapgen/orders/:id/remake", requireAuth, rejectLegacyExternal3dRoute, async (req: AuthedRequest, res: Response) => {
     let durableOrderId: number | null = null;
     try {
       const userKey = req.user!.phone;

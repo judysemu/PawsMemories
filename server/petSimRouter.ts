@@ -21,6 +21,7 @@
 
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth, type AuthedRequest } from "../auth";
+import { rejectLegacyExternal3dRoute } from "./externalGenerativePolicy";
 import rateLimit from "express-rate-limit";
 import {
   isEndpointEnabled,
@@ -224,7 +225,7 @@ export function createPetSimRouter(deps: PetSimDeps): Router {
   });
 
   // POST /api/pets/:id/rig — auto-rig a pet's avatar (DISABLED by default).
-  router.post("/api/pets/:id/rig", requireAuth, paidLimiter, async (req: AuthedRequest, res: Response) => {
+  router.post("/api/pets/:id/rig", requireAuth, rejectLegacyExternal3dRoute, paidLimiter, async (req: AuthedRequest, res: Response) => {
     // P0 containment: rig stays disabled unless explicitly enabled.
     if (process.env.PETSIM_RIG_ENABLED !== "true") {
       return res.status(501).json({ error: "Rig pipeline disabled.", featureFlag: "PETSIM_RIG_ENABLED", enabled: false });
