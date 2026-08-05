@@ -18,7 +18,7 @@ from pathlib import Path
 from validation import canonical_target_name, facial_capability, measure_morph, print_metrics_pass, quaternion_xyzw
 
 
-PIPELINE_ALGORITHM_VERSION = "paws-rig-blender-1"
+PIPELINE_ALGORITHM_VERSION = "paws-rig-blender-2"
 MIN_SEMANTIC_REGION_VERTICES = 12
 PARENT_BY_BONE = {
     "spine": "hip",
@@ -334,6 +334,18 @@ def _non_manifold_count(meshes) -> int:
     for obj in meshes:
         bm = bmesh.new()
         bm.from_mesh(obj.data)
+        # glTF import may split otherwise identical positions at UV, normal,
+        # material, or skinning seams. Counting those render-vertex splits as
+        # open geometry makes a watertight GLB appear entirely non-manifold.
+        # Weld only a disposable BMesh copy at a scale-relative near-zero
+        # distance; the source mesh, UVs, normals, and exported bytes are not
+        # modified by this topology measurement.
+        if bm.verts:
+            minimum = [min(vertex.co[axis] for vertex in bm.verts) for axis in range(3)]
+            maximum = [max(vertex.co[axis] for vertex in bm.verts) for axis in range(3)]
+            extent = max(maximum[axis] - minimum[axis] for axis in range(3))
+            weld_distance = max(extent * 1e-9, 1e-12)
+            bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=weld_distance)
         count += sum(1 for edge in bm.edges if not edge.is_manifold)
         bm.free()
     return count
