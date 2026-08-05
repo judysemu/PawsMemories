@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:36 MDT
+Last updated: 2026-08-05 10:45 MDT
 
 ## Definition of done
 
@@ -12,8 +12,9 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 
 ## Current state
 
+- **PAUSED BY USER at 2026-08-05 10:45 MDT.** Do not provision a GPU, deploy production, or resume model installation until the user explicitly resumes this goal.
 - Azure resource group `Trellis` contains the running core/orchestrator VM and an isolated GibiWorld VM. Resource addresses, subscription identifiers, tenant identifiers, and secrets are deliberately omitted here.
-- GPU-family quota remains zero in the checked US regions. No compatible private GPU worker has been allocated and no real TRELLIS inference has run.
+- GPU-family quota remains zero in the checked US regions. The manual East US 2 A100 request was denied with Azure code `QuotaNotAvailableForResource`; no compatible private GPU worker has been allocated and no real TRELLIS inference has run.
 - Exact TRELLIS.2 source revision: `75fbf0183001ed9876c8dbb35de6b68552ee08bd`.
 - The immutable four-model bundle is complete in Azure: 37 manifest-tracked files and 18,482,646,202 bytes.
 - A fresh private Blob readback transferred 113 objects and independently rehashed all 37 tracked files with zero failures. The manifest state, lock hash, and local runtime model paths pass.
@@ -22,17 +23,26 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 - The first full worker image `7a3dbcc` compiled successfully but is rejected: `pip check` failed and importing Transformers raised an error because Hugging Face Hub 0.34.4 was incompatible with Transformers 5.14.1.
 - Commit `ab389ca` pins the compatible runtime pair, adds a mandatory `pip check`, and separates the expensive CUDA-extension layer from the small runtime layer. Its persistent Azure build passed and produced the candidate image `paws-trellis2:75fbf018-ab389ca` at 9,112,738,036 bytes with no broken package requirements. The candidate is rejected pending repair because offline smoke tests found the TRELLIS source missing from Python's import path and CuMesh loading an older Conda `libstdc++` without `GLIBCXX_3.4.30`.
 - Commit `b74ca0c` applies the verified runtime-only repair while preserving the cached CUDA-extension layer. Persistent Azure build unit `paws-trellis-build-b74ca0c` exited successfully and produced `paws-trellis2:75fbf018-b74ca0c` at 9,112,739,312 bytes. No deployability is claimed until it passes offline smoke tests; provenance currently rests on the immutable build-context check and tag because the image has no source-revision label.
+- The accepted image is also preserved in private Blob storage as a 9,083,773,141-byte compressed OCI archive. Managed-identity upload and fresh private readback completed with integrity checks; the transfer emitted no sensitive values.
 - Existing Azure Blender proof for an imported textured pet remains valid: 16-bone rig, 16,085 weighted vertices, zero unweighted islands, 15 clips, and saved `idle` and `walk` animations. This proves rig/animation for an existing GLB, not image-to-mesh generation.
 - Local strict mode blocks known Tripo/fal calls and legacy external-generation routes before their handlers. Production still runs the older external-provider release and has not been cut over.
 - The active worktree is expected to remain clean after each checkpoint. Local `main` is intentionally ahead of `origin/main`; nothing in this handoff claims a production deployment.
 
+## Pause boundary
+
+- East US 2 denial is confirmed as `QuotaNotAvailableForResource`; the user is manually trying other Azure regions.
+- At the last live check, the compatible GPU-family limit was still zero. A portal request marked received or pending is not approval; resume only after the CLI reports a sufficient applied limit.
+- No GPU VM exists, so no GPU charge is running. The completed build and private-cache units are inactive/dead.
+- Implementation checkpoint `e408662` adds the value-safe, managed-identity image-cache helper. The accepted `b74ca0c` worker image and all four pinned model repositories passed private Blob readback.
+- The next agent must preserve the provider-neutral adapters and strict no-external-provider policy. Do not restore archived Tripo/remediation material or introduce a silent fallback.
+
 ## Current blocker and next action
 
-1. Package the CPU-accepted `b74ca0c` image into the private Azure cache with hash readback.
-2. Obtain 24 `NCADS_A100_v4` family vCPUs in East US and allocate the private GPU worker.
-3. Prove the remaining `o_voxel`/FlexGEMM imports on the NVIDIA driver.
-4. Load all four local models with outbound model access disabled.
-5. Run one real pet image through TRELLIS, Blender rigging, animation bake, and final GLB validation.
+1. Wait for the user to resume, then identify which manually tried region—if any—has an applied compatible GPU-family limit.
+2. If none is approved, escalate `QuotaNotAvailableForResource` through Microsoft for Startups Program Support; do not create a CPU substitute or Marketplace image.
+3. If quota is live, allocate only the private GPU worker in that region; keep the East US core and GibiWorld hosts intact.
+4. Restore the hash-verified worker image and four-model bundle from private Blob storage.
+5. Prove `o_voxel`/FlexGEMM on the NVIDIA driver, load models offline, and run the real pet image through TRELLIS, Blender rigging, animation bake, and final GLB validation.
 6. Only after that proof, deploy the strict in-house customer path and verify production with external provider calls disabled.
 
 ## Test ledger
@@ -69,6 +79,17 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:33 MDT — CONFIRMED PENDING — Broader live quota lookup found `StandardNCADSA100v4Family` in East US 2 at current 0 / limit 0, while `Standard_NC24ads_A100_v4` is listed as a 24-vCPU regional size. Azure has received the 24-vCPU request but has not approved/applied it. No GPU VM will be created until the live limit becomes 24.
 - 2026-08-05 10:34 MDT — PASS — Private image-cache preflight on the core host: AzCopy, Zstandard, and SHA-256 tooling are installed; the accepted `b74ca0c` image is present; and more than 100 GB of `/opt` disk headroom remains. No archive or upload was started by this test.
 - 2026-08-05 10:36 MDT — PASS — Private image-cache helper validation: shell syntax passed, 4/4 immutable model/runtime/cache security tests passed, and the full TypeScript check passed. The helper uses managed identity, refuses credential query strings, keeps transfer details out of standard output, and requires SHA-256 plus manifest byte comparison after a fresh private Blob readback.
+- 2026-08-05 10:36 MDT — FAIL / NO EXECUTION — First helper transfer stopped because its new revision-specific destination directory did not exist. The helper was not installed or run, and no archive/upload began. The already transferred temporary file remains isolated for the directory-creation retry.
+- 2026-08-05 10:36 MDT — PASS — Helper transfer retry created the exact revision-specific tool directory, installed commit `e408662`, removed the temporary transfer, and matched the committed local script SHA-256. No archive/upload began during the verification.
+- 2026-08-05 10:36 MDT — IN PROGRESS — Persistent unit `paws-trellis-cache-b74ca0c` started the accepted image export, managed-identity private upload, and fresh Blob readback. Completion requires unit success plus the helper's archive SHA-256 and manifest byte comparisons.
+- 2026-08-05 10:40 MDT — PASS — Private worker-image cache: persistent unit exited with result `success` and status 0. The helper reported state `complete`, build revision `b74ca0c`, 9,083,773,141 archive bytes, private readback `true`, and values printed `false`; host disk headroom remained healthy.
+- 2026-08-05 10:41 MDT — INCONCLUSIVE — First sanitized Azure quota-request history query returned one record but the expected status/message fields were absent under the assumed schema. No request or account identifiers were printed. A key-only schema inspection is required to locate Azure's denial reason safely.
+- 2026-08-05 10:41 MDT — PASS — Key-only quota schema inspection found Azure returns denial status, message, error, submission time, and requested values at the top level rather than under `properties`. No field values, request IDs, or account identifiers were printed by this schema check.
+- 2026-08-05 10:42 MDT — DENIED / ACTION REQUIRED — Sanitized Azure quota history confirms the 24-vCPU `STANDARDNCADSA100V4FAMILY` request failed with `QuotaNotAvailableForResource`. Azure supplied no more specific explanation than “Request failed.” The live limit remains zero; no GPU resource exists or is accruing charges.
+- 2026-08-05 10:43 MDT — INCONCLUSIVE — First cross-region A100/H100 SKU query returned no rows under the selected `list-skus --size` filter, so it provides no regional recommendation. No provisioning or quota request occurred; a broader SKU query is required if alternate-region evidence is needed for support.
+- 2026-08-05 10:44 MDT — INCONCLUSIVE — The unfiltered `list-skus --all` catalog also returned no exact A100/H100 rows for this subscription, despite the legacy regional size catalog listing A100 in East US 2. This mismatch cannot prove capacity or approval eligibility. Regional size and live quota checks remain the safer evidence while manual requests are tried.
+- 2026-08-05 10:45 MDT — PAUSED — User is trying quota requests in other regions and explicitly paused the goal. No active worker/cache job remains, no GPU VM exists, and no further Azure mutation or model-chain implementation is authorized until resume.
+- 2026-08-05 10:45 MDT — PASS — Pause-checkpoint whitespace validation passed before commit. Only the handoff and simple status tracker were included; no runtime, Azure resource, or production change was made.
 
 ## Operational references
 
@@ -78,4 +99,5 @@ All entries record evidence, not intent. Secret values are never included.
 - Model lock: `infra/azure/models/trellis2.lock.json`
 - Secure gated staging helper: `infra/azure/scripts/complete-trellis-gated-staging.sh`
 - Worker Dockerfile: `trellis-worker/Dockerfile`
-- Active corrected build unit: `paws-trellis-build-b74ca0c`
+- Completed corrected build unit: `paws-trellis-build-b74ca0c`
+- Completed private image-cache unit: `paws-trellis-cache-b74ca0c`

@@ -75,9 +75,14 @@
 <main>
   <div class="headline">
     <h1>Pawsome3D In-House 3D</h1>
-    <span class="badge work">IN PROGRESS</span>
+    <span class="badge pending">PAUSED</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 10:33 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 10:45 MDT · Auto-refreshes every 30 seconds</p>
+
+  <section class="panel callout">
+    <h2>Pause boundary</h2>
+    <p><span class="badge pending">USER PAUSED</span> East US 2 denied the A100 request. The user is trying other regions; engineering will not provision a GPU or resume installation until the user explicitly resumes and Azure shows an applied quota limit.</p>
+  </section>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -95,7 +100,7 @@
     <section class="panel">
       <h2>Current blocker</h2>
       <div class="metric blocked">GPU QUOTA</div>
-      <p>Azure has received a request for 24 <code>NCADS_A100_v4</code> family vCPUs in East US 2, but the live limit is still 0. No GPU VM will be created until Azure applies the requested limit.</p>
+      <p>Azure denied the 24-vCPU East US 2 A100 request with <code>QuotaNotAvailableForResource</code>. The last verified live limit remains 0. The user is trying other regions; no result counts until Azure applies a sufficient limit.</p>
     </section>
     <section class="panel">
       <h2>Runtime policy</h2>
@@ -116,6 +121,7 @@
     <p><span class="badge pass">BLOB READBACK PASS</span> Managed identity promoted the gated files, complete manifest, and lock with zero failures. A fresh private-cache download transferred 113 objects and 18,482,650,117 bytes including cache metadata, then rehashed all 37 tracked files and 18,482,646,202 tracked bytes with zero failures.</p>
     <p><span class="badge pass">ACCESS COMPLETE</span> Both RMBG and DINOv3 access requests were accepted and downloaded through the value-safe input stream in commit <code>5cca002</code>. The temporary token is no longer required; no runtime model request may leave Azure.</p>
     <p><span class="badge pass">CPU-SIDE IMAGE PASS</span> Candidate <code>b74ca0c</code> built successfully at 9,112,739,312 bytes. With Docker networking disabled, package checks and CPU-safe TRELLIS/FlashAttention/nvdiffrast/CuMesh imports pass. The service starts, enforces authentication, and stays <code>not_ready</code> without CUDA and mounted models. The final <code>o_voxel</code>/FlexGEMM import and inference proof correctly remain pending for the NVIDIA worker.</p>
+    <p><span class="badge pass">PRIVATE IMAGE READBACK PASS</span> Managed identity stored the accepted image as a 9,083,773,141-byte compressed OCI archive, downloaded it fresh from private Blob storage, and passed archive SHA-256 plus manifest byte comparison. The transfer printed no sensitive values.</p>
     <p class="subtle">The bundle is portable installation data, not application architecture. No serving process can use Hugging Face or another model API at runtime.</p>
   </section>
 
@@ -136,11 +142,11 @@
         <tr><td><span class="badge pass">PASS</span></td><td>GibiWorld VM</td><td><code>pawstrellis-gibi-01</code><br>Standard_D4ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Platform services</td><td>VNet, NSGs, Key Vault, Blob Storage, Log Analytics</td><td>Created by validated Bicep; blobs are non-public and access is identity-based. Existing Azure AI resources were untouched.</td></tr>
         <tr><td><span class="badge work">REGISTERING</span></td><td>Microsoft.Network provider</td><td>Subscription-level registration</td><td>Registration was safely re-requested and remains in progress. Existing network resources are live, but full preflight waits for <code>Registered</code>.</td></tr>
-        <tr><td><span class="badge work">PENDING</span></td><td>A100 quota</td><td>24 NCads A100 v4 cores, East US 2</td><td>Azure received the request; live CLI evidence remains current 0 / limit 0. The 24-vCPU VM size is listed in the region.</td></tr>
+        <tr><td><span class="badge blocked">DENIED</span></td><td>A100 quota</td><td>24 NCads A100 v4 cores, East US 2</td><td>Azure returned <code>QuotaNotAvailableForResource</code>; live evidence remains current 0 / limit 0. The user is trying other regions. No GPU VM or charge exists.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>H100 quota</td><td>40 NCads H100 v5 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>NC A10 quota</td><td>16 NCads A10 v4 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>NV A10 quota</td><td>36 NVads A10 v5 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
-        <tr><td><span class="badge work">RECEIVED</span></td><td>Azure quota request</td><td>Sponsored subscription</td><td>The manual quota request was accepted for review and remains pending.</td></tr>
+        <tr><td><span class="badge blocked">ESCALATE</span></td><td>Startup Program Support</td><td>Sponsored subscription</td><td>Request one 24-vCPU <code>NCADS_A100_v4</code> allocation in East US 2 or another supported US region, citing the denial code.</td></tr>
         <tr><td><span class="badge blocked">WAITING</span></td><td>GPU worker VM</td><td>Private address redacted</td><td>Will be created only after a compatible GPU family quota is granted.</td></tr>
       </tbody>
     </table>
@@ -155,7 +161,7 @@
         <tr><td><span class="badge pass">PASS</span></td><td>TRELLIS worker contract</td><td>Pinned source, direct authenticated image upload, durable base/finalization status, verified GLB artifact endpoints, runtime offline flags.</td></tr>
         <tr><td><span class="badge blocked">BLOCKED</span></td><td>GPU capacity</td><td>Azure Support must grant 24 A100 or 40 H100 family vCPUs before the private GPU VM can be allocated.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Upstream compatibility audit</td><td>The install manifest pins the model dependency graph and configures A100/A10/H100 CUDA architectures. An actual image build and loaded model remain separate pending gates.</td></tr>
-        <tr><td><span class="badge work">CPU PASS</span></td><td>Model readiness</td><td>All four pinned dependencies passed private-cache readback and full hash verification. The corrected image passes offline CPU imports and fail-closed service checks. GPU-only FlexGEMM loading and a real inference run remain outstanding; no model API call is allowed during serving.</td></tr>
+        <tr><td><span class="badge work">CPU PASS</span></td><td>Model readiness</td><td>All four pinned dependencies and the accepted worker image passed private-cache readback and integrity verification. The corrected image passes offline CPU imports and fail-closed service checks. GPU-only FlexGEMM loading and a real inference run remain outstanding; no model API call is allowed during serving.</td></tr>
         <tr><td><span class="badge work">LOCAL PASS</span></td><td>Replaceable boundaries + kill switch</td><td>Generic generation/finalization ports remain replaceable. Local strict-mode tests block every Tripo network entry point, fal authoring, historical polls, and known legacy customer routes before their handlers. Production still runs an older release, so this is not yet a live pass.</td></tr>
         <tr><td><span class="badge work">NOT DEPLOYED</span></td><td>Customer-path cutover</td><td>The replaceable paid adapter covers TRELLIS base, measured rig-check, rigging, and animation finalization without external fallback. The separate paid texture stage stays closed because TRELLIS already returns PBR texture. Customer flags remain off and the older Tripo-backed production release remains unchanged until live proof.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Fixture matrix + Drive intake</td><td>Six baseline samples distinguish independent gates. All 76 dropped GLBs parse as self-contained textured meshes: 12 are likely passable after visual review, 3 need joint mapping, 31 need animation, 30 need rigging, and none are structurally unusable. One real sample from each bucket also passed the hash-verified internal handoff unchanged. Nothing is being discarded automatically.</td></tr>
