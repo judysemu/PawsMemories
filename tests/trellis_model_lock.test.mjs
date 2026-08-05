@@ -39,6 +39,9 @@ test("runtime compose and worker build stay aligned with the model lock", () => 
   const dockerfile = fs.readFileSync(path.join(ROOT, "trellis-worker/Dockerfile"), "utf8");
 
   assert.match(dockerfile, new RegExp(lock.source.revision));
+  assert.match(dockerfile, /^FROM nvidia\/cuda:12\.4\.1-devel-ubuntu22\.04@sha256:[a-f0-9]{64}$/m);
+  assert.match(dockerfile, /^ARG MINICONDA_SHA256=[a-f0-9]{64}$/m);
+  assert.match(dockerfile, /sha256sum -c -/);
   for (const model of lock.models) {
     assert.match(compose, new RegExp(model.revision));
   }

@@ -1,7 +1,8 @@
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:da6791294b0b04d7e65d87b7451d6f2390b4d36225ab0701ee7dfec5769829f5
 
 ARG TRELLIS2_COMMIT=75fbf0183001ed9876c8dbb35de6b68552ee08bd
 ARG TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0"
+ARG MINICONDA_SHA256=84bd8f60fea2e09f1fa72f258132337aff7a20ec1e12dea9d1eff96830cf3d8c
 ARG DEBIAN_FRONTEND=noninteractive
 
 ENV CUDA_HOME=/usr/local/cuda-12.4 \
@@ -17,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_25.5.1-1-Linux-x86_64.sh -o /tmp/miniconda.sh && \
+    echo "${MINICONDA_SHA256}  /tmp/miniconda.sh" | sha256sum -c - && \
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh
 
