@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 11:20 MDT
+Last updated: 2026-08-05 11:32 MDT
 
 ## Definition of done
 
@@ -14,7 +14,7 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 
 - **GPU provisioning remains paused.** At 2026-08-05 11:04 MDT the user explicitly authorized Azure Quota API work only. Quota inspection/request repair may proceed, but do not provision a GPU, deploy production, or resume model installation until quota is applied and the user authorizes the next phase.
 - Azure resource group `Trellis` contains the running core/orchestrator VM and an isolated GibiWorld VM. Resource addresses, subscription identifiers, tenant identifiers, and secrets are deliberately omitted here.
-- GPU-family quota remains zero in the checked US regions. The manual East US 2 A100 request was denied with Azure code `QuotaNotAvailableForResource`; no compatible private GPU worker has been allocated and no real TRELLIS inference has run.
+- GPU-family quota remains zero. The Quota API has now exhausted every standard US region where this subscription lists `Standard_NC24ads_A100_v4`: Central US, East US, East US 2, South Central US, West US, West US 2, and West US 3. Every latest request is failed and every applied family limit is 0; no compatible private GPU worker has been allocated and no real TRELLIS inference has run.
 - Exact TRELLIS.2 source revision: `75fbf0183001ed9876c8dbb35de6b68552ee08bd`.
 - The immutable four-model bundle is complete in Azure: 37 manifest-tracked files and 18,482,646,202 bytes.
 - A fresh private Blob readback transferred 113 objects and independently rehashed all 37 tracked files with zero failures. The manifest state, lock hash, and local runtime model paths pass.
@@ -30,13 +30,16 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 
 ## Pause boundary
 
-- East US 2 denial is confirmed as `QuotaNotAvailableForResource`; the user is manually trying other Azure regions.
+- A final consolidated API read confirms Central US, East US 2, and West US 3 failed with `QuotaNotAvailableForResource`; East US, South Central US, West US, and West US 2 failed with `ContactSupport`. Every applied limit is 0.
 - The user subsequently authorized Azure Quota API work across the requested regions. This narrow authorization does not permit VM creation or production deployment.
 - Live Quota API reads show the A100 family is quota-applicable in Canada Central, Canada East, Central US, East US 2, Mexico Central, North Central US, and West Central US, but every region still has usage 0 and applied limit 0.
 - Quota history confirms the user's seven-region portal batch was processed, not left pending. Canada Central, Central US, and East US 2 failed with `QuotaNotAvailableForResource`. Canada East, Mexico Central, North Central US, and West Central US failed with `ContactSupport`. East US 2, Central US, and North Central US also have earlier failed attempts. Retrying those same region/family pairs without Microsoft intervention is not useful.
 - The exact `Standard_NC24ads_A100_v4` size is listed for this subscription in five additional standard US regions: East US, South Central US, West US, West US 2, and West US 3. It is not listed in North Central US or West Central US. A listing is only an eligibility hint, not capacity proof.
 - Quota API checks show the A100 family is applicable with usage 0 / applied limit 0 in all five candidates. East US already failed a 24-vCPU request with `ContactSupport`; South Central US, West US, West US 2, and West US 3 have no prior A100-family request record.
 - The new 24-vCPU South Central US Quota API request progressed and then failed with `ContactSupport`. Usage and applied limit remain 0. Do not retry that region.
+- The new 24-vCPU West US 3 request progressed and then failed with `QuotaNotAvailableForResource`; usage and applied limit remain 0. Do not retry that region.
+- The new 24-vCPU West US 2 request failed with `ContactSupport`; usage and applied limit remain 0. The local CLI long-running-operation waiter continued after Azure's server-side request was terminal, so only that local wait process was interrupted after the failure was independently confirmed.
+- The new 24-vCPU West US request failed with `ContactSupport`; usage and applied limit remain 0. This exhausts the standard public US regions where the exact size is listed for this subscription. The Quota API cannot override Azure's support/capacity decision.
 - At the last live check, the compatible GPU-family limit was still zero. A portal request marked received or pending is not approval; resume only after the CLI reports a sufficient applied limit.
 - No GPU VM exists, so no GPU charge is running. The completed build and private-cache units are inactive/dead.
 - Implementation checkpoint `e408662` adds the value-safe, managed-identity image-cache helper. The accepted `b74ca0c` worker image and all four pinned model repositories passed private Blob readback.
@@ -44,12 +47,13 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 
 ## Current blocker and next action
 
-1. Wait for the user to resume, then identify which manually tried region—if any—has an applied compatible GPU-family limit.
-2. If none is approved, escalate `QuotaNotAvailableForResource` through Microsoft for Startups Program Support; do not create a CPU substitute or Marketplace image.
-3. If quota is live, allocate only the private GPU worker in that region; keep the East US core and GibiWorld hosts intact.
-4. Restore the hash-verified worker image and four-model bundle from private Blob storage.
-5. Prove `o_voxel`/FlexGEMM on the NVIDIA driver, load models offline, and run the real pet image through TRELLIS, Blender rigging, animation bake, and final GLB validation.
-6. Only after that proof, deploy the strict in-house customer path and verify production with external provider calls disabled.
+1. Open one Microsoft for Startups Program Support case requesting **24 `StandardNCADSA100v4Family` vCPUs in East US**. State that the exact `Standard_NC24ads_A100_v4` size is listed, the self-service Quota API returns `ContactSupport`, and the sponsored subscription needs one private GPU worker for an offline 3D inference workload. Ask support to name an available US region if East US cannot be allocated.
+2. Do not repeat self-service requests, create a CPU substitute, or use a Marketplace image. The API cannot override these support/capacity decisions.
+3. After support applies quota, verify `quota show` reports at least 24 and then check actual SKU capacity; quota does not reserve hardware.
+4. If quota and capacity are live, allocate only the private GPU worker in that region; keep the East US core and GibiWorld hosts intact.
+5. Restore the hash-verified worker image and four-model bundle from private Blob storage.
+6. Prove `o_voxel`/FlexGEMM on the NVIDIA driver, load models offline, and run the real pet image through TRELLIS, Blender rigging, animation bake, and final GLB validation.
+7. Only after that proof, deploy the strict in-house customer path and verify production with external provider calls disabled.
 
 ## Test ledger
 
@@ -114,6 +118,17 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 11:18 MDT — CONFIRMED CONTACT SUPPORT — Sanitized history classified the failed South Central US request as `ContactSupport`. West US, West US 2, and West US 3 remain the clean API targets. No identifiers were emitted and no Azure state changed during this read.
 - 2026-08-05 11:19 MDT — PASS — Quota-tracker checkpoint passed Git whitespace validation. Only `handoff.md` and the simple HTML tracker are modified; no runtime, infrastructure template, secret, or model file changed.
 - 2026-08-05 11:20 MDT — PASS — Category-only scan of the quota handoff and HTML tracker found zero private-key, live-token, Azure-connection-string, credential-URL, email, subscription-ID, tenant-ID, or request-ID flags. No candidate value was printed.
+- 2026-08-05 11:21 MDT — PASS — Periodic checkpoint commit `578bca6` passed the repository's full TypeScript pre-commit check and recorded only the quota handoff/tracker changes. Local `main` is intentionally ahead of `origin/main`; no push or deployment occurred.
+- 2026-08-05 11:22 MDT — INCONCLUSIVE / VERIFY BEFORE RETRY — The West US 3 `az quota update` process completed without an observable sanitized response. It may have submitted the request; no success or failure is inferred and no duplicate may be sent until a fresh applied-limit and request-history check determines the actual state.
+- 2026-08-05 11:23 MDT — CONFIRMED IN PROGRESS — Fresh Quota API evidence shows the West US 3 request is processing for 24 A100-family vCPUs. The family is applicable, usage is 0, and the applied limit remains 0. No duplicate request or VM was created.
+- 2026-08-05 11:24 MDT — FAILED / WEST US 3 — A bounded Quota API monitor observed the new request transition from `InProgress` to `Failed`; a fresh quota read remains usage 0 / applied limit 0. No duplicate was sent and no VM exists. The sanitized error code is the next check.
+- 2026-08-05 11:25 MDT — CONFIRMED UNAVAILABLE — Sanitized history classified the West US 3 failure as `QuotaNotAvailableForResource`. West US 2 and West US remain the two clean API targets. No identifiers were emitted and no Azure state changed during this read.
+- 2026-08-05 11:27 MDT — FAILED / WEST US 2 — Independent Quota API history showed the 24-vCPU request was terminal `Failed` with `ContactSupport`; a fresh quota read remained usage 0 / applied limit 0. The CLI waiter was then interrupted locally because it had not exited after the server-side terminal result. No Azure request was cancelled or duplicated, and no VM exists.
+- 2026-08-05 11:28 MDT — CONFIRMED IN PROGRESS — Independent Quota API history shows the new West US request is processing for 24 A100-family vCPUs. Usage and applied limit remain 0. No duplicate or VM was created.
+- 2026-08-05 11:29 MDT — FAILED / WEST US — Independent Quota API history showed the 24-vCPU request was terminal `Failed` with `ContactSupport`; a fresh quota read remained usage 0 / applied limit 0. The lingering local CLI waiter was interrupted only after the server-side failure was confirmed. Every standard US region listing the exact A100 size has now been attempted or has an existing failed request; no VM exists.
+- 2026-08-05 11:30 MDT — BLOCKED / SUPPORT REQUIRED — Final sanitized Quota API read confirmed all seven standard US regions listing the exact A100 size have a failed latest request and applied limit 0. Central US, East US 2, and West US 3 report `QuotaNotAvailableForResource`; East US, South Central US, West US, and West US 2 report `ContactSupport`. No request/account identifiers were emitted. Self-service is exhausted; Microsoft for Startups support is the next authority boundary.
+- 2026-08-05 11:31 MDT — PASS — Final local status readback found all four expected quota/support markers, Git whitespace validation passed, and the handoff/tracker category scan found zero private-key, live-token, Azure-connection-string, credential-URL, email, subscription-ID, tenant-ID, or request-ID flags. No candidate value was printed.
+- 2026-08-05 11:32 MDT — PASS — The final quota checkpoint passed the repository's full TypeScript pre-commit check. The documentation-only evidence update was folded into that checkpoint without rerunning the already-passing hook; no runtime or Azure resource changed.
 
 ## Operational references
 

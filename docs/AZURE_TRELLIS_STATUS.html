@@ -75,17 +75,21 @@
 <main>
   <div class="headline">
     <h1>Pawsome3D In-House 3D</h1>
-    <span class="badge work">QUOTA API ACTIVE</span>
+    <span class="badge blocked">SUPPORT REQUIRED</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 11:20 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 11:32 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
-    <h2>Quota-only authorization</h2>
-    <p><span class="badge work">API REVIEW ACTIVE</span> The user authorized Azure Quota API inspection and request repair across the requested regions. GPU provisioning, model installation, and production deployment remain paused until Azure applies a sufficient limit and the user authorizes the next phase.</p>
+    <h2>Quota API result</h2>
+    <p><span class="badge blocked">SELF-SERVICE EXHAUSTED</span> The authorized Quota API pass is complete. GPU provisioning, model installation, and production deployment remain paused until Microsoft support applies a sufficient limit and the user authorizes the next phase.</p>
     <p><span class="badge blocked">NOT APPLIED</span> Live API reads show the A100 family is applicable in all seven requested regions, but every applied limit is still 0: Canada Central, Canada East, Central US, East US 2, Mexico Central, North Central US, and West Central US.</p>
     <p><span class="badge blocked">ALL 7 REQUESTS FAILED</span> The API proves the portal batch was processed, not left pending. Canada Central, Central US, and East US 2 returned <code>QuotaNotAvailableForResource</code>. Canada East, Mexico Central, North Central US, and West Central US returned <code>ContactSupport</code>.</p>
     <p><span class="badge pending">4 CLEAN US TARGETS</span> East US's earlier 24-vCPU request failed with <code>ContactSupport</code>. South Central US, West US, West US 2, and West US 3 are listed, quota-applicable, and have no prior A100-family request record.</p>
     <p><span class="badge blocked">SOUTH CENTRAL US FAILED</span> The new 24-vCPU API request failed with <code>ContactSupport</code>; usage and applied limit remain 0. West US, West US 2, and West US 3 are the remaining clean API targets.</p>
+    <p><span class="badge blocked">WEST US 3 UNAVAILABLE</span> Its 24-vCPU request failed with <code>QuotaNotAvailableForResource</code>.</p>
+    <p><span class="badge blocked">WEST US 2 FAILED</span> Its 24-vCPU request failed with <code>ContactSupport</code>; usage and applied limit remain 0. West US is the last clean listed US API target.</p>
+    <p><span class="badge blocked">WEST US FAILED</span> The final clean listed US request failed with <code>ContactSupport</code>; usage and applied limit remain 0.</p>
+    <p><span class="badge blocked">SUPPORT REQUIRED</span> The Quota API has exhausted every standard US region where this subscription lists the exact A100 size. It cannot override Microsoft's support/capacity decision; a Microsoft for Startups support case is now required.</p>
     <p class="subtle">Request identifiers, subscription identifiers, tenant identifiers, and secret values remain omitted.</p>
     <p class="subtle">A portal receipt is not approval. Request identifiers and account identifiers are deliberately omitted.</p>
   </section>
@@ -106,7 +110,7 @@
     <section class="panel">
       <h2>Current blocker</h2>
       <div class="metric blocked">GPU QUOTA</div>
-      <p>Azure denied the 24-vCPU East US 2 A100 request with <code>QuotaNotAvailableForResource</code>. The last verified live limit remains 0. The user is trying other regions; no result counts until Azure applies a sufficient limit.</p>
+      <p>The Quota API exhausted all seven standard US regions where this subscription lists the exact A100 size. Every latest request failed and every applied limit remains 0. Microsoft support must now apply the quota.</p>
     </section>
     <section class="panel">
       <h2>Runtime policy</h2>
@@ -148,11 +152,11 @@
         <tr><td><span class="badge pass">PASS</span></td><td>GibiWorld VM</td><td><code>pawstrellis-gibi-01</code><br>Standard_D4ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Platform services</td><td>VNet, NSGs, Key Vault, Blob Storage, Log Analytics</td><td>Created by validated Bicep; blobs are non-public and access is identity-based. Existing Azure AI resources were untouched.</td></tr>
         <tr><td><span class="badge work">REGISTERING</span></td><td>Microsoft.Network provider</td><td>Subscription-level registration</td><td>Registration was safely re-requested and remains in progress. Existing network resources are live, but full preflight waits for <code>Registered</code>.</td></tr>
-        <tr><td><span class="badge blocked">DENIED</span></td><td>A100 quota</td><td>24 NCads A100 v4 cores, East US 2</td><td>Azure returned <code>QuotaNotAvailableForResource</code>; live evidence remains current 0 / limit 0. The user is trying other regions. No GPU VM or charge exists.</td></tr>
+        <tr><td><span class="badge blocked">DENIED</span></td><td>A100 quota</td><td>24 NCads A100 v4 cores, seven listed US regions</td><td>Central US, East US 2, and West US 3 returned <code>QuotaNotAvailableForResource</code>. East US, South Central US, West US, and West US 2 returned <code>ContactSupport</code>. All applied limits remain 0; no GPU VM or charge exists.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>H100 quota</td><td>40 NCads H100 v5 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>NC A10 quota</td><td>16 NCads A10 v4 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
         <tr><td><span class="badge blocked">FAILED</span></td><td>NV A10 quota</td><td>36 NVads A10 v5 cores, East US</td><td>Self-service request failed with <code>ContactSupport</code>.</td></tr>
-        <tr><td><span class="badge blocked">ESCALATE</span></td><td>Startup Program Support</td><td>Sponsored subscription</td><td>Request one 24-vCPU <code>NCADS_A100_v4</code> allocation in East US 2 or another supported US region, citing the denial code.</td></tr>
+        <tr><td><span class="badge blocked">ESCALATE</span></td><td>Startup Program Support</td><td>Sponsored subscription</td><td>Request one 24-vCPU <code>StandardNCADSA100v4Family</code> allocation in East US. Cite <code>ContactSupport</code> and ask Microsoft to name an available US region if East US cannot be allocated.</td></tr>
         <tr><td><span class="badge blocked">WAITING</span></td><td>GPU worker VM</td><td>Private address redacted</td><td>Will be created only after a compatible GPU family quota is granted.</td></tr>
       </tbody>
     </table>
@@ -182,7 +186,7 @@
 
   <section class="panel">
     <h2>Safest next action</h2>
-    <p>Use <a href="https://learn.microsoft.com/en-us/startups/microsoft-for-startups/mfs-program-support">Microsoft for Startups Program Support</a> or Founders Hub <strong>Guidance → Get paired with an advisor</strong>, then request <strong>24 Standard NCADS_A100_v4 Family vCPUs in East US</strong>. No ticket currently exists. Do not run the full deployment until the family limit is at least 24.</p>
+    <p>Use <a href="https://learn.microsoft.com/en-us/startups/microsoft-for-startups/mfs-program-support">Microsoft for Startups Program Support</a> or Founders Hub <strong>Guidance → Get paired with an advisor</strong>. Request <strong>24 Standard NCADS_A100_v4 Family vCPUs in East US</strong>, explain that the API returned <code>ContactSupport</code>, and ask Microsoft to name an available US region if East US cannot be allocated. Do not run the GPU deployment until a fresh API read shows an applied limit of at least 24.</p>
   </section>
 
   <section class="panel">
