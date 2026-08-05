@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge work">IN PROGRESS</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 08:25 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 08:59 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -105,10 +105,18 @@
     <section class="panel">
       <h2>Model intake</h2>
       <div class="metric pass">76 INSPECTED</div>
-      <p><strong>None are automatically bad.</strong> 12 are likely passable after visual playback review; 64 are usable after known repairs; 0 are structurally unusable.</p>
+      <p><strong>None are automatically bad.</strong> 12 are likely passable after visual playback review; 64 are usable after known repairs; 0 are structurally unusable. One repair-needed pet now has a live in-house Azure final.</p>
       <p><a href="MODEL_INTAKE_REPORT.html">Open the private per-file report →</a></p>
     </section>
   </div>
+
+  <section class="panel callout">
+    <h2>Live Azure proof added</h2>
+    <p><span class="badge pass">PASS</span> Commit <code>e2cb178</code> processed one real textured pet from the intake set through authenticated, self-hosted Blender rigging and animation on <code>pawstrellis-core-01</code>.</p>
+    <p>The measured rig has 16 bones, 16,085 weighted vertices, zero unweighted islands, zero boundary edges after non-destructive render-seam normalization, and a passing deformation sweep. The durable finalizer wrote a 2,164,916-byte rigged GLB and a 2,297,088-byte final GLB.</p>
+    <p>A separate Blender process reopened the final artifact with three meshes, one armature, 16 bones, and 15 clips; <code>idle</code> and <code>walk</code> were present in the saved GLB bytes. <a href="MODEL_INTAKE_REPORT.html">Open the private visual-review link →</a></p>
+    <p class="subtle">This closes the live rig/animation proof for that existing GLB. Image-to-mesh generation with TRELLIS remains blocked by Azure GPU-family quota.</p>
+  </section>
 
   <section class="panel">
     <h2>Azure resources</h2>
@@ -143,8 +151,8 @@
         <tr><td><span class="badge work">PARTIAL</span></td><td>Customer-path cutover</td><td>The replaceable paid adapter now covers TRELLIS base, measured rig-check, rigging, and animation finalization without external fallback. The separate paid texture stage stays closed because TRELLIS already returns PBR texture and a charged no-op is not acceptable. Customer flags remain off until live proof.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Fixture matrix + Drive intake</td><td>Six baseline samples distinguish independent gates. All 76 dropped GLBs parse as self-contained textured meshes: 12 are likely passable after visual review, 3 need joint mapping, 31 need animation, 30 need rigging, and none are structurally unusable. One real sample from each bucket also passed the hash-verified internal handoff unchanged. Nothing is being discarded automatically.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Real generation</td><td>A real pet image produces a valid PBR master GLB.</td></tr>
-        <tr><td><span class="badge work">LOCAL PASS</span></td><td>In-house rigging</td><td>Authenticated internal worker contract, provider-neutral artifact locator, replaceable resolver, read-only shared source, hash/size checks, and measured rig-result gate pass locally. Real Blender execution remains pending.</td></tr>
-        <tr><td><span class="badge work">LOCAL PASS</span></td><td>Animation bake</td><td>Durable coordinator requires idle/walk in both the Blender manifest and the final GLB bytes. Real clip deformation/playback remains pending.</td></tr>
+        <tr><td><span class="badge pass">LIVE PASS</span></td><td>In-house rigging</td><td>An authenticated real pet GLB passed the provider-neutral resolver, hash/size checks, 16-bone skin validation, topology gate, and deformation sweep on the Azure core VM. Two sequential control jobs also passed after state-isolation repair.</td></tr>
+        <tr><td><span class="badge pass">LIVE PASS</span></td><td>Animation bake</td><td>The durable coordinator baked 15 named clips into the real pet final. Independent byte inspection and a fresh Blender reopen both confirmed idle and walk.</td></tr>
         <tr><td><span class="badge work">PARTIAL</span></td><td>Final delivery validation</td><td>Finalizer verifies GLB structure, hashes, byte counts, embedded resources, and required clip names. Full mesh/PBR/skin/finite-transform validation still runs at the paid service boundary and needs a live artifact.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Cold restart + cost guard</td><td>Job recovery is understood and idle GPU is confirmed <code>PowerState/deallocated</code>.</td></tr>
       </tbody>
@@ -162,6 +170,7 @@
     <p><span class="badge pass">PASS</span> No email-like, private-key, credential-like, connection-string, local-path, or signed-URL strings were detected inside the 76 imported GLBs. The local report shows flag categories only and never prints a detected value.</p>
     <p><span class="badge work">FLAG</span> The broader tracked repository contains email-shaped strings in 27 text files (15 are test fixtures) and credential-shaped URLs in 6 text files (5 are test fixtures). These are potential-review flags, not confirmed secrets; their values are deliberately not printed here.</p>
     <p><span class="badge pass">PASS</span> The broader tracked scan found zero private-key markers, zero live-looking cloud token patterns, and zero Azure-style connection strings.</p>
+    <p><span class="badge pass">PASS</span> The deployed commit archives and model bundle were scanned before transfer; no private-key, cloud-token, Azure-key, or credential-in-URL pattern was found. Worker secrets were generated on the VM, never printed, and never added to Git.</p>
     <p><span class="badge pass">REDACTED</span> Public and private IP addresses plus quota request IDs are omitted from this tracker. Secret variable names remain as configuration references only; values stay outside the repository.</p>
   </section>
 
@@ -173,7 +182,7 @@
         <tr><td>Tripo image-to-3D / texture / rigging</td><td><span class="badge blocked">STILL IN CURRENT CODE</span></td><td>Rejected by the paid and model-build factories when in-house-only mode is on; retain as a replaceable adapter until live proof.</td></tr>
         <tr><td>fal PBR generation</td><td><span class="badge blocked">STILL IN CURRENT CODE</span></td><td>No call from the in-house pet path.</td></tr>
         <tr><td>Microsoft TRELLIS.2 source and weights</td><td><span class="badge work">INSTALL DOWNLOAD</span></td><td>Local immutable source/weights; offline serving.</td></tr>
-        <tr><td>Blender rigging and animation</td><td><span class="badge pass">SELF-HOSTED CODE EXISTS</span></td><td>Run and verify on Azure worker with real fixtures.</td></tr>
+        <tr><td>Blender rigging and animation</td><td><span class="badge pass">LIVE AZURE PASS</span></td><td>Real pet rigged, animated, byte-verified, and reopened without an outside model API.</td></tr>
         <tr><td>Azure infrastructure</td><td><span class="badge pass">INSIDE ACCOUNT</span></td><td>System of execution.</td></tr>
       </tbody>
     </table>
