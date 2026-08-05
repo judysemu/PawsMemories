@@ -58,9 +58,6 @@ docker_environment=(
   --env HOME=/tmp
   --env HF_HUB_DISABLE_TELEMETRY=1
 )
-if [[ -n "${HF_TOKEN:-}" ]]; then
-  docker_environment+=(--env HF_TOKEN)
-fi
 
 downloader_args=(
   --lock /work/infra/azure/models/trellis2.lock.json
@@ -71,14 +68,34 @@ if [[ "$mode" == "public-only" ]]; then
   downloader_args+=(--public-only)
 fi
 
-"${docker_command[@]}" run --rm \
-  --user "$(id -u):$(id -g)" \
-  "${docker_environment[@]}" \
-  --volume "${repo_root}:/work:ro" \
-  --volume "${stage_root}:/stage" \
-  python:3.11-slim \
-  sh -euc \
-    'python -m pip install --quiet --disable-pip-version-check --target /tmp/hfclient huggingface-hub==0.34.4 && PYTHONPATH=/tmp/hfclient python /work/infra/azure/scripts/stage_trellis_models.py "$@"' \
-  _ "${downloader_args[@]}"
+docker_args=(
+  run --rm
+  --user "$(id -u):$(id -g)"
+  "${docker_environment[@]}"
+  --volume "${repo_root}:/work:ro"
+  --volume "${stage_root}:/stage"
+)
+
+if [[ "$mode" == "complete" ]]; then
+  if [[ -z "${HF_TOKEN:-}" ]]; then
+    echo "HF_TOKEN is required for complete staging"
+    exit 2
+  fi
+
+  # Stream the credential through container stdin. This works through sudo
+  # without placing the token in Docker metadata, argv, the manifest, or disk.
+  printf '%s\n' "$HF_TOKEN" | "${docker_command[@]}" "${docker_args[@]}" \
+    --interactive \
+    python:3.11-slim \
+    sh -euc \
+      'python -m pip install --quiet --disable-pip-version-check --target /tmp/hfclient huggingface-hub==0.34.4 && IFS= read -r HF_TOKEN && export HF_TOKEN && PYTHONPATH=/tmp/hfclient python /work/infra/azure/scripts/stage_trellis_models.py "$@"' \
+    _ "${downloader_args[@]}"
+else
+  "${docker_command[@]}" "${docker_args[@]}" \
+    python:3.11-slim \
+    sh -euc \
+      'python -m pip install --quiet --disable-pip-version-check --target /tmp/hfclient huggingface-hub==0.34.4 && PYTHONPATH=/tmp/hfclient python /work/infra/azure/scripts/stage_trellis_models.py "$@"' \
+    _ "${downloader_args[@]}"
+fi
 
 echo "TRELLIS staging manifest: ${stage_root}/trellis2-staging-manifest.json"

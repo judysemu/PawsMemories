@@ -12,6 +12,8 @@ if [[ "$hf_token" != hf_* ]]; then
   exit 2
 fi
 
+echo "Token format accepted locally; resolving the private Azure staging host."
+
 core_ip="$(az vm show \
   --resource-group Trellis \
   --name pawstrellis-core-01 \
@@ -39,7 +41,8 @@ printf '%s\n' "$hf_token" | ssh \
    fi
    export HF_TOKEN
    trap "unset HF_TOKEN" EXIT
-   cd /opt/paws-model-tools/1d66783
+   echo "Token received by Azure; starting private model staging."
+   cd /opt/paws-model-tools/current
    ./infra/azure/scripts/stage-trellis-models.sh complete'
 
 unset hf_token

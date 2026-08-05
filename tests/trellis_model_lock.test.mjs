@@ -66,4 +66,7 @@ test("staging code never embeds a Hugging Face credential", () => {
   const combined = stagingFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
   assert.doesNotMatch(combined, /hf_[A-Za-z0-9]{20,}/);
   assert.doesNotMatch(combined, /HF_TOKEN\s*=\s*[^$\s]/);
+  assert.match(combined, /IFS= read -r HF_TOKEN/);
+  assert.match(combined, /--interactive/);
+  assert.doesNotMatch(combined, /docker_environment\+?=.*--env HF_TOKEN/);
 });
