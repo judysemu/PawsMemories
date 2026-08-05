@@ -58,6 +58,7 @@ test("staging code never embeds a Hugging Face credential", () => {
     lockPath,
     path.join(ROOT, "infra/azure/scripts/stage-trellis-models.sh"),
     path.join(ROOT, "infra/azure/scripts/stage_trellis_models.py"),
+    path.join(ROOT, "infra/azure/scripts/complete-trellis-gated-staging.sh"),
   ];
   const combined = stagingFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
   assert.doesNotMatch(combined, /hf_[A-Za-z0-9]{20,}/);
