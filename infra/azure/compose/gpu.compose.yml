@@ -1,0 +1,81 @@
+services:
+  trellis-model-init:
+    profiles: ["model-download"]
+    build:
+      context: ../../../trellis-worker
+      args:
+        TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+    image: paws-trellis2:75fbf018
+    user: "10001:10001"
+    environment:
+      HF_HOME: /models/huggingface
+    volumes:
+      - /opt/paws-gpu/models:/models
+    command:
+      - /opt/conda/bin/conda
+      - run
+      - --no-capture-output
+      - -n
+      - trellis2
+      - huggingface-cli
+      - download
+      - microsoft/TRELLIS.2-4B
+      - --local-dir
+      - /models/TRELLIS.2-4B
+
+  trellis-api:
+    build:
+      context: ../../../trellis-worker
+      args:
+        TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+    image: paws-trellis2:75fbf018
+    restart: unless-stopped
+    env_file:
+      - /opt/paws-gpu/secrets/trellis.env
+    environment:
+      HF_HOME: /models/huggingface
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TRELLIS_MODEL_PATH: /models/TRELLIS.2-4B
+      TRELLIS_JOBS_DIR: /jobs
+      TRELLIS_PRELOAD: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - /opt/paws-gpu/models:/models:ro
+      - /opt/paws-gpu/jobs:/jobs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  blender-worker:
+    build:
+      context: ../../../blender-worker
+    image: paws-blender-worker:5.1.2
+    restart: unless-stopped
+    env_file:
+      - /opt/paws-gpu/secrets/blender.env
+    environment:
+      PORT: "10000"
+      IFC_MAX_CONCURRENT: "1"
+    ports:
+      - "10000:10000"
+    volumes:
+      - /opt/paws-gpu/blender-checkpoints:/tmp/blender_checkpoints
+      - /opt/paws-gpu/blender-viewports:/tmp/blender_viewports
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s

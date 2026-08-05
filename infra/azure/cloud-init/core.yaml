@@ -1,0 +1,32 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - jq
+  - unzip
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/sysctl.d/99-paws-platform.conf
+    permissions: '0644'
+    content: |
+      net.ipv4.tcp_syncookies=1
+      net.ipv4.conf.all.rp_filter=1
+      net.ipv4.conf.default.rp_filter=1
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+  - mkdir -p /opt/paws-platform/compose /opt/paws-platform/data /opt/paws-platform/releases
+  - sysctl --system
+  - touch /var/lib/cloud/instance/paws-core-ready
+
+final_message: "Paws core host bootstrap completed after $UPTIME seconds"

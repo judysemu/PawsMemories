@@ -1,0 +1,42 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - build-essential
+  - ca-certificates
+  - curl
+  - git
+  - git-lfs
+  - jq
+  - libjpeg-dev
+  - ninja-build
+  - unzip
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {"max-size": "20m", "max-file": "5"}
+      }
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin nvidia-container-toolkit
+  - nvidia-ctk runtime configure --runtime=docker
+  - systemctl enable docker
+  - systemctl restart docker
+  - mkdir -p /opt/paws-gpu/compose /opt/paws-gpu/jobs /opt/paws-gpu/models /opt/paws-gpu/releases /opt/paws-gpu/secrets /opt/paws-gpu/blender-checkpoints /opt/paws-gpu/blender-viewports
+  - chmod 0750 /opt/paws-gpu/secrets
+  - chown -R 10001:10001 /opt/paws-gpu/jobs /opt/paws-gpu/models
+  - touch /var/lib/cloud/instance/paws-gpu-base-ready
+
+final_message: "Paws GPU host base bootstrap completed after $UPTIME seconds; NVIDIA driver readiness is verified separately"

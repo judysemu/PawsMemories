@@ -1,0 +1,51 @@
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ARG TRELLIS2_COMMIT=75fbf0183001ed9876c8dbb35de6b68552ee08bd
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV CUDA_HOME=/usr/local/cuda-12.4 \
+    TORCH_CUDA_ARCH_LIST=9.0 \
+    OPENCV_IO_ENABLE_OPENEXR=1 \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/models/huggingface
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git git-lfs jq libgl1 libglib2.0-0 \
+      libjpeg-dev ninja-build sudo wget && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_25.5.1-1-Linux-x86_64.sh -o /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm /tmp/miniconda.sh
+
+ENV PATH=/opt/conda/bin:${PATH}
+
+RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /opt/trellis2 && \
+    cd /opt/trellis2 && \
+    git checkout "${TRELLIS2_COMMIT}" && \
+    git submodule update --init --recursive
+
+# TRELLIS.2's setup script only needs nvidia-smi to select the CUDA build path.
+# Docker image builds do not expose the host GPU, so a build-only probe is used;
+# the real driver and GPU are verified by /readyz at runtime.
+RUN printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
+    chmod +x /usr/local/bin/nvidia-smi && \
+    bash -lc 'source /opt/conda/etc/profile.d/conda.sh && cd /opt/trellis2 && source ./setup.sh --new-env --basic --flash-attn --nvdiffrast --nvdiffrec --cumesh --o-voxel --flexgemm' && \
+    rm /usr/local/bin/nvidia-smi && \
+    /opt/conda/bin/conda run -n trellis2 pip install \
+      fastapi==0.116.1 \
+      huggingface-hub==0.34.4 \
+      python-multipart==0.0.20 \
+      uvicorn==0.35.0
+
+WORKDIR /app
+COPY app /app
+
+RUN mkdir -p /jobs /models && useradd --create-home --uid 10001 trellis && \
+    chown -R trellis:trellis /app /jobs /models
+
+USER trellis
+EXPOSE 8000
+
+CMD ["/opt/conda/bin/conda", "run", "--no-capture-output", "-n", "trellis2", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
