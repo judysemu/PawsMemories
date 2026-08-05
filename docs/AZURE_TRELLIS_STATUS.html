@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge work">IN PROGRESS</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 09:22 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 09:31 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -113,6 +113,7 @@
   <section class="panel callout">
     <h2>Immutable model bundle staging</h2>
     <p><span class="badge pass">PUBLIC PASS</span> Azure now holds the exact signed TRELLIS.2 source commit, the pinned TRELLIS.2-4B snapshot, and the required pinned sparse-structure decoder. Every staged file has a recorded SHA-256 inventory.</p>
+    <p><span class="badge pass">BLOB READBACK PASS</span> Managed identity uploaded 2,346 private objects totaling 16,563,628,225 bytes to <code>model-cache</code> with zero failures. A fresh download to a new VM directory rehashed all 26 manifest-tracked model files and 16,385,082,296 bytes successfully.</p>
     <p><span class="badge work">2 OF 4</span> The bundle deliberately reports <code>incomplete</code>. RMBG terms have been accepted; DINOv3 manual approval is pending. A temporary read-only Hugging Face token is still required to download both gated repositories.</p>
     <p class="subtle">The bundle is portable installation data, not application architecture. No serving process can use Hugging Face or another model API at runtime.</p>
   </section>
@@ -178,6 +179,7 @@
     <p><span class="badge work">FLAG</span> The broader tracked repository contains email-shaped strings in 27 text files (15 are test fixtures) and credential-shaped URLs in 6 text files (5 are test fixtures). These are potential-review flags, not confirmed secrets; their values are deliberately not printed here.</p>
     <p><span class="badge pass">PASS</span> The broader tracked scan found zero private-key markers, zero live-looking cloud token patterns, and zero Azure-style connection strings.</p>
     <p><span class="badge pass">PASS</span> The deployed commit archives and model bundle were scanned before transfer; no private-key, cloud-token, Azure-key, or credential-in-URL pattern was found. Worker secrets were generated on the VM, never printed, and never added to Git.</p>
+    <p><span class="badge pass">PASS</span> The Azure-staged upstream source/model bundle scanned 2,217 text files with zero private-key, live-looking token, Azure connection-string, credential-URL, or email-shaped flags. Only category counts were emitted; no candidate value was printed.</p>
     <p><span class="badge pass">REDACTED</span> Public and private IP addresses plus quota request IDs are omitted from this tracker. Secret variable names remain as configuration references only; values stay outside the repository.</p>
   </section>
 
