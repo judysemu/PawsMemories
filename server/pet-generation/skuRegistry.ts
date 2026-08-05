@@ -1,4 +1,5 @@
 import { PetGenerationError } from "./provider";
+import { selectedPaws3dProvider } from "../model-builds/configuredProvider";
 
 export interface SkuProviderBinding {
   providerId: string;
@@ -55,8 +56,11 @@ export const skuRegistry = new SkuRegistry();
 export const CUSTOM_RIGGED_PET_GLB_V1 = "CUSTOM_RIGGED_PET_GLB_V1";
 
 export function registerDefaultSkus(registry: SkuRegistry = skuRegistry): void {
+  const providerId = selectedPaws3dProvider();
   registry.register(CUSTOM_RIGGED_PET_GLB_V1, {
-    providerId: "tripo",
-    providerVersion: process.env.TRIPO_MODEL_VERSION || "default",
+    providerId,
+    providerVersion: providerId === "trellis2"
+      ? process.env.TRELLIS_MODEL_REVISION || "af44b45f2e35a493886929c6d786e563ec68364d"
+      : process.env.TRIPO_MODEL_VERSION || "default",
   });
 }

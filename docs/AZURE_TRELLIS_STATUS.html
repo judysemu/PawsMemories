@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge work">IN PROGRESS</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 13:52 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 07:58 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -139,8 +139,8 @@
         <tr><td><span class="badge blocked">BLOCKED</span></td><td>GPU capacity</td><td>Azure Support must grant 24 A100 or 40 H100 family vCPUs before the private GPU VM can be allocated.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Upstream compatibility audit</td><td>The install manifest pins the model dependency graph and configures A100/A10/H100 CUDA architectures. An actual image build and loaded model remain separate pending gates.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Model readiness</td><td>Local TRELLIS.2 weights load on the VM; no model API call during serving.</td></tr>
-        <tr><td><span class="badge pass">PASS</span></td><td>Provider boundary + kill switch</td><td>The model-build route can select a replaceable TRELLIS adapter; in-house-only mode rejects configured external providers without fallback.</td></tr>
-        <tr><td><span class="badge pending">PENDING</span></td><td>Customer-path cutover</td><td>The paid staged pet flow still needs TRELLIS base generation plus Blender rig/animation wiring before Tripo/fal can be disabled there.</td></tr>
+        <tr><td><span class="badge pass">PASS</span></td><td>Provider boundary + kill switch</td><td>Both model-build and paid-pet factories can select a replaceable TRELLIS adapter; in-house-only mode rejects configured external providers without fallback.</td></tr>
+        <tr><td><span class="badge work">PARTIAL</span></td><td>Customer-path cutover</td><td>The paid path now has a TRELLIS base adapter. Texture, rig-check, and Blender rig/animation deliberately fail closed with <code>INHOUSE_STAGE_NOT_READY</code> until their internal worker contracts pass live.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Fixture matrix + Drive intake</td><td>Six baseline samples distinguish independent gates. All 76 dropped GLBs parse as self-contained textured meshes: 12 ready candidates, 3 need joint remapping, 31 need animation, 30 need rigging, and none are structural rejects. Visual QA remains pending.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>Real generation</td><td>A real pet image produces a valid PBR master GLB.</td></tr>
         <tr><td><span class="badge pending">PENDING</span></td><td>In-house rigging</td><td>Blender worker creates a valid quadruped skeleton and skin weights.</td></tr>
@@ -168,7 +168,7 @@
     <table>
       <thead><tr><th>Dependency</th><th>Today</th><th>Target</th></tr></thead>
       <tbody>
-        <tr><td>Tripo image-to-3D / texture / rigging</td><td><span class="badge blocked">STILL IN CURRENT CODE</span></td><td>Disabled in in-house mode, then retired after live proof.</td></tr>
+        <tr><td>Tripo image-to-3D / texture / rigging</td><td><span class="badge blocked">STILL IN CURRENT CODE</span></td><td>Rejected by the paid and model-build factories when in-house-only mode is on; retain as a replaceable adapter until live proof.</td></tr>
         <tr><td>fal PBR generation</td><td><span class="badge blocked">STILL IN CURRENT CODE</span></td><td>No call from the in-house pet path.</td></tr>
         <tr><td>Microsoft TRELLIS.2 source and weights</td><td><span class="badge work">INSTALL DOWNLOAD</span></td><td>Local immutable source/weights; offline serving.</td></tr>
         <tr><td>Blender rigging and animation</td><td><span class="badge pass">SELF-HOSTED CODE EXISTS</span></td><td>Run and verify on Azure worker with real fixtures.</td></tr>

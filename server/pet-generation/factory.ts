@@ -1,5 +1,7 @@
 import { TripoModelBuildAdapter } from "../model-builds/provider";
+import { TrellisModelBuildAdapter } from "../model-builds/trellisProvider";
 import { skuRegistry, registerDefaultSkus, type SkuRegistry } from "./skuRegistry";
+import { InHousePetGenerationAdapter } from "./inHouseAdapter";
 import { TripoPetGenerationAdapter } from "./tripoAdapter";
 import { StubPetGenerationProvider } from "./stubProvider";
 import {
@@ -10,6 +12,13 @@ import {
 } from "./provider";
 
 let defaultsRegistered = false;
+
+export class PetGlbFeatureError extends Error {
+  constructor() {
+    super("CUSTOM_RIGGED_PET_GLB_V1 is disabled until PET_GLB_ENABLED=true");
+    this.name = "PetGlbFeatureError";
+  }
+}
 
 /**
  * Resolve a provider for a SKU.
@@ -25,6 +34,7 @@ export function createProviderForSku(
   sku: string,
   options: { store?: ProviderJobStore; registry?: SkuRegistry } = {},
 ): PetModelGenerationProvider {
+  if (process.env.PET_GLB_ENABLED !== "true") throw new PetGlbFeatureError();
   const registry = options.registry ?? skuRegistry;
   if (registry === skuRegistry && !defaultsRegistered) {
     registerDefaultSkus(registry);
@@ -33,6 +43,18 @@ export function createProviderForSku(
 
   // Fail closed BEFORE any override is considered.
   const binding = registry.resolve(sku);
+  const externalProviders = new Set(
+    String(process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS || "tripo")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (process.env.PAWS_3D_INHOUSE_ONLY === "true" && externalProviders.has(binding.providerId.toLowerCase())) {
+    throw new PetGenerationError(
+      "INHOUSE_PROVIDER_REQUIRED",
+      `In-house-only mode rejects providerId '${binding.providerId}' for SKU ${sku}`,
+    );
+  }
 
   if (process.env.PET_GLB_USE_STUB === "true") {
     console.log(
@@ -54,6 +76,14 @@ export function createProviderForSku(
       // explicit stages; the purchased body-rig stage internally completes
       // Tripo's idle/walk presets without another customer gate.
       { animate: false },
+    );
+  }
+
+  if (binding.providerId === "trellis2") {
+    return new InHousePetGenerationAdapter(
+      new TrellisModelBuildAdapter(),
+      options.store ?? new InMemoryJobStore(),
+      binding.providerVersion,
     );
   }
 

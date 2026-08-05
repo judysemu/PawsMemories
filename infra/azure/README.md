@@ -112,3 +112,21 @@ ready, verify separately:
 
 Do not cut over DNS, database writes, credit charging, or customer jobs until
 these gates pass.
+
+## Application cutover switches
+
+Keep the paid customer path closed until the live GPU and Blender proof passes:
+
+```dotenv
+PAWS_3D_PROVIDER=trellis2
+PAWS_3D_INHOUSE_ONLY=true
+PAWS_3D_EXTERNAL_PROVIDER_IDS=tripo,fal
+PET_GLB_ENABLED=false
+PET_GLB_BODY_RIG_ENABLED=false
+```
+
+`PAWS_3D_INHOUSE_ONLY=true` is the no-fallback safety boundary: a Tripo-bound
+paid SKU is rejected rather than called. The paid adapter currently supports
+the TRELLIS base stage and refuses texture, rig-check, and rig/animation stages
+with `INHOUSE_STAGE_NOT_READY`. Enable the two `PET_GLB_*` switches only after
+those internal stages and the full paid-order refund/recovery path pass live.
