@@ -116,8 +116,10 @@ def main() -> int:
                 {
                     "repoId": model["repoId"],
                     "revision": model["revision"],
+                    "localDir": model["localDir"],
                     "access": access,
                     "status": "awaiting_access",
+                    "bytes": 0,
                     "files": [],
                 }
             )
@@ -131,13 +133,16 @@ def main() -> int:
             allow_patterns=model.get("files"),
             token=token,
         )
+        model_files = inventory(destination)
         results.append(
             {
                 "repoId": model["repoId"],
                 "revision": model["revision"],
+                "localDir": model["localDir"],
                 "access": access,
                 "status": "staged",
-                "files": inventory(destination),
+                "bytes": sum(file["bytes"] for file in model_files),
+                "files": model_files,
             }
         )
 
@@ -145,9 +150,11 @@ def main() -> int:
     for result in results:
         if result["repoId"] == "microsoft/TRELLIS.2-4B":
             result["files"] = inventory(models_root / "TRELLIS.2-4B")
+            result["bytes"] = sum(file["bytes"] for file in result["files"])
 
     manifest = {
         "schemaVersion": 1,
+        "lockSha256": hashlib.sha256(args.lock.read_bytes()).hexdigest(),
         "state": "incomplete" if skipped else "complete",
         "runtimeNetworkPolicy": "offline",
         "source": {
