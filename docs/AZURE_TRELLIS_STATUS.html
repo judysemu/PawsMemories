@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge work">IN PROGRESS</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 09:51 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 09:56 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Definition of done</h2>
@@ -114,8 +114,8 @@
     <h2>Immutable model bundle staging</h2>
     <p><span class="badge pass">PUBLIC PASS</span> Azure now holds the exact signed TRELLIS.2 source commit, the pinned TRELLIS.2-4B snapshot, and the required pinned sparse-structure decoder. Every staged file has a recorded SHA-256 inventory.</p>
     <p><span class="badge pass">BLOB READBACK PASS</span> Managed identity uploaded 2,346 private objects totaling 16,563,628,225 bytes to <code>model-cache</code> with zero failures. A fresh download to a new VM directory rehashed all 26 manifest-tracked model files and 16,385,082,296 bytes successfully.</p>
-    <p><span class="badge work">ACCESS APPROVED</span> Both RMBG and DINOv3 access requests are accepted. The bundle deliberately remains <code>incomplete</code> until the approved files are downloaded and their pinned revisions and SHA-256 inventory pass. A hidden prompt is open for a temporary fine-grained read-only token; no token value is printed or saved in this report.</p>
-    <p><span class="badge work">IMAGE BUILD</span> The first worker-image build exposed a new non-interactive Anaconda channel-terms gate, and a cached probe proved that even a local named-environment clone triggers it. Commit <code>9d3bbe6</code> removes that unnecessary layer and installs into the pinned base environment inside the already isolated container. No legal terms are accepted automatically; contract tests and the full type-check pass.</p>
+    <p><span class="badge work">ACCESS APPROVED</span> Both RMBG and DINOv3 access requests are accepted. The bundle deliberately remains <code>incomplete</code> until the approved files are downloaded and their pinned revisions and SHA-256 inventory pass. Azure has not yet received a token-backed download; the secure one-command helper never prints or saves the token in this report.</p>
+    <p><span class="badge work">IMAGE BUILD</span> Commit <code>7a3dbcc</code> removes the unnecessary named-environment layer, explicitly pins PyTorch 2.6.0 plus CUDA 12.4, and avoids accepting Anaconda terms automatically. A persistent Azure build has verified those exact CUDA 12 packages and is compiling the remaining extensions; contract tests and the full type-check pass.</p>
     <p class="subtle">The bundle is portable installation data, not application architecture. No serving process can use Hugging Face or another model API at runtime.</p>
   </section>
 
