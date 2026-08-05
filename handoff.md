@@ -1,6 +1,6 @@
 # Pawsome3D in-house 3D handoff
 
-Last updated: 2026-08-05 10:13 MDT
+Last updated: 2026-08-05 10:14 MDT
 
 ## Definition of done
 
@@ -18,6 +18,7 @@ A provisioned VM, complete model cache, built image, health endpoint, existing i
 - The immutable four-model bundle is complete in Azure: 37 manifest-tracked files and 18,482,646,202 bytes.
 - A fresh private Blob readback transferred 113 objects and independently rehashed all 37 tracked files with zero failures. The manifest state, lock hash, and local runtime model paths pass.
 - Hugging Face was used only to download the two approved gated repositories. The token was streamed through standard input, was not printed or written to Docker metadata/disk by the staging tools, and is no longer required. Runtime serving is configured offline.
+- The gated DINOv3/RMBG bundle contains 9 scanned text/code/config files with zero private-key, live-token, Azure-connection-string, credential-URL, or email-shaped flags. No candidate values or filenames were printed.
 - The first full worker image `7a3dbcc` compiled successfully but is rejected: `pip check` failed and importing Transformers raised an error because Hugging Face Hub 0.34.4 was incompatible with Transformers 5.14.1.
 - Commit `ab389ca` pins the compatible runtime pair, adds a mandatory `pip check`, and separates the expensive CUDA-extension layer from the small runtime layer. Its persistent Azure build is currently running.
 - Existing Azure Blender proof for an imported textured pet remains valid: 16-bone rig, 16,085 weighted vertices, zero unweighted islands, 15 clips, and saved `idle` and `walk` animations. This proves rig/animation for an existing GLB, not image-to-mesh generation.
@@ -49,6 +50,7 @@ All entries record evidence, not intent. Secret values are never included.
 - 2026-08-05 10:08 MDT — PASS — Runtime alignment tests: 3/3 model-lock tests and full TypeScript check passed for commit `5b458ab`; Hugging Face Hub 1.26.0 and Transformers 5.14.1 are pinned and `pip check` is mandatory.
 - 2026-08-05 10:10 MDT — PASS — Cache-layer refactor: 3/3 model-lock tests and full TypeScript check passed for commit `ab389ca`.
 - 2026-08-05 10:13 MDT — PASS — Category-only model scanner validation: shell syntax, 3/3 model-lock/security tests, and the full TypeScript check passed. The scanner emits counts only and never matching filenames or values.
+- 2026-08-05 10:14 MDT — PASS — Gated DINOv3/RMBG sensitive-string scan: 9 text/code/config files; zero private-key, live-token, Azure connection-string, credential-URL, or email-shaped flags; values printed `false`.
 
 ## Operational references
 
