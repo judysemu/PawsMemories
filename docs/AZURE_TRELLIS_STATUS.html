@@ -75,13 +75,19 @@
 <main>
   <div class="headline">
     <h1>Pawsome3D In-House 3D</h1>
-    <span class="badge pending">PAUSED</span>
+    <span class="badge work">QUOTA API ACTIVE</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 10:45 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 11:20 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
-    <h2>Pause boundary</h2>
-    <p><span class="badge pending">USER PAUSED</span> East US 2 denied the A100 request. The user is trying other regions; engineering will not provision a GPU or resume installation until the user explicitly resumes and Azure shows an applied quota limit.</p>
+    <h2>Quota-only authorization</h2>
+    <p><span class="badge work">API REVIEW ACTIVE</span> The user authorized Azure Quota API inspection and request repair across the requested regions. GPU provisioning, model installation, and production deployment remain paused until Azure applies a sufficient limit and the user authorizes the next phase.</p>
+    <p><span class="badge blocked">NOT APPLIED</span> Live API reads show the A100 family is applicable in all seven requested regions, but every applied limit is still 0: Canada Central, Canada East, Central US, East US 2, Mexico Central, North Central US, and West Central US.</p>
+    <p><span class="badge blocked">ALL 7 REQUESTS FAILED</span> The API proves the portal batch was processed, not left pending. Canada Central, Central US, and East US 2 returned <code>QuotaNotAvailableForResource</code>. Canada East, Mexico Central, North Central US, and West Central US returned <code>ContactSupport</code>.</p>
+    <p><span class="badge pending">4 CLEAN US TARGETS</span> East US's earlier 24-vCPU request failed with <code>ContactSupport</code>. South Central US, West US, West US 2, and West US 3 are listed, quota-applicable, and have no prior A100-family request record.</p>
+    <p><span class="badge blocked">SOUTH CENTRAL US FAILED</span> The new 24-vCPU API request failed with <code>ContactSupport</code>; usage and applied limit remain 0. West US, West US 2, and West US 3 are the remaining clean API targets.</p>
+    <p class="subtle">Request identifiers, subscription identifiers, tenant identifiers, and secret values remain omitted.</p>
+    <p class="subtle">A portal receipt is not approval. Request identifiers and account identifiers are deliberately omitted.</p>
   </section>
 
   <section class="panel callout">
