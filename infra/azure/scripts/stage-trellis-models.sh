@@ -22,6 +22,16 @@ for dependency in docker git jq; do
   fi
 done
 
+docker_command=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    docker_command=(sudo docker)
+  else
+    echo "Docker is installed but this account cannot use it"
+    exit 1
+  fi
+fi
+
 source_repository="$(jq -er '.source.repository' "$lock_file")"
 source_revision="$(jq -er '.source.revision' "$lock_file")"
 
@@ -61,7 +71,7 @@ if [[ "$mode" == "public-only" ]]; then
   downloader_args+=(--public-only)
 fi
 
-docker run --rm \
+"${docker_command[@]}" run --rm \
   --user "$(id -u):$(id -g)" \
   "${docker_environment[@]}" \
   --volume "${repo_root}:/work:ro" \
