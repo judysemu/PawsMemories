@@ -42,6 +42,9 @@ test("runtime compose and worker build stay aligned with the model lock", () => 
   assert.match(dockerfile, /^FROM nvidia\/cuda:12\.4\.1-devel-ubuntu22\.04@sha256:[a-f0-9]{64}$/m);
   assert.match(dockerfile, /^ARG MINICONDA_SHA256=[a-f0-9]{64}$/m);
   assert.match(dockerfile, /sha256sum -c -/);
+  assert.match(dockerfile, /conda create --name trellis2 --clone base -y/);
+  assert.match(dockerfile, /conda activate trellis2/);
+  assert.doesNotMatch(dockerfile, /setup\.sh --new-env/);
   for (const model of lock.models) {
     assert.match(compose, new RegExp(model.revision));
   }

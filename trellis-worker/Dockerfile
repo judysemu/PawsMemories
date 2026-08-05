@@ -32,9 +32,10 @@ RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /opt/trelli
 # TRELLIS.2's setup script only needs nvidia-smi to select the CUDA build path.
 # Docker image builds do not expose the host GPU, so a build-only probe is used;
 # the real driver and GPU are verified by /readyz at runtime.
-RUN printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
+RUN /opt/conda/bin/conda create --name trellis2 --clone base -y && \
+    printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
     chmod +x /usr/local/bin/nvidia-smi && \
-    bash -lc 'source /opt/conda/etc/profile.d/conda.sh && cd /opt/trellis2 && source ./setup.sh --new-env --basic --flash-attn --nvdiffrast --nvdiffrec --cumesh --o-voxel --flexgemm' && \
+    bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate trellis2 && cd /opt/trellis2 && source ./setup.sh --basic --flash-attn --nvdiffrast --nvdiffrec --cumesh --o-voxel --flexgemm' && \
     rm /usr/local/bin/nvidia-smi && \
     /opt/conda/bin/conda run -n trellis2 pip install \
       fastapi==0.116.1 \
