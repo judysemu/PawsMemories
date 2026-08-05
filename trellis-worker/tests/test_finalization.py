@@ -111,7 +111,10 @@ class FinalizationTests(unittest.TestCase):
             self.assertEqual(result["artifact_sha256"], hashlib.sha256(final).hexdigest())
             self.assertEqual(result["clips"], ["idle", "tail_wag", "walk"])
         rig_request = client.calls[0][2]
-        self.assertEqual(rig_request["source"]["signedUrl"], f"trellis2://jobs/{JOB_ID}/master.glb")
+        self.assertEqual(
+            rig_request["source"]["locator"],
+            f"artifact+local://model-builds/{JOB_ID}/master.glb",
+        )
         self.assertEqual(progress, [15, 55, 75, 95])
 
     def test_missing_required_clip_fails_without_final_artifact(self):

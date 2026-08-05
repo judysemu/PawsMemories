@@ -53,7 +53,7 @@ function request(accessories = []) {
     classification: "quadruped",
     requestFacial: false,
     requestedFacialTargets: [],
-    source: { signedUrl: "https://assets.example.test/source.glb", sha256: SOURCE_HASH, sizeBytes: 1024 },
+    source: { locator: "https://assets.example.test/source.glb", sha256: SOURCE_HASH, sizeBytes: 1024 },
     budgets: { maxJoints: 128, maxInfluences: 4, maxTriangles: 100_000, maxTextureDimension: 2048 },
     accessories,
   };
@@ -134,7 +134,7 @@ function result(display, fusedPrint, overrides = {}) {
 const accessoryRequest = {
   accessoryUuid: ACCESSORY_UUID,
   attachmentBone: "head",
-  signedUrl: "https://assets.example.test/accessory.glb",
+  locator: "https://assets.example.test/accessory.glb",
   sha256: "b".repeat(64),
   sizeBytes: 512,
 };

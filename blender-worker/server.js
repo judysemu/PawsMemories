@@ -161,7 +161,7 @@ class BlenderBridgeClient {
 const bridge = new BlenderBridgeClient();
 const rigPipelineProcessor = createRigPipelineProcessor({
   runner: createBlenderPipelineRunner({ bridge }),
-  sharedJobsDirectory: process.env.TRELLIS_SHARED_JOBS_DIR,
+  sharedArtifactsDirectory: process.env.RIG_PIPELINE_SHARED_ARTIFACTS_DIR,
 });
 
 function isLoopbackBridgeHost() {

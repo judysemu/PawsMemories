@@ -7,11 +7,13 @@ import test from "node:test";
 
 import {
   RigPipelineError,
+  acquireVerifiedAsset,
+  createSharedArtifactResolver,
   createRigPipelineProcessor,
   createWorkerAuthMiddleware,
   inspectGlb,
   isPrivateAddress,
-  readVerifiedTrellisAsset,
+  readVerifiedSharedArtifact,
   validateRigPipelineRequest,
   validateSourceUrl,
 } from "../blender-worker/rig_pipeline/index.js";
@@ -66,7 +68,7 @@ function makeRequest(source, overrides = {}) {
     requestFacial: true,
     requestedFacialTargets: ["A", "B", "C", "D", "E", "F", "G", "H", "X", "jawOpen", "eyeBlinkLeft", "eyeBlinkRight"],
     source: {
-      signedUrl: "https://signed-assets.example/source.glb?token=secret",
+      locator: "https://signed-assets.example/source.glb?token=secret",
       sha256: crypto.createHash("sha256").update(source).digest("hex"),
       sizeBytes: source.length,
     },
@@ -258,25 +260,25 @@ test("source URL checks reject non-HTTPS, unlisted, and private DNS targets", as
   assert.equal(isPrivateAddress("8.8.8.8"), false);
 });
 
-test("shared TRELLIS source reads only a verified job master from the configured volume", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paws-trellis-jobs-"));
+test("shared artifact resolver reads only a verified job artifact from its configured volume", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paws-shared-artifacts-"));
   const source = makeTriangleGlb();
   const jobDirectory = path.join(root, JOB_UUID);
   fs.mkdirSync(jobDirectory, { mode: 0o700 });
   fs.writeFileSync(path.join(jobDirectory, "master.glb"), source, { mode: 0o600 });
   const asset = {
-    signedUrl: `trellis2://jobs/${JOB_UUID}/master.glb`,
+    locator: `artifact+local://model-builds/${JOB_UUID}/master.glb`,
     sha256: crypto.createHash("sha256").update(source).digest("hex"),
     sizeBytes: source.length,
   };
   try {
-    assert.deepEqual(readVerifiedTrellisAsset(asset, { sharedJobsDirectory: root }), source);
+    assert.deepEqual(readVerifiedSharedArtifact(asset, { sharedArtifactsDirectory: root }), source);
     assert.throws(
-      () => readVerifiedTrellisAsset({ ...asset, signedUrl: `trellis2://jobs/${JOB_UUID}/../master.glb` }, { sharedJobsDirectory: root }),
+      () => readVerifiedSharedArtifact({ ...asset, locator: `artifact+local://model-builds/${JOB_UUID}/../master.glb` }, { sharedArtifactsDirectory: root }),
       (error) => error instanceof RigPipelineError && error.code === "SOURCE_URL_REJECTED",
     );
     assert.throws(
-      () => readVerifiedTrellisAsset({ ...asset, sha256: "0".repeat(64) }, { sharedJobsDirectory: root }),
+      () => readVerifiedSharedArtifact({ ...asset, sha256: "0".repeat(64) }, { sharedArtifactsDirectory: root }),
       (error) => error instanceof RigPipelineError && error.code === "SOURCE_HASH_MISMATCH",
     );
   } finally {
@@ -284,17 +286,70 @@ test("shared TRELLIS source reads only a verified job master from the configured
   }
 });
 
-test("shared TRELLIS source fails closed when its volume is not configured", () => {
+test("shared artifact resolver fails closed when its volume is not configured", () => {
   const source = makeTriangleGlb();
   const asset = {
-    signedUrl: `trellis2://jobs/${JOB_UUID}/master.glb`,
+    locator: `artifact+local://model-builds/${JOB_UUID}/master.glb`,
     sha256: crypto.createHash("sha256").update(source).digest("hex"),
     sizeBytes: source.length,
   };
   assert.throws(
-    () => readVerifiedTrellisAsset(asset, { sharedJobsDirectory: "" }),
+    () => readVerifiedSharedArtifact(asset, { sharedArtifactsDirectory: "" }),
     (error) => error instanceof RigPipelineError && error.code === "SHARED_SOURCE_NOT_CONFIGURED",
   );
+});
+
+test("artifact resolver registry is replaceable and rejects ambiguous or unsupported locators", async () => {
+  const source = makeTriangleGlb();
+  const asset = {
+    locator: "memory://fixture/source.glb",
+    sha256: crypto.createHash("sha256").update(source).digest("hex"),
+    sizeBytes: source.length,
+  };
+  const memoryResolver = {
+    name: "memory-fixture",
+    supports: (candidate) => candidate.locator.startsWith("memory://"),
+    acquire: async () => source,
+  };
+  assert.deepEqual(await acquireVerifiedAsset(asset, { resolvers: [memoryResolver] }), source);
+  await assert.rejects(
+    acquireVerifiedAsset(asset, { resolvers: [] }),
+    (error) => error instanceof RigPipelineError && error.code === "SOURCE_SCHEME_REJECTED",
+  );
+  await assert.rejects(
+    acquireVerifiedAsset(asset, { resolvers: [memoryResolver, { ...memoryResolver, name: "duplicate" }] }),
+    (error) => error instanceof RigPipelineError && error.code === "SOURCE_RESOLVER_AMBIGUOUS",
+  );
+});
+
+test("shared artifact resolver can be injected into the processor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paws-resolver-injection-"));
+  const source = makeTriangleGlb();
+  const jobDirectory = path.join(root, JOB_UUID);
+  fs.mkdirSync(jobDirectory, { mode: 0o700 });
+  fs.writeFileSync(path.join(jobDirectory, "master.glb"), source, { mode: 0o600 });
+  let runnerCalls = 0;
+  const processor = createRigPipelineProcessor({
+    assetResolvers: [createSharedArtifactResolver({ sharedArtifactsDirectory: root })],
+    runner: async () => {
+      runnerCalls += 1;
+      const raw = makeBodyOnlyRaw();
+      return { raw, outputBuffer: makeTriangleGlb([], raw.rig.metrics.boneNames) };
+    },
+  });
+  try {
+    const result = await processor.process(makeRequest(source, {
+      source: {
+        locator: `artifact+local://model-builds/${JOB_UUID}/master.glb`,
+        sha256: crypto.createHash("sha256").update(source).digest("hex"),
+        sizeBytes: source.length,
+      },
+    }));
+    assert.equal(result.rig.overallPass, true);
+    assert.equal(runnerCalls, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("full facial output requires A-H/X, jaw, blink, and exactly two renders", async () => {

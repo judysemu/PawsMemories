@@ -31,7 +31,7 @@ function request() {
     classification: "quadruped",
     requestFacial: true,
     source: {
-      signedUrl: "https://assets.example.test/source.glb?signature=test",
+      locator: "https://assets.example.test/source.glb?signature=test",
       sha256: SOURCE_HASH,
       sizeBytes: 1024,
     },

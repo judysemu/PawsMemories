@@ -96,13 +96,13 @@ services:
     environment:
       PORT: "10000"
       IFC_MAX_CONCURRENT: "1"
-      TRELLIS_SHARED_JOBS_DIR: /trellis-jobs
+      RIG_PIPELINE_SHARED_ARTIFACTS_DIR: /shared-model-artifacts
     ports:
       - "10000:10000"
     volumes:
       - /opt/paws-gpu/blender-checkpoints:/tmp/blender_checkpoints
       - /opt/paws-gpu/blender-viewports:/tmp/blender_viewports
-      - /opt/paws-gpu/jobs:/trellis-jobs:ro
+      - /opt/paws-gpu/jobs:/shared-model-artifacts:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10000/health"]
       interval: 30s

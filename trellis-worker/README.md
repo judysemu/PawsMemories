@@ -24,10 +24,12 @@ inference therefore makes no call to Hugging Face or another model API.
 
 This worker creates geometry and PBR material, then durably coordinates the
 separate Blender rig and animation stages. TRELLIS job bytes stay on the GPU
-host: Blender reads only a hash-verified `master.glb` from the shared read-only
-job volume, and authenticated container-network calls return the measured rig
-and baked clips. A final result is accepted only when the rig rules pass and
-the saved GLB bytes themselves contain `idle` and `walk` animations.
+host: the TRELLIS adapter emits a provider-neutral artifact locator, and
+Blender's replaceable shared-artifact resolver reads only a hash-verified
+`master.glb` from the read-only volume. Authenticated container-network calls
+return the measured rig and baked clips. A final result is accepted only when
+the rig rules pass and the saved GLB bytes themselves contain `idle` and
+`walk` animations.
 
 `WORKER_SHARED_SECRET` must have the same value in the TRELLIS and Blender
 secret files. Do not place its value in Compose or this repository.

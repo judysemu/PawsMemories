@@ -242,7 +242,7 @@ def finalize_trellis_job(
         "requestFacial": False,
         "requestedFacialTargets": [],
         "source": {
-            "signedUrl": f"trellis2://jobs/{job_id}/master.glb",
+            "locator": f"artifact+local://model-builds/{job_id}/master.glb",
             "sha256": source_sha256,
             "sizeBytes": source_bytes,
         },

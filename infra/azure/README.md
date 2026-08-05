@@ -38,9 +38,11 @@ guest OS is not enough; verify Azure reports `PowerState/deallocated`.
 
 At runtime, TRELLIS and Blender exchange artifacts only within the private GPU
 host. `/opt/paws-gpu/jobs` is writable by TRELLIS and mounted read-only at
-`/trellis-jobs` in Blender. The shared `WORKER_SHARED_SECRET` authenticates the
-container-network calls; its value belongs in both service secret files, never
-in Compose or Git.
+`/shared-model-artifacts` in Blender. The Blender pipeline consumes a generic
+artifact locator through an injected resolver; the shared volume is an Azure
+deployment adapter, not a required storage or generator architecture. The
+shared `WORKER_SHARED_SECRET` authenticates the container-network calls; its
+value belongs in both service secret files, never in Compose or Git.
 
 ## Deployment gates
 

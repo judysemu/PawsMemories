@@ -94,7 +94,7 @@ export const RigWorkerRequestSchema = z.object({
   requestFacial: z.boolean(),
   requestedFacialTargets: z.array(z.string().min(1).max(120)).max(20),
   source: z.object({
-    signedUrl: z.string().url().max(4_096),
+    locator: z.string().url().max(4_096),
     sha256: Sha256Schema,
     sizeBytes: z.number().int().positive().max(100 * 1024 * 1024),
   }).strict(),
@@ -107,7 +107,7 @@ export const RigWorkerRequestSchema = z.object({
   accessories: z.array(z.object({
     accessoryUuid: z.string().uuid(),
     attachmentBone: z.string().min(1).max(120),
-    signedUrl: z.string().url().max(4_096),
+    locator: z.string().url().max(4_096),
     sha256: Sha256Schema,
     sizeBytes: z.number().int().positive().max(100 * 1024 * 1024),
   }).strict()).max(20),

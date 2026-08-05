@@ -70,16 +70,16 @@ function numberValue(value, label, min, max) {
 
 function parseAsset(value, label) {
   const asset = objectValue(value, label);
-  exactKeys(asset, new Set(["signedUrl", "sha256", "sizeBytes"]), label);
-  const signedUrl = stringValue(asset.signedUrl, `${label}.signedUrl`, 1, 4096);
+  exactKeys(asset, new Set(["locator", "sha256", "sizeBytes"]), label);
+  const locator = stringValue(asset.locator, `${label}.locator`, 1, 4096);
   try {
-    new URL(signedUrl);
+    new URL(locator);
   } catch {
-    fail("INVALID_REQUEST", `${label}.signedUrl must be a URL`, 400);
+    fail("INVALID_REQUEST", `${label}.locator must be a URL-shaped artifact locator`, 400);
   }
   if (!SHA256_PATTERN.test(asset.sha256 || "")) fail("INVALID_REQUEST", `${label}.sha256 must be lowercase SHA-256`, 400);
   return {
-    signedUrl,
+    locator,
     sha256: asset.sha256,
     sizeBytes: numberValue(asset.sizeBytes, `${label}.sizeBytes`, 1, RIG_PIPELINE_MAX_ASSET_BYTES),
   };
@@ -115,12 +115,12 @@ export function validateRigPipelineRequest(input) {
   }
   const accessories = value.accessories.map((entry, index) => {
     const accessory = objectValue(entry, `accessories[${index}]`);
-    exactKeys(accessory, new Set(["accessoryUuid", "attachmentBone", "signedUrl", "sha256", "sizeBytes"]), `accessories[${index}]`);
+    exactKeys(accessory, new Set(["accessoryUuid", "attachmentBone", "locator", "sha256", "sizeBytes"]), `accessories[${index}]`);
     if (!UUID_PATTERN.test(accessory.accessoryUuid || "")) fail("INVALID_REQUEST", `accessories[${index}].accessoryUuid must be a UUID`, 400);
     return {
       accessoryUuid: accessory.accessoryUuid,
       attachmentBone: stringValue(accessory.attachmentBone, `accessories[${index}].attachmentBone`, 1, 120),
-      ...parseAsset({ signedUrl: accessory.signedUrl, sha256: accessory.sha256, sizeBytes: accessory.sizeBytes }, `accessories[${index}]`),
+      ...parseAsset({ locator: accessory.locator, sha256: accessory.sha256, sizeBytes: accessory.sizeBytes }, `accessories[${index}]`),
     };
   });
 
@@ -186,7 +186,7 @@ export async function validateSourceUrl(rawUrl, options = {}) {
 }
 
 export async function downloadVerifiedAsset(asset, options = {}) {
-  const parsed = await validateSourceUrl(asset.signedUrl, options);
+  const parsed = await validateSourceUrl(asset.locator, options);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || 30_000);
   try {
@@ -229,33 +229,35 @@ export async function downloadVerifiedAsset(asset, options = {}) {
   }
 }
 
-export function readVerifiedTrellisAsset(asset, options = {}) {
+export function readVerifiedSharedArtifact(asset, options = {}) {
   let parsed;
   try {
-    parsed = new URL(asset.signedUrl);
+    parsed = new URL(asset.locator);
   } catch {
-    fail("SOURCE_URL_REJECTED", "shared TRELLIS source is invalid", 400);
+    fail("SOURCE_URL_REJECTED", "shared artifact locator is invalid", 400);
   }
-  if (parsed.protocol !== "trellis2:" || parsed.hostname !== "jobs" || parsed.username
+  const protocol = options.protocol || "artifact+local:";
+  const namespace = options.namespace || "model-builds";
+  if (parsed.protocol !== protocol || parsed.hostname !== namespace || parsed.username
     || parsed.password || parsed.port || parsed.search || parsed.hash) {
-    fail("SOURCE_URL_REJECTED", "shared TRELLIS source must use the internal jobs namespace", 400);
+    fail("SOURCE_URL_REJECTED", "shared artifact locator is outside the configured namespace", 400);
   }
 
   let decodedPath;
   try {
     decodedPath = decodeURIComponent(parsed.pathname);
   } catch {
-    fail("SOURCE_URL_REJECTED", "shared TRELLIS source path is invalid", 400);
+    fail("SOURCE_URL_REJECTED", "shared artifact locator path is invalid", 400);
   }
   const pathParts = decodedPath.split("/");
   const jobId = pathParts[1];
   if (pathParts.length !== 3 || !UUID_PATTERN.test(jobId || "") || pathParts[2] !== "master.glb") {
-    fail("SOURCE_URL_REJECTED", "shared TRELLIS source path is not an allowed job artifact", 400);
+    fail("SOURCE_URL_REJECTED", "shared artifact locator is not an allowed job artifact", 400);
   }
 
-  const configuredRoot = options.sharedJobsDirectory || process.env.TRELLIS_SHARED_JOBS_DIR || "";
+  const configuredRoot = options.sharedArtifactsDirectory || process.env.RIG_PIPELINE_SHARED_ARTIFACTS_DIR || "";
   if (!configuredRoot || !path.isAbsolute(configuredRoot)) {
-    fail("SHARED_SOURCE_NOT_CONFIGURED", "shared TRELLIS source storage is not configured", 503);
+    fail("SHARED_SOURCE_NOT_CONFIGURED", "shared artifact storage is not configured", 503);
   }
 
   let root;
@@ -267,43 +269,70 @@ export function readVerifiedTrellisAsset(asset, options = {}) {
     jobDirectory = path.join(root, jobId);
     candidate = path.join(jobDirectory, "master.glb");
     if (fs.lstatSync(jobDirectory).isSymbolicLink() || fs.lstatSync(candidate).isSymbolicLink()) {
-      fail("SOURCE_PATH_REJECTED", "shared TRELLIS source cannot use symbolic links", 403);
+      fail("SOURCE_PATH_REJECTED", "shared artifact cannot use symbolic links", 403);
     }
     if (fs.realpathSync(candidate) !== candidate || path.dirname(candidate) !== jobDirectory) {
-      fail("SOURCE_PATH_REJECTED", "shared TRELLIS source escaped the configured job directory", 403);
+      fail("SOURCE_PATH_REJECTED", "shared artifact escaped the configured root", 403);
     }
     descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
     const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile()) fail("SOURCE_PATH_REJECTED", "shared TRELLIS source is not a regular file", 403);
+    if (!stat.isFile()) fail("SOURCE_PATH_REJECTED", "shared artifact is not a regular file", 403);
     if (stat.size > RIG_PIPELINE_MAX_ASSET_BYTES || stat.size > asset.sizeBytes) {
-      fail("SOURCE_TOO_LARGE", "shared TRELLIS source exceeded its declared byte count", 413);
+      fail("SOURCE_TOO_LARGE", "shared artifact exceeded its declared byte count", 413);
     }
-    if (stat.size !== asset.sizeBytes) fail("SOURCE_SIZE_MISMATCH", "shared TRELLIS source byte count does not match request");
+    if (stat.size !== asset.sizeBytes) fail("SOURCE_SIZE_MISMATCH", "shared artifact byte count does not match request");
     const buffer = fs.readFileSync(descriptor);
     const digest = crypto.createHash("sha256").update(buffer).digest("hex");
-    if (digest !== asset.sha256) fail("SOURCE_HASH_MISMATCH", "shared TRELLIS source SHA-256 does not match request");
+    if (digest !== asset.sha256) fail("SOURCE_HASH_MISMATCH", "shared artifact SHA-256 does not match request");
     inspectGlb(buffer);
     return buffer;
   } catch (error) {
     if (error instanceof RigPipelineError) throw error;
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
-      fail("SOURCE_NOT_FOUND", "shared TRELLIS source is unavailable", 404);
+      fail("SOURCE_NOT_FOUND", "shared artifact is unavailable", 404);
     }
-    fail("SOURCE_READ_FAILED", "shared TRELLIS source could not be read", 500);
+    fail("SOURCE_READ_FAILED", "shared artifact could not be read", 500);
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 }
 
-export function acquireVerifiedAsset(asset, options = {}) {
-  let protocol;
+export function createHttpsAssetResolver(options = {}) {
+  return Object.freeze({
+    name: "https",
+    supports(asset) {
+      try { return new URL(asset.locator).protocol === "https:"; } catch { return false; }
+    },
+    acquire(asset) { return downloadVerifiedAsset(asset, options); },
+  });
+}
+
+export function createSharedArtifactResolver(options = {}) {
+  const protocol = options.protocol || "artifact+local:";
+  return Object.freeze({
+    name: "shared-artifact",
+    supports(asset) {
+      try { return new URL(asset.locator).protocol === protocol; } catch { return false; }
+    },
+    acquire(asset) { return Promise.resolve(readVerifiedSharedArtifact(asset, options)); },
+  });
+}
+
+export async function acquireVerifiedAsset(asset, options = {}) {
   try {
-    protocol = new URL(asset.signedUrl).protocol;
+    new URL(asset.locator);
   } catch {
-    fail("SOURCE_URL_REJECTED", "asset URL is invalid", 400);
+    fail("SOURCE_URL_REJECTED", "artifact locator is invalid", 400);
   }
-  if (protocol === "trellis2:") return Promise.resolve(readVerifiedTrellisAsset(asset, options));
-  return downloadVerifiedAsset(asset, options.downloadOptions || options);
+  const resolvers = options.resolvers || [
+    createHttpsAssetResolver(options.downloadOptions || options),
+    createSharedArtifactResolver(options),
+  ];
+  const matches = resolvers.filter((resolver) => resolver && typeof resolver.supports === "function"
+    && typeof resolver.acquire === "function" && resolver.supports(asset));
+  if (matches.length === 0) fail("SOURCE_SCHEME_REJECTED", "no artifact resolver accepts this locator", 400);
+  if (matches.length > 1) fail("SOURCE_RESOLVER_AMBIGUOUS", "multiple artifact resolvers accept this locator", 500);
+  return await Promise.resolve(matches[0].acquire(asset));
 }
 
 export function inspectGlb(buffer) {
@@ -688,7 +717,8 @@ export function createRigPipelineProcessor(options = {}) {
   const profileDirectory = options.profileDirectory || path.resolve(__dirname, "..", "profiles");
   const acquireAsset = options.acquireAsset || ((asset) => acquireVerifiedAsset(asset, {
     downloadOptions: options.downloadOptions,
-    sharedJobsDirectory: options.sharedJobsDirectory,
+    sharedArtifactsDirectory: options.sharedArtifactsDirectory,
+    resolvers: options.assetResolvers,
   }));
   if (typeof options.runner !== "function") throw new TypeError("runner is required");
   const cache = new Map();

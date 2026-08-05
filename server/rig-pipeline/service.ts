@@ -339,14 +339,14 @@ export class RigPipelineService {
         classification: classification.classification as "biped" | "quadruped",
         requestFacial: Boolean(job.request_facial),
         source: {
-          signedUrl: await this.signVersion(sourceAsset, sourceVersion, ownerId),
+          locator: await this.signVersion(sourceAsset, sourceVersion, ownerId),
           sha256: sourceVersion.sha256,
           sizeBytes: sourceVersion.size_bytes,
         },
         accessories: await Promise.all(accessoryInputs.map(async (item) => ({
           accessoryUuid: item.record.accessory_uuid,
           attachmentBone: item.record.attachment_bone,
-          signedUrl: await this.signVersion(item.asset, item.version, ownerId),
+          locator: await this.signVersion(item.asset, item.version, ownerId),
           sha256: item.version.sha256,
           sizeBytes: item.version.size_bytes,
         }))),
