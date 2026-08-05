@@ -631,11 +631,25 @@ function normalizePipelineResult(raw, request, outputBuffer, sourceInspection, o
   const reportedJointCount = finiteMetric(metrics.jointCount, "rig.metrics.jointCount", { integer: true });
   const reportedTriangles = finiteMetric(metrics.triangleCount, "rig.metrics.triangleCount", { integer: true });
   const outputBoneNames = new Set(outputInspection?.boneNames || []);
+  const missingBones = boneNames.filter((name) => !outputBoneNames.has(name));
+  const unexpectedBones = [...outputBoneNames].filter((name) => !boneNames.includes(name));
   if (!outputInspection?.hasSkinnedMesh || outputInspection.jointCount !== reportedJointCount
     || reportedBoneCount !== boneNames.length || reportedJointCount !== boneNames.length
     || boneNames.some((name) => !outputBoneNames.has(name)) || outputBoneNames.size !== boneNames.length
     || outputInspection.triangleCount !== reportedTriangles) {
-    fail("RIG_OUTPUT_MISMATCH", "reported rig metrics do not match the exported GLB skin, joints, or triangles", 502);
+    const detail = JSON.stringify({
+      hasSkinnedMesh: outputInspection?.hasSkinnedMesh === true,
+      reportedBoneCount,
+      reportedJointCount,
+      reportedBoneNames: boneNames.length,
+      outputJointCount: outputInspection?.jointCount ?? null,
+      outputBoneNames: outputBoneNames.size,
+      missingBones: missingBones.slice(0, 32),
+      unexpectedBones: unexpectedBones.slice(0, 32),
+      reportedTriangles,
+      outputTriangles: outputInspection?.triangleCount ?? null,
+    });
+    fail("RIG_OUTPUT_MISMATCH", `reported rig metrics do not match the exported GLB: ${detail}`, 502);
   }
   const result = {
     contractVersion: 1,
