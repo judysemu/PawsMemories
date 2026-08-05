@@ -6,6 +6,28 @@ import { selectedPaws3dProvider } from "../server/model-builds/configuredProvide
 
 const JOB_ID = "11111111-1111-4111-8111-111111111111";
 const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+const BLENDER_REVISION = "a".repeat(40);
+process.env.BLENDER_WORKER_REVISION = BLENDER_REVISION;
+
+function readyPayload() {
+  return {
+    status: "ready",
+    cuda: true,
+    modelPresent: true,
+    modelLoaded: true,
+    modelBundleVerified: true,
+    modelRevision: "af44b45f2e35a493886929c6d786e563ec68364d",
+    sourceRevision: "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+    runtimeRepositoryRevision: BLENDER_REVISION,
+    runtimeRevisionVerified: true,
+    blender: {
+      status: "ready",
+      bridgeConnected: true,
+      version: "5.1.2",
+      revision: BLENDER_REVISION,
+    },
+  };
+}
 
 function minimalGlb() {
   const bytes = Buffer.alloc(12);
@@ -31,6 +53,9 @@ test("TRELLIS provider submits approved bytes only to the private worker", async
       return new Response(PNG, { headers: { "content-type": "image/png" } });
     }
     assert.equal(url.hostname, "10.42.2.10");
+    if (url.pathname === "/readyz") {
+      return jsonResponse(readyPayload());
+    }
     assert.equal(url.pathname, "/v1/jobs");
     assert.equal(init.headers["x-worker-secret"], "test-worker-secret");
     assert.ok(init.body instanceof FormData);
@@ -54,7 +79,7 @@ test("TRELLIS provider submits approved bytes only to the private worker", async
     provider: "trellis2",
     model: "microsoft/TRELLIS.2-4B@af44b45f2e35a493886929c6d786e563ec68364d",
   });
-  assert.equal(calls.length, 2, "one approved reference read and one private worker call");
+  assert.equal(calls.length, 3, "one reference read, one final readiness proof, and one worker submission");
   assert.equal(calls.some(({ url }) => /tripo|fal\.ai|huggingface/i.test(url.hostname)), false);
 });
 
@@ -68,18 +93,85 @@ test("TRELLIS provider proves authenticated locked-model readiness before charge
       const url = new URL(String(request));
       calls.push(url.pathname);
       assert.equal(init.headers["x-worker-secret"], "test-worker-secret");
-      return jsonResponse({
-        status: "ready",
-        cuda: true,
-        modelPresent: true,
-        modelLoaded: true,
-        modelRevision: "af44b45f2e35a493886929c6d786e563ec68364d",
-        sourceRevision: "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
-      });
+      return jsonResponse(readyPayload());
     },
   });
   await provider.preflightForCharge();
   assert.deepEqual(calls, ["/readyz"]);
+});
+
+test("TRELLIS provider requires Blender bridge and pinned revision before charge", async () => {
+  const response = (blender, status = 503) => jsonResponse({
+    status: status === 200 ? "ready" : "not_ready",
+    cuda: true,
+    modelPresent: true,
+    modelLoaded: true,
+    modelBundleVerified: true,
+    modelRevision: "af44b45f2e35a493886929c6d786e563ec68364d",
+    sourceRevision: "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+    runtimeRepositoryRevision: BLENDER_REVISION,
+    runtimeRevisionVerified: true,
+    blender,
+  }, status);
+  const disconnected = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async () => response({
+      status: "not_ready",
+      bridgeConnected: false,
+      version: null,
+      revision: null,
+    }),
+  });
+  await assert.rejects(
+    () => disconnected.preflightForCharge(),
+    (error) => error.code === "BLENDER_WORKER_NOT_READY",
+  );
+
+  const stale = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async () => response({
+      status: "ready",
+      bridgeConnected: true,
+      version: "5.1.2",
+      revision: "wrong-revision",
+    }),
+  });
+  await assert.rejects(
+    () => stale.preflightForCharge(),
+    (error) => error.code === "BLENDER_REVISION_MISMATCH",
+  );
+
+  const omittedPins = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async () => response({
+      status: "ready",
+      bridgeConnected: true,
+    }, 200),
+  });
+  await assert.rejects(
+    () => omittedPins.preflightForCharge(),
+    (error) => error.code === "BLENDER_REVISION_MISMATCH",
+  );
+
+  const unverifiedRuntime = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async () => jsonResponse({
+      ...readyPayload(),
+      runtimeRevisionVerified: false,
+    }),
+  });
+  await assert.rejects(
+    () => unverifiedRuntime.preflightForCharge(),
+    (error) => error.code === "TRELLIS_RUNTIME_REVISION_MISMATCH",
+  );
 });
 
 test("TRELLIS provider fails readiness on stale or unloaded workers", async () => {
@@ -148,6 +240,9 @@ test("TRELLIS provider starts, polls, and downloads internal finalization", asyn
       calls.push({ path: url.pathname, method: init.method || "GET" });
       assert.equal(url.hostname, "10.42.2.10");
       assert.equal(init.headers["x-worker-secret"], "test-worker-secret");
+      if (url.pathname === "/readyz") {
+        return jsonResponse(readyPayload());
+      }
       if (url.pathname.endsWith("/finalize")) {
         return jsonResponse({ id: JOB_ID, status: "queued" }, 202);
       }
@@ -176,6 +271,7 @@ test("TRELLIS provider starts, polls, and downloads internal finalization", asyn
   assert.deepEqual(await provider.pollFinalization(handle), { done: true, progress: 100 });
   assert.deepEqual(await provider.downloadFinal(handle), glb);
   assert.deepEqual(calls, [
+    { path: "/readyz", method: "GET" },
     { path: `/v1/jobs/${JOB_ID}/finalize`, method: "POST" },
     { path: `/v1/jobs/${JOB_ID}`, method: "GET" },
     { path: `/v1/jobs/${JOB_ID}/final-artifact`, method: "GET" },

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "manifestSha256": "e3a4d702026090228807307c073f4171dbefd4db456a28a92e8a014669c0819c",
+  "modelLockSha256": "fb8c7a52240cb1393d9ccff0e9acb1db560eb6b57c03302d732ee700badba487",
+  "sourceRevision": "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+  "runtimeNetworkPolicy": "offline",
+  "modelCount": 4,
+  "trackedFiles": 37,
+  "trackedBytes": 18482646202,
+  "acceptance": "private-readback-verified"
+}

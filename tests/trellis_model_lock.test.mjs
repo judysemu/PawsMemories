@@ -63,6 +63,28 @@ test("runtime compose and worker build stay aligned with the model lock", () => 
   assert.match(compose, /TRANSFORMERS_OFFLINE:\s*"1"/);
 });
 
+test("authenticated TRELLIS readiness aggregates pinned Blender bridge readiness", () => {
+  const worker = fs.readFileSync(path.join(ROOT, "trellis-worker/app/main.py"), "utf8");
+  const blender = fs.readFileSync(path.join(ROOT, "blender-worker/server.js"), "utf8");
+  const trellisDockerfile = fs.readFileSync(path.join(ROOT, "trellis-worker/Dockerfile"), "utf8");
+  const blenderDockerfile = fs.readFileSync(path.join(ROOT, "blender-worker/Dockerfile"), "utf8");
+  assert.match(worker, /BLENDER_WORKER_REVISION/);
+  assert.match(worker, /BLENDER_VERSION/);
+  assert.match(worker, /IMAGE_RUNTIME_REVISION == EXPECTED_BLENDER_REVISION/);
+  assert.match(worker, /health\.get\("revisionVerified"\) is True/);
+  assert.match(worker, /runtimeRevisionVerified/);
+  assert.match(worker, /blender\.request_json\([\s\S]*?"\/health"/);
+  assert.match(worker, /and blender_ready/);
+  assert.match(worker, /"blender": blender_status/);
+  assert.equal((worker.match(/require_aggregate_readiness\(\)/g) || []).length >= 4, true);
+  assert.match(blender, /workerRevision:\s*WORKER_REVISION/);
+  assert.match(blender, /revisionVerified:\s*REVISION_VERIFIED/);
+  assert.match(trellisDockerfile, /PAWS_RUNTIME_REPOSITORY_REVISION/);
+  assert.match(trellisDockerfile, /PAWS_RUNTIME_REVISION/);
+  assert.match(blenderDockerfile, /PAWS_RUNTIME_REPOSITORY_REVISION/);
+  assert.match(blenderDockerfile, /PAWS_RUNTIME_REVISION/);
+});
+
 test("staging code never embeds a Hugging Face credential", () => {
   const stagingFiles = [
     lockPath,

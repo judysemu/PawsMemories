@@ -44,6 +44,7 @@ before(async () => {
       PORT: String(port),
       WORKER_SHARED_SECRET: "worker-auth-regression-secret",
       BLENDER_AUTOSTART_BRIDGE: "false",
+      BLENDER_WORKER_REVISION: "test-blender-revision",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -151,6 +152,9 @@ test("Blender worker compares equal-length secret buffers with timingSafeEqual",
 test("Blender worker health remains public", async () => {
   const response = await fetch(`${baseUrl}/health`);
   assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.workerRevision, "test-blender-revision");
+  assert.equal(body.bridge, "disconnected");
 });
 
 test("Blender TCP bridge is loopback-only and is not published by the container", async () => {

@@ -55,6 +55,8 @@ export interface PetGlbServiceDeps {
     ttlSeconds: number;
     sessionUuid?: string;
     sessionId?: number;
+    /** Exact asset/version manifest already persisted on the order. */
+    durableManifest?: PetModelGenerationInput;
   }) => Promise<{
     sessionId: number;
     sessionUuid?: string;
@@ -369,6 +371,10 @@ export class PetGlbService {
           styleDirection: order.styleDirection,
         })
       : null;
+    const nextPriceCredits = nextStage ? stagePrice(nextStage) : 0;
+    const readyProvider = nextStage && nextPriceCredits > 0
+      ? await this.providerReadyForCharge(nextStage)
+      : undefined;
 
     const queued = await this.stages.approveAndQueueNext({
       orderId: order.id,
@@ -376,11 +382,11 @@ export class PetGlbService {
       approval,
       nextStage,
       nextInputHash,
-      nextPriceCredits: nextStage ? stagePrice(nextStage) : 0,
+      nextPriceCredits,
     });
 
     if (queued.next) {
-      await this.startQueuedStage(orderUuid, ownerPhone, queued.next);
+      await this.startQueuedStage(orderUuid, ownerPhone, queued.next, readyProvider);
     }
     return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
@@ -642,6 +648,9 @@ export class PetGlbService {
     if (!current || current.attemptUuid !== input.attemptUuid) {
       throw new PetGenerationError("STALE_STAGE", "Retry does not match the current stage");
     }
+    if (current.stage === "reference") {
+      throw new PetGenerationError("REFERENCES_REQUIRED", "Update and resubmit the reference images");
+    }
     if (current.stage === "texture" && !petGlbProductCapabilities().texture.separateStageAvailable) {
       throw new PetGenerationError(
         "TEXTURE_INCLUDED_IN_BASE",
@@ -649,6 +658,9 @@ export class PetGlbService {
       );
     }
     const retryPrice = stagePrice(current.stage);
+    const readyProvider = retryPrice > 0
+      ? await this.providerReadyForCharge(current.stage)
+      : undefined;
     const retry = await this.stages.queueRetry({
       orderId: order.id,
       ownerPhone,
@@ -662,7 +674,7 @@ export class PetGlbService {
       }),
       priceCredits: retryPrice,
     });
-    await this.startQueuedStage(orderUuid, ownerPhone, retry);
+    await this.startQueuedStage(orderUuid, ownerPhone, retry, readyProvider);
     return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
 
@@ -738,10 +750,27 @@ export class PetGlbService {
     });
   }
 
+  private async providerReadyForCharge(
+    stage: Exclude<PetGlbStageKind, "reference">,
+  ): Promise<PetModelGenerationProvider> {
+    try {
+      const provider = this.provider();
+      await provider.preflightForCharge(stage);
+      return provider;
+    } catch (error: any) {
+      if (error instanceof PetGenerationError) throw error;
+      throw new PetGenerationError(
+        typeof error?.code === "string" ? error.code : "PROVIDER_NOT_READY",
+        "The selected in-house pipeline is not ready. No PupCoins were charged.",
+      );
+    }
+  }
+
   private async startQueuedStage(
     orderUuid: string,
     ownerPhone: string,
     attempt: PetGlbStageAttempt,
+    readyProvider?: PetModelGenerationProvider,
   ): Promise<void> {
     if (attempt.state !== "queued") return;
     const order = await this.requireOwned(orderUuid, ownerPhone);
@@ -754,33 +783,47 @@ export class PetGlbService {
       );
       return;
     }
-    const provider = this.provider();
     let startedJobId: string | null = null;
     try {
+      if (attempt.stage === "reference") {
+        throw new PetGenerationError("UNSUPPORTED_STAGE", "Reference approval does not start a provider job");
+      }
+      // Paid callers reuse the exact preflighted instance. Construction for a
+      // zero-cost stage still belongs inside the immediate refund/failure guard.
+      const provider = readyProvider ?? this.provider();
       let job;
       if (attempt.stage === "base") {
         const references = (await this.resolveOrderReferenceContext(order)).manifest;
         if (!references) {
           throw new PetGenerationError("REFERENCES_MISSING", "Approved references are missing");
         }
-        job = await provider.createBaseJob({
+        const input = {
           ...references,
           meshProfile: order.meshProfile,
           subjectProfile: order.subjectProfile,
-        });
+        };
+        // Close the readiness race at the last await before submission. This
+        // authenticated check is inside the immediate refund/failure guard.
+        await provider.preflightForCharge(attempt.stage);
+        job = await provider.createBaseJob(input);
       } else {
         const source = await this.resolveSourceModelAttempt(attempt);
         if (!source.providerJobId) {
           throw new PetGenerationError("SOURCE_JOB_MISSING", "Approved source stage has no provider job");
         }
         if (attempt.stage === "texture") {
-          job = await provider.createTextureJob(source.providerJobId, {
+          const input = {
             styleDirection: order.styleDirection,
             quality: order.textureQuality,
-          });
+          };
+          await provider.preflightForCharge(attempt.stage);
+          job = await provider.createTextureJob(source.providerJobId, input);
         } else if (attempt.stage === "rig_check") {
+          // Zero-price capability work still cannot start on stale readiness.
+          await provider.preflightForCharge(attempt.stage);
           job = await provider.createRigCheckJob(source.providerJobId);
         } else if (attempt.stage === "rig") {
+          await provider.preflightForCharge(attempt.stage);
           job = await provider.createRigJob(source.providerJobId, order.subjectProfile);
         } else {
           throw new PetGenerationError("UNSUPPORTED_STAGE", `Cannot start ${attempt.stage}`);
@@ -866,16 +909,20 @@ export class PetGlbService {
           styleDirection: order.styleDirection,
         })
       : null;
+    const nextPriceCredits = nextStage ? stagePrice(nextStage) : 0;
+    const readyProvider = nextStage && nextPriceCredits > 0
+      ? await this.providerReadyForCharge(nextStage)
+      : undefined;
     const advanced = await this.stages.autoAdvanceCompletedStage({
       orderId: order.id,
       ownerPhone,
       attemptId: current.id,
       nextStage,
       nextInputHash,
-      nextPriceCredits: nextStage ? stagePrice(nextStage) : 0,
+      nextPriceCredits,
     });
     if (advanced.next) {
-      await this.startQueuedStage(orderUuid, ownerPhone, advanced.next);
+      await this.startQueuedStage(orderUuid, ownerPhone, advanced.next, readyProvider);
     }
     return this.buildView((await this.orders.findByUuid(orderUuid))!);
   }
@@ -922,6 +969,9 @@ export class PetGlbService {
         ownerPhone: order.ownerPhone,
         ttlSeconds: DOWNLOAD_TTL_SECONDS,
         sessionId: order.referenceSessionId,
+        durableManifest: order.referenceManifest
+          ? order.referenceManifest as unknown as PetModelGenerationInput
+          : undefined,
       });
       return {
         manifest: resolved.signedManifest,

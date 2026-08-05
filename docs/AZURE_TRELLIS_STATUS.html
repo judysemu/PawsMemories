@@ -77,7 +77,7 @@
     <h1>Pawsome3D In-House 3D</h1>
     <span class="badge blocked">SUPPORT REQUIRED</span>
   </div>
-  <p class="subtle">Last engineering update: 2026-08-05 12:38 MDT · Auto-refreshes every 30 seconds</p>
+  <p class="subtle">Last engineering update: 2026-08-05 12:49 MDT · Auto-refreshes every 30 seconds</p>
 
   <section class="panel callout">
     <h2>Quota API result</h2>
@@ -93,7 +93,8 @@
     <p><span class="badge blocked">WEST US FAILED</span> The final clean listed US request failed with <code>ContactSupport</code>; usage and applied limit remain 0.</p>
     <p><span class="badge blocked">SUPPORT REQUIRED</span> The Quota API has exhausted every standard US region where this subscription lists the exact A100 size. It cannot override Microsoft's support/capacity decision; a Microsoft for Startups support case is now required.</p>
     <p><span class="badge pending">2 ALTERNATIVE SUBSCRIPTIONS</span> Azure also lists two enabled subscriptions in separate tenant contexts. They have not been disproven: the CLI lacks a tenant-specific access token for both, so their offer, GPU entitlement, quota, and regional availability are still unknown.</p>
-    <p><span class="badge blocked">WRONG IDENTITY SELECTED</span> The first tenant sign-in returned <code>AADSTS50020</code>: the active personal-browser identity is not a member of that tenant. This is an authentication mismatch, not a quota result.</p>
+    <p><span class="badge blocked">2 WRONG-IDENTITY ATTEMPTS</span> Both Alternative 1 sign-in attempts returned <code>AADSTS50020</code> because Microsoft selected the same personal-browser identity. A third retry with that identity is prohibited. The user must choose one of the two distinct organizational sign-ins cached for the alternatives, or those subscriptions are inaccessible.</p>
+    <p><span class="badge blocked">DEFAULT TENANT ONLY</span> The tenant record supplied during recovery was classified locally as the current default tenant, not either alternative tenant. Its identifier remains omitted and it must not be paired with an alternative subscription.</p>
     <p><span class="badge pending">2 SIGN-INS REQUIRED</span> Cached CLI metadata proves the alternatives use two different organizational/custom-domain identities, each with its own home tenant. Each must be selected in a signed-out or private browser session, then audited independently before any support escalation or GPU deployment.</p>
     <p class="subtle">Request identifiers, subscription identifiers, tenant identifiers, and secret values remain omitted.</p>
     <p class="subtle">A portal receipt is not approval. Request identifiers and account identifiers are deliberately omitted.</p>
@@ -110,6 +111,12 @@
     <h2>Architecture checkpoint</h2>
     <p><span class="badge pass">LOCAL PASS</span> One real uploaded front image can now be canonicalized locally into a truthful one-image reference manifest. Strict in-house mode does not synthesize turnaround images and cannot call Tripo for this step.</p>
     <p><span class="badge pass">DEPLOYMENT PLAN PASS</span> The GPU lane is independent from the existing core and GibiWorld VMs. It can use any approved same-tenant region or subscription, connects through private global VNet peering, gives the GPU VM no public IP, and uses an egress-only NAT gateway for secure first boot and Azure service access.</p>
+    <p><span class="badge pass">SERVERLESS A100 FOUNDATION PASS</span> A separate cross-tenant Azure Container Apps lane now compiles locally. It uses target-local ACR, storage, Key Vault, managed identity, offline model mounts, the TRELLIS container first, and a Blender CPU sidecar. It does not replace or modify the existing private VM lane.</p>
+    <p><span class="badge blocked">SERVING IMAGE REBUILD REQUIRED</span> The previously accepted TRELLIS and Blender images predate aggregate readiness: the cached TRELLIS image cannot report Blender readiness and the cached Blender image cannot report its worker revision. Foundation planning remains safe, but both images must be rebuilt, privately read back, tested, and assigned new accepted tags before the template can create the serving app.</p>
+    <p><span class="badge blocked">REVISION LOCK REQUIRED</span> Both rebuilt containers must receive the same explicit full repository revision. Serving rejects the old revision, malformed revisions, and any revision or image tag that does not exactly match a runtime lock with verified private readback for both images.</p>
+    <p><span class="badge pass">LOCAL PRECHARGE SAFETY PASS</span> Customer approval, retry, paid rig purchase, and zero-credit rig capability work now fail closed on aggregate TRELLIS/Blender readiness. Paid stages prove readiness before debit and again as the final await before provider submission; a post-debit readiness race refunds before submission. Provider input stays bound to the order's persisted exact asset version.</p>
+    <p><span class="badge pending">QUOTA + TARGET AUTH PENDING</span> This is governed by a distinct Container Apps GPU quota rather than the exhausted Compute VM-family quota. The working sponsored subscription reports zero dedicated A100 and zero managed-environment capacity; both alternative subscriptions remain untested.</p>
+    <p><span class="badge blocked">NO SCALE-TO-ZERO CLAIM</span> Azure's platform can scale serverless GPUs to zero, but this initial service is deliberately fixed at one replica because in-process background jobs and SQLite recovery are not scale-to-zero safe. If serving is applied, one A100 can remain allocated and billed until the service is disabled or removed. A durable external queue and restart-safe job ownership must land before reducing the minimum to zero.</p>
     <p><span class="badge blocked">NOT LIVE</span> These are compiled and tested local contracts. The new GPU lane has not been deployed because quota is still zero, and no real image-to-TRELLIS generation has completed.</p>
   </section>
 
@@ -117,7 +124,8 @@
     <section class="panel">
       <h2>Current result</h2>
       <div class="metric pass">2 VMs LIVE</div>
-      <p>Core/orchestrator and isolated GibiWorld hosts are provisioned, running, and Docker-ready.</p>
+      <p>Core/orchestrator and isolated GibiWorld hosts are provisioned and running. The core is a CPU build/cache host, not a GPU inference host; it has no data disk, so the synchronized image rebuild must pass a fresh Docker-storage headroom gate before it starts.</p>
+      <p><span class="badge pending">ADVISOR DEFERRED</span> Azure recommends VM Scale Sets Flex for the standalone core. Apply that only after Docker/build/cache state is externalized and control services are stateless; duplicating the current stateful build host would add cost without creating real high availability.</p>
     </section>
     <section class="panel">
       <h2>Current blocker</h2>
@@ -160,8 +168,8 @@
     <table>
       <thead><tr><th>Status</th><th>Resource</th><th>Size / address</th><th>Evidence</th></tr></thead>
       <tbody>
-        <tr><td><span class="badge pass">PASS</span></td><td>Core / orchestrator VM</td><td><code>pawstrellis-core-01</code><br>Standard_D8ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active.</td></tr>
-        <tr><td><span class="badge pass">PASS</span></td><td>GibiWorld VM</td><td><code>pawstrellis-gibi-01</code><br>Standard_D4ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active.</td></tr>
+        <tr><td><span class="badge pass">PASS</span></td><td>Core / orchestrator VM</td><td><code>pawstrellis-core-01</code><br>Standard_D8ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active. No data disk; VMSS Flex recommendation deferred until state is externalized.</td></tr>
+        <tr><td><span class="badge pass">PASS</span></td><td>GibiWorld VM</td><td><code>pawstrellis-gibi-01</code><br>Standard_D4ads_v7<br>Public IP redacted</td><td>Provisioning succeeded; running; cloud-init done; Docker 29.7.1 active. CPU application/orchestration host only.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Platform services</td><td>VNet, NSGs, Key Vault, Blob Storage, Log Analytics</td><td>Created by validated Bicep; blobs are non-public and access is identity-based. Existing Azure AI resources were untouched.</td></tr>
         <tr><td><span class="badge work">REGISTERING</span></td><td>Microsoft.Network provider</td><td>Subscription-level registration</td><td>Registration was safely re-requested and remains in progress. Existing network resources are live, but full preflight waits for <code>Registered</code>.</td></tr>
         <tr><td><span class="badge blocked">DENIED</span></td><td>A100 quota</td><td>24 NCads A100 v4 cores, seven listed US regions</td><td>Central US, East US 2, and West US 3 returned <code>QuotaNotAvailableForResource</code>. East US, South Central US, West US, and West US 2 returned <code>ContactSupport</code>. All applied limits remain 0; no GPU VM or charge exists.</td></tr>
@@ -180,7 +188,9 @@
       <thead><tr><th>Status</th><th>Gate</th><th>What must be proven</th></tr></thead>
       <tbody>
         <tr><td><span class="badge pass">LOCAL PASS</span></td><td>Audited Azure foundation</td><td>Independent regional GPU-lane Bicep, private peering, egress-only NAT, managed identities, Key Vault/storage RBAC, and cost guards compile and pass static contracts. The lane is not deployed.</td></tr>
+        <tr><td><span class="badge blocked">FOUNDATION PASS / SERVING BLOCKED</span></td><td>Optional Container Apps A100 lane</td><td>The isolated cross-tenant foundation compiles and passes 7/7 focused contracts, including exact authenticated readiness metadata. Serving is intentionally disabled for the two older cached image tags and requires rebuilt aggregate-readiness images, target auth, registered providers, live environment-scoped NCA100 quota, hash-verified offline weights, Key Vault secret metadata, exact source-IP ingress, and two spend confirmations. Initial scale is fixed at one replica and is not idle-free.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>TRELLIS worker contract</td><td>Pinned source, direct authenticated image upload, durable base/finalization status, verified GLB artifact endpoints, runtime offline flags.</td></tr>
+        <tr><td><span class="badge pass">LOCAL PASS</span></td><td>Customer precharge + immutable input safety</td><td>Real-MySQL tests pass 7/7: aggregate TRELLIS/Blender failure cannot debit or submit approval, retry, paid rig, or zero-credit rig-check work; the second authenticated proof is immediately before submission; post-debit readiness loss refunds before submission; Tripo behavior is unchanged; and the provider receives the persisted exact asset version rather than a later session-current version.</td></tr>
         <tr><td><span class="badge blocked">BLOCKED</span></td><td>GPU capacity</td><td>Azure Support must grant 24 A100 or 40 H100 family vCPUs before the private GPU VM can be allocated.</td></tr>
         <tr><td><span class="badge pass">PASS</span></td><td>Upstream compatibility audit</td><td>The install manifest pins the model dependency graph and configures A100/A10/H100 CUDA architectures. An actual image build and loaded model remain separate pending gates.</td></tr>
         <tr><td><span class="badge work">CPU PASS</span></td><td>Model readiness</td><td>All four pinned dependencies and the accepted worker image passed private-cache readback and integrity verification. The corrected image passes offline CPU imports and fail-closed service checks. GPU-only FlexGEMM loading and a real inference run remain outstanding; no model API call is allowed during serving.</td></tr>
@@ -198,7 +208,7 @@
 
   <section class="panel">
     <h2>Safest next action</h2>
-    <p>First authenticate each alternative subscription with its own organizational identity in an isolated CLI profile and private browser session. Read its offer, provider state, A100-family limit, and exact SKU restrictions independently. Do not clear or replace the working sponsored profile. Only if both alternatives also fail should the project return to <a href="https://learn.microsoft.com/en-us/startups/microsoft-for-startups/mfs-program-support">Microsoft for Startups Program Support</a>. Do not run the GPU deployment until a fresh read shows at least 24 available family and regional vCPUs.</p>
+    <p>First authenticate each alternative subscription with its own organizational identity in an isolated CLI profile and private browser session. Read both its Compute A100-family quota and its separate Container Apps managed-environment NCA100 entitlement. Do not clear or replace the working sponsored profile. If entitlement exists, rebuild and accept both aggregate-readiness images before any serving plan. Then prefer the Container Apps lane because it accepts the private images and avoids managing a GPU VM, but budget it as one continuously allocated replica at first; scale-to-zero is prohibited until queue and job recovery are redesigned. Only if both alternatives fail both lanes should the project return to <a href="https://learn.microsoft.com/en-us/startups/microsoft-for-startups/mfs-program-support">Microsoft for Startups Program Support</a>.</p>
   </section>
 
   <section class="panel">
@@ -207,6 +217,7 @@
     <p><span class="badge pass">PASS</span> No email-like, private-key, credential-like, connection-string, local-path, or signed-URL strings were detected inside the 76 imported GLBs. The local report shows flag categories only and never prints a detected value.</p>
     <p><span class="badge work">FLAG</span> The broader tracked repository contains email-shaped strings in 27 text files (15 are test fixtures) and credential-shaped URLs in 6 text files (5 are test fixtures). These are potential-review flags, not confirmed secrets; their values are deliberately not printed here.</p>
     <p><span class="badge work">CURRENT CHANGE FLAGS REVIEWED</span> Three changed files contain business-contact/configuration or test email shapes. Eight contain public Azure role-definition identifiers or deterministic test UUIDs. They are retained as functional data, not classified as subscription, tenant, request, credential, or secret values.</p>
+    <p><span class="badge pass">FINAL CHANGESET PASS</span> The latest 42-file category-only scan found zero private-key markers, live-looking token patterns, Azure connection strings, credential URLs, or whitespace diagnostics. One administrator configuration example contains an email shape; three files contain deterministic test UUIDs or public Azure RBAC role-definition identifiers. Candidate strings were redacted during classification.</p>
     <p><span class="badge pass">PASS</span> The broader tracked scan found zero private-key markers, zero live-looking cloud token patterns, and zero Azure-style connection strings.</p>
     <p><span class="badge pass">PASS</span> The deployed commit archives and model bundle were scanned before transfer; no private-key, cloud-token, Azure-key, or credential-in-URL pattern was found. Worker secrets were generated on the VM, never printed, and never added to Git.</p>
     <p><span class="badge pass">PASS</span> The Azure-staged upstream source/model bundle scanned 2,217 text files with zero private-key, live-looking token, Azure connection-string, credential-URL, or email-shaped flags. Only category counts were emitted; no candidate value was printed.</p>
@@ -232,6 +243,7 @@
     <h2>Cost guardrails</h2>
     <p>Observed East US retail compute rates: H100 about <strong>$6.98/hour</strong>, A100 about <strong>$3.673/hour</strong>, core about <strong>$0.456/hour</strong>, GibiWorld about <strong>$0.228/hour</strong>, plus disks/logs.</p>
     <p>The GPU template has no public IP and includes a daily shutdown backstop. After each test window, Azure must explicitly report <code>PowerState/deallocated</code>.</p>
+    <p>The optional Container Apps template uses <code>minReplicas=1</code> and <code>maxReplicas=1</code>. Its serving apply has a separate A100 spend confirmation, and billing can continue while that replica exists. Do not use Azure's general scale-to-zero marketing as the cost estimate for this initial job architecture.</p>
   </section>
 </main>
 </body>

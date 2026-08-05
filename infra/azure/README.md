@@ -137,6 +137,144 @@ The deployment adds a peering and two narrowly scoped managed-identity roles to
 the existing foundation. It does not run `main.bicep` and does not move or
 recreate core/GibiWorld.
 
+## Optional cross-tenant Container Apps A100 lane
+
+The VM lane above remains intact. `container-apps-gpu-main.bicep` and
+`container-apps-gpu.bicep` add a separate, optional serverless-A100 target for
+an explicitly selected subscription and tenant. They never reference the core
+resource group, VNet, Key Vault, storage, or identity. This makes the lane
+suitable for an A100 entitlement held by a different organization: the core
+calls authenticated HTTPS ingress instead of relying on cross-tenant VNet
+peering or role assignments.
+
+The target-local foundation contains:
+
+- a Premium, admin-disabled ACR for independently accepted runtime images;
+- non-public model/job file shares, with the model share mounted read-only;
+- an RBAC Key Vault containing only an operator-staged worker secret;
+- a user-assigned identity with only ACR pull and Key Vault secret-read roles;
+- Log Analytics and a workload-profile Container Apps environment; and
+- `Consumption-GPU-NC24-A100`, with TRELLIS first and the Blender worker as its
+  CPU sidecar.
+
+The template has no model downloader or serving-time registry build. TRELLIS
+runs with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, reads the pre-staged
+`/models/TRELLIS.2-4B` tree, and shares `/jobs` with Blender at
+`/shared-model-artifacts`. The image defaults record the previously accepted
+runtime lock:
+`paws-trellis2:75fbf018-b74ca0c` and
+`paws-blender-worker:e2cb178`. Those images predate aggregate readiness: the
+cached TRELLIS image does not return Blender readiness and the cached Blender
+image does not return its worker revision. They remain provenance inputs for
+foundation planning, but the template and preflight refuse to create a serving
+app from those tags or their old full repository revision. Azure Files currently requires an account key
+at the Container Apps environment storage boundary; ARM resolves that value
+internally. It is not a template parameter, output, command argument, or
+repository value.
+
+The TRELLIS container also carries the full pinned source/model revisions plus
+the expected Blender `5.1.2` version and the explicit
+`runtimeRepositoryRevision`. The Blender sidecar reports that same revision.
+The serving preflight requires one lowercase 40-hex revision, rejects the old
+checkpoint, and verifies that the revision and both image references exactly
+match a runtime lock where both cache states are `verified-private-readback`.
+The current pre-aggregate lock intentionally has no top-level
+`repositoryRevision`: its historical TRELLIS and Blender images came from two
+different Paws commits. The field becomes required only when both replacements
+are rebuilt from one checkpoint.
+Container startup uses only secret-free TCP
+process probes; the backend's precharge gate remains authenticated `/readyz`,
+which must match those revisions and prove CUDA, loaded models, and a connected
+Blender bridge before a customer job or credit event can begin.
+
+Deployment is deliberately two-phase. Foundation creation comes first. Before
+serving, both images must be rebuilt from an implementation checkpoint that
+contains aggregate readiness, pass private-cache readback and runtime tests,
+and receive new accepted tags in `runtime/gpu-runtime.lock.json`. An operator
+then copies those new images into the target ACR, stages and hash-verifies the
+locked model bundle in the target model share, and adds the worker secret to
+the target Key Vault through a private user-controlled process. Only the
+serving phase can create the Container App, and its preflight fails closed
+unless the new tags, explicit aggregate-readiness acceptance, secret metadata,
+model-staging attestation, and live managed-environment NCA100 quota all pass.
+
+Set the target context explicitly; neither helper falls back to the currently
+selected core subscription:
+
+```bash
+export AZURE_ACA_SUBSCRIPTION_ID="<target-subscription-id>"
+export AZURE_ACA_TENANT_ID="<target-tenant-id>"
+export AZURE_ACA_LOCATION="<approved-A100-region>"
+```
+
+The default command is a What-If of the foundation and performs no write:
+
+```bash
+./infra/azure/scripts/deploy-container-apps-gpu.sh
+```
+
+An authorized foundation apply requires both the normal spend confirmation and
+an explicit attestation that Managed Environment Consumption NCA100 access is
+visible in the target tenant:
+
+```bash
+CONFIRM_AZURE_SPEND=YES \
+AZURE_ACA_NCA100_QUOTA_CONFIRMED=YES \
+./infra/azure/scripts/deploy-container-apps-gpu.sh apply-foundation
+```
+
+For cross-tenant public ingress, provide only the core service's exact fixed
+egress CIDR. The template emits one allow rule and TLS-only ingress; the worker
+still requires `X-Worker-Secret`. `AZURE_ACA_INGRESS_MODE=internal` is also
+available, but it is usable only after separately providing private network
+connectivity to that environment.
+
+```bash
+export AZURE_ACA_INGRESS_MODE=external-allowlist
+export AZURE_ACA_CORE_SOURCE_CIDR="<core-fixed-egress-ip>/32"
+export AZURE_ACA_MODELS_MANIFEST_SHA256="e3a4d702026090228807307c073f4171dbefd4db456a28a92e8a014669c0819c"
+export AZURE_ACA_TRELLIS_DIGEST="<64-lowercase-hex-manifest-digest>"
+export AZURE_ACA_BLENDER_DIGEST="<64-lowercase-hex-manifest-digest>"
+export AZURE_ACA_RUNTIME_REPOSITORY_REVISION="<full-40-hex-build-revision>"
+export AZURE_ACA_AGGREGATE_READINESS_IMAGES_ACCEPTED=YES
+
+./infra/azure/scripts/deploy-container-apps-gpu.sh what-if-serving
+```
+
+At the current checkpoint this command is expected to stop at the image gate;
+no new aggregate-readiness images have been built or accepted yet.
+Serving never accepts mutable tags. Both full target-ACR `@sha256:` references
+must exactly match `registryImageRef` values in the shared-revision runtime lock.
+
+Serving apply has a second A100-specific spend gate:
+
+```bash
+CONFIRM_AZURE_SPEND=YES \
+CONFIRM_AZURE_ACA_A100_SPEND=YES \
+AZURE_ACA_MODELS_MANIFEST_SHA256=e3a4d702026090228807307c073f4171dbefd4db456a28a92e8a014669c0819c \
+AZURE_ACA_AGGREGATE_READINESS_IMAGES_ACCEPTED=YES \
+./infra/azure/scripts/deploy-container-apps-gpu.sh apply-serving
+```
+
+Important: although Azure's serverless GPU platform supports scale-to-zero,
+this initial TRELLIS service intentionally sets `minReplicas=1` and
+`maxReplicas=1`. Jobs currently execute in-process and use SQLite state on the
+shared job volume, so scale-to-zero or concurrent replicas are not recovery
+safe. Once serving is applied, one A100 replica can remain allocated and billed
+until it is disabled or removed. Do not describe this configuration as
+scale-to-zero or idle-free. That cost optimization requires a durable external
+queue, leased job ownership, and restart-safe orchestration first.
+
+The preflight reads provider registration, the region's advertised workload
+profiles, Microsoft.App regional usage, and—after foundation creation—the
+official managed-environment usage endpoint. It never registers a provider,
+requests quota, stages a secret, moves a model, builds an image, or deploys a
+resource. Primary references: [serverless GPUs](https://learn.microsoft.com/en-us/azure/container-apps/gpu-serverless-overview),
+[workload profiles](https://learn.microsoft.com/en-us/azure/container-apps/workload-profiles-overview),
+[IP restrictions](https://learn.microsoft.com/en-us/azure/container-apps/ip-restrictions),
+[storage mounts](https://learn.microsoft.com/en-us/azure/container-apps/storage-mounts),
+and [managed-environment usage](https://learn.microsoft.com/en-us/rest/api/resource-manager/containerapps/managed-environment-usages/list?view=rest-resource-manager-containerapps-2026-01-01).
+
 ## Accepted worker and model contract
 
 The pinned source and four-model set are recorded in
@@ -145,6 +283,9 @@ The pinned source and four-model set are recorded in
 source. `compose/gpu.compose.yml` uses that exact tag by default and no longer
 rebuilds a different image on the GPU host. A later accepted image can be
 selected with `TRELLIS_WORKER_IMAGE` without changing the infrastructure.
+This earlier acceptance covers the recorded offline/runtime checks, not the
+new aggregate TRELLIS-plus-Blender readiness contract. It must not be selected
+for the Container Apps serving phase.
 
 The image uses the Miniconda `base` environment. Model initialization invokes
 `/opt/conda/bin/hf` directly; there is no nonexistent `trellis2` Conda

@@ -14,6 +14,7 @@ import type {
   GenerationJob,
   GenerationArtifacts,
   GenerationJobStatus,
+  PetGlbStageKind,
   ProviderJobRecord,
   SubjectProfile,
   TextureQuality,
@@ -100,6 +101,9 @@ export class TripoPetGenerationAdapter implements PetModelGenerationProvider {
     this.animate = opts.animate ?? false;
     this.ops = opts.animationOps ?? defaultAnimationOps;
   }
+
+  /** Tripo keeps its existing submission behavior; no new readiness call is introduced. */
+  async preflightForCharge(_stage: Exclude<PetGlbStageKind, "reference">): Promise<void> {}
 
   async createJob(input: PetModelGenerationInput): Promise<GenerationJob> {
     return this.createBaseJob(input);

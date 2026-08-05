@@ -50,12 +50,15 @@ services:
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
       TRELLIS_MODEL_PATH: /models/TRELLIS.2-4B
+      TRELLIS_MODEL_MANIFEST: /models/trellis2-staging-manifest.json
       TRELLIS_MODEL_REVISION: af44b45f2e35a493886929c6d786e563ec68364d
       TRELLIS_SOURCE_REVISION: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
       TRELLIS_JOBS_DIR: /jobs
       TRELLIS_PRELOAD: "true"
       BLENDER_WORKER_URL: http://blender-worker:10000
       BLENDER_INTERNAL_HOSTS: blender-worker
+      BLENDER_VERSION: "5.1.2"
+      BLENDER_WORKER_REVISION: ${BLENDER_WORKER_REVISION:?set the full accepted Paws runtime commit}
     depends_on:
       blender-worker:
         condition: service_healthy
@@ -92,13 +95,14 @@ services:
       start_period: 15m
 
   blender-worker:
-    image: ${BLENDER_WORKER_IMAGE:-paws-blender-worker:5.1.2}
+    image: ${BLENDER_WORKER_IMAGE:-paws-blender-worker:e2cb178}
     restart: unless-stopped
     env_file:
       - /opt/paws-gpu/secrets/blender.env
     environment:
       PORT: "10000"
       IFC_MAX_CONCURRENT: "1"
+      BLENDER_WORKER_REVISION: ${BLENDER_WORKER_REVISION:?set the full accepted Paws runtime commit}
       RIG_PIPELINE_SHARED_ARTIFACTS_DIR: /shared-model-artifacts
     ports:
       - "${GPU_PRIVATE_IP:-10.43.2.10}:10000:10000"

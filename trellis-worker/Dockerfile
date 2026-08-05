@@ -1,6 +1,7 @@
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:da6791294b0b04d7e65d87b7451d6f2390b4d36225ab0701ee7dfec5769829f5
 
 ARG TRELLIS2_COMMIT=75fbf0183001ed9876c8dbb35de6b68552ee08bd
+ARG PAWS_RUNTIME_REPOSITORY_REVISION
 ARG TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0"
 ARG MINICONDA_SHA256=84bd8f60fea2e09f1fa72f258132337aff7a20ec1e12dea9d1eff96830cf3d8c
 ARG DEBIAN_FRONTEND=noninteractive
@@ -62,6 +63,9 @@ RUN /opt/conda/bin/pip install \
 
 WORKDIR /app
 COPY app /app
+
+RUN printf '%s' "${PAWS_RUNTIME_REPOSITORY_REVISION}" | grep -Eq '^[0-9a-f]{40}$' && \
+    printf '%s\n' "${PAWS_RUNTIME_REPOSITORY_REVISION}" > /app/PAWS_RUNTIME_REVISION
 
 RUN mkdir -p /jobs /models && useradd --create-home --uid 10001 trellis && \
     chown -R trellis:trellis /app /jobs /models

@@ -2,6 +2,7 @@ import type {
   PetModelGenerationInput,
   GenerationJob,
   GenerationArtifacts,
+  PetGlbStageKind,
   ProviderJobRecord,
   SubjectProfile,
   TextureQuality,
@@ -12,6 +13,8 @@ import type {
  * which provider is in use.
  */
 export interface PetModelGenerationProvider {
+  /** Non-billable stage readiness proof, called before any credit debit. */
+  preflightForCharge(stage: Exclude<PetGlbStageKind, "reference">): Promise<void>;
   createJob(input: PetModelGenerationInput): Promise<GenerationJob>;
   createBaseJob(input: PetModelGenerationInput): Promise<GenerationJob>;
   createTextureJob(

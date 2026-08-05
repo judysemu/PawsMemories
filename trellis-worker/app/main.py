@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -20,6 +20,11 @@ from finalization import BlenderClient, FinalizationConfig, FinalizationError, f
 
 
 MODEL_PATH = Path(os.environ.get("TRELLIS_MODEL_PATH", "/models/TRELLIS.2-4B"))
+MODEL_MANIFEST_PATH = Path(
+    os.environ.get("TRELLIS_MODEL_MANIFEST", "/models/trellis2-staging-manifest.json")
+)
+EXPECTED_MODEL_MANIFEST_SHA256 = "e3a4d702026090228807307c073f4171dbefd4db456a28a92e8a014669c0819c"
+EXPECTED_MODEL_LOCK_SHA256 = "fb8c7a52240cb1393d9ccff0e9acb1db560eb6b57c03302d732ee700badba487"
 JOBS_ROOT = Path(os.environ.get("TRELLIS_JOBS_DIR", "/jobs"))
 DATABASE_PATH = JOBS_ROOT / "jobs.sqlite3"
 MAX_UPLOAD_BYTES = int(os.environ.get("TRELLIS_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
@@ -28,6 +33,19 @@ WORKER_SECRET = os.environ.get("WORKER_SHARED_SECRET", "").strip()
 PRELOAD_MODEL = os.environ.get("TRELLIS_PRELOAD", "true").lower() == "true"
 MODEL_REVISION = os.environ.get("TRELLIS_MODEL_REVISION", "unknown")
 SOURCE_REVISION = os.environ.get("TRELLIS_SOURCE_REVISION", "unknown")
+EXPECTED_BLENDER_VERSION = os.environ.get("BLENDER_VERSION", "5.1.2").strip()
+EXPECTED_BLENDER_REVISION = os.environ.get("BLENDER_WORKER_REVISION", "").strip()
+RUNTIME_REVISION_FILE = Path(
+    os.environ.get("PAWS_RUNTIME_REVISION_FILE", "/app/PAWS_RUNTIME_REVISION")
+)
+try:
+    IMAGE_RUNTIME_REVISION = RUNTIME_REVISION_FILE.read_text(encoding="utf-8").strip()
+except OSError:
+    IMAGE_RUNTIME_REVISION = None
+BLENDER_READINESS_TIMEOUT_SECONDS = max(
+    1,
+    min(30, int(os.environ.get("BLENDER_READINESS_TIMEOUT_SECONDS", "5"))),
+)
 
 if not WORKER_SECRET:
     raise RuntimeError("WORKER_SHARED_SECRET is required")
@@ -40,6 +58,7 @@ executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="trellis-job")
 pipeline_lock = threading.Lock()
 pipeline = None
 pipeline_error: str | None = None
+model_bundle_verified = False
 
 
 def database() -> sqlite3.Connection:
@@ -126,8 +145,69 @@ def require_worker_secret(x_worker_secret: str | None = Header(default=None)) ->
         raise HTTPException(status_code=401, detail="UNAUTHORIZED")
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_model_bundle() -> None:
+    if not MODEL_MANIFEST_PATH.is_file() or MODEL_MANIFEST_PATH.stat().st_size > 8 * 1024 * 1024:
+        raise RuntimeError("MODEL_MANIFEST_MISSING")
+    if sha256_file(MODEL_MANIFEST_PATH) != EXPECTED_MODEL_MANIFEST_SHA256:
+        raise RuntimeError("MODEL_MANIFEST_HASH_MISMATCH")
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    entries = manifest.get("models")
+    if (
+        manifest.get("schemaVersion") != 1
+        or manifest.get("state") != "complete"
+        or manifest.get("runtimeNetworkPolicy") != "offline"
+        or manifest.get("lockSha256") != EXPECTED_MODEL_LOCK_SHA256
+        or manifest.get("source", {}).get("revision") != SOURCE_REVISION
+        or manifest.get("awaitingAccess") != []
+        or not isinstance(entries, list)
+        or len(entries) != 4
+    ):
+        raise RuntimeError("MODEL_MANIFEST_NOT_ACCEPTED")
+    model_root = MODEL_PATH.parent.resolve()
+    for entry in entries:
+        local_dir = entry.get("localDir") if isinstance(entry, dict) else None
+        files = entry.get("files") if isinstance(entry, dict) else None
+        if not isinstance(local_dir, str) or not isinstance(files, list) or not files:
+            raise RuntimeError("MODEL_MANIFEST_ENTRY_INVALID")
+        entry_root = (model_root / local_dir).resolve()
+        if entry_root.parent != model_root or not entry_root.is_dir():
+            raise RuntimeError("MODEL_DIRECTORY_INVALID")
+        recorded_paths: set[str] = set()
+        for recorded in files:
+            relative = recorded.get("path") if isinstance(recorded, dict) else None
+            parsed = PurePosixPath(relative) if isinstance(relative, str) else None
+            if parsed is None or parsed.is_absolute() or ".." in parsed.parts or relative in recorded_paths:
+                raise RuntimeError("MODEL_FILE_MANIFEST_INVALID")
+            recorded_paths.add(relative)
+            target = entry_root.joinpath(*parsed.parts)
+            resolved = target.resolve()
+            if (
+                (resolved.parent != entry_root and entry_root not in resolved.parents)
+                or target.is_symlink()
+                or not target.is_file()
+                or target.stat().st_size != recorded.get("bytes")
+                or sha256_file(target) != recorded.get("sha256")
+            ):
+                raise RuntimeError("MODEL_FILE_HASH_MISMATCH")
+        actual_paths = {
+            path.relative_to(entry_root).as_posix()
+            for path in entry_root.rglob("*")
+            if path.is_file() and ".cache" not in path.relative_to(entry_root).parts
+        }
+        if actual_paths != recorded_paths:
+            raise RuntimeError("MODEL_FILE_SET_MISMATCH")
+
+
 def load_pipeline():
-    global pipeline, pipeline_error
+    global pipeline, pipeline_error, model_bundle_verified
     if pipeline is not None:
         return pipeline
     with pipeline_lock:
@@ -136,6 +216,8 @@ def load_pipeline():
         try:
             if not MODEL_PATH.is_dir():
                 raise RuntimeError(f"Model directory is missing: {MODEL_PATH}")
+            verify_model_bundle()
+            model_bundle_verified = True
             from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
             loaded = Trellis2ImageTo3DPipeline.from_pretrained(str(MODEL_PATH))
@@ -144,6 +226,7 @@ def load_pipeline():
             pipeline_error = None
             return pipeline
         except Exception as error:  # surfaced through readiness without leaking a traceback
+            model_bundle_verified = False
             pipeline_error = f"{type(error).__name__}: {error}"
             raise
 
@@ -274,8 +357,7 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/readyz", dependencies=[Depends(require_worker_secret)])
-def readyz():
+def aggregate_readiness() -> tuple[bool, dict[str, object]]:
     try:
         import torch
 
@@ -284,11 +366,53 @@ def readyz():
     except Exception:
         cuda_ready = False
         gpu_name = None
+    blender_status = {
+        "status": "not_ready",
+        "bridgeConnected": False,
+        "version": None,
+        "revision": None,
+    }
+    try:
+        blender = BlenderClient(FinalizationConfig.from_environment(WORKER_SECRET))
+        health = blender.request_json(
+            "GET",
+            "/health",
+            None,
+            BLENDER_READINESS_TIMEOUT_SECONDS,
+        )
+        actual_version = health.get("blenderVersion")
+        actual_revision = health.get("workerRevision")
+        bridge_connected = health.get("bridge") == "connected"
+        blender_ready = (
+            health.get("status") == "ok"
+            and bridge_connected
+            and health.get("revisionVerified") is True
+            and bool(EXPECTED_BLENDER_REVISION)
+            and actual_version == EXPECTED_BLENDER_VERSION
+            and actual_revision == EXPECTED_BLENDER_REVISION
+        )
+        blender_status = {
+            "status": "ready" if blender_ready else "not_ready",
+            "bridgeConnected": bridge_connected,
+            "version": actual_version if isinstance(actual_version, str) else None,
+            "revision": actual_revision if isinstance(actual_revision, str) else None,
+        }
+    except Exception:
+        blender_ready = False
+    runtime_revision_verified = (
+        isinstance(IMAGE_RUNTIME_REVISION, str)
+        and len(IMAGE_RUNTIME_REVISION) == 40
+        and all(character in "0123456789abcdef" for character in IMAGE_RUNTIME_REVISION)
+        and IMAGE_RUNTIME_REVISION == EXPECTED_BLENDER_REVISION
+    )
     ready = (
         cuda_ready
         and MODEL_PATH.is_dir()
+        and model_bundle_verified
         and pipeline is not None
         and pipeline_error is None
+        and runtime_revision_verified
+        and blender_ready
     )
     body = {
         "status": "ready" if ready else "not_ready",
@@ -296,10 +420,26 @@ def readyz():
         "gpu": gpu_name,
         "modelPresent": MODEL_PATH.is_dir(),
         "modelLoaded": pipeline is not None,
+        "modelBundleVerified": model_bundle_verified,
         "modelRevision": MODEL_REVISION,
         "sourceRevision": SOURCE_REVISION,
+        "runtimeRepositoryRevision": IMAGE_RUNTIME_REVISION,
+        "runtimeRevisionVerified": runtime_revision_verified,
+        "blender": blender_status,
         "error": pipeline_error,
     }
+    return ready, body
+
+
+def require_aggregate_readiness() -> None:
+    ready, _body = aggregate_readiness()
+    if not ready:
+        raise HTTPException(status_code=503, detail="INHOUSE_PIPELINE_NOT_READY")
+
+
+@app.get("/readyz", dependencies=[Depends(require_worker_secret)])
+def readyz():
+    ready, body = aggregate_readiness()
     return JSONResponse(status_code=200 if ready else 503, content=body)
 
 
@@ -311,6 +451,9 @@ async def create_job(
     decimation_target: int = Form(1_000_000, ge=10_000, le=1_000_000),
     texture_size: Literal[1024, 2048, 4096] = Form(4096),
 ):
+    # Reject before receiving a potentially large upload, then prove readiness
+    # again immediately before accepting the durable job.
+    require_aggregate_readiness()
     job_id = str(uuid.uuid4())
     job_dir = JOBS_ROOT / job_id
     job_dir.mkdir(mode=0o700)
@@ -329,6 +472,15 @@ async def create_job(
         input_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(error)) from error
 
+    try:
+        require_aggregate_readiness()
+    except HTTPException:
+        input_path.unlink(missing_ok=True)
+        try:
+            job_dir.rmdir()
+        except OSError:
+            pass
+        raise
     now = time.time()
     with database() as connection:
         connection.execute(
@@ -397,6 +549,7 @@ def request_finalization(job_id: str):
         raise HTTPException(status_code=409, detail="BASE_ARTIFACT_NOT_READY")
     if row["finalization_status"] == "succeeded" and row["final_artifact_path"]:
         return JSONResponse(status_code=200, content={"id": job_id, "status": "succeeded"})
+    require_aggregate_readiness()
     now = time.time()
     with database() as connection:
         claimed = connection.execute(

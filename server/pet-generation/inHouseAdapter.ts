@@ -15,6 +15,7 @@ import type {
   GenerationArtifacts,
   GenerationJob,
   GenerationJobStatus,
+  PetGlbStageKind,
   PetModelGenerationInput,
   ProviderJobRecord,
   SubjectProfile,
@@ -46,6 +47,16 @@ export class InHousePetGenerationAdapter implements PetModelGenerationProvider {
     finalizer?: ModelArtifactFinalizer,
   ) {
     this.finalizer = finalizer ?? (isModelArtifactFinalizer(provider) ? provider : null);
+  }
+
+  async preflightForCharge(_stage: Exclude<PetGlbStageKind, "reference">): Promise<void> {
+    if (!this.provider.preflightForCharge) {
+      throw new PetGenerationError(
+        "PROVIDER_READINESS_UNAVAILABLE",
+        "The in-house provider does not expose an authenticated readiness check",
+      );
+    }
+    await this.provider.preflightForCharge();
   }
 
   async createJob(input: PetModelGenerationInput): Promise<GenerationJob> {

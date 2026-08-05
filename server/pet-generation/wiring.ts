@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 import { putPrivateObject } from "../../storage.private";
-import { findAssetById, findVersionById } from "../assets/repository";
+import {
+  findAssetById,
+  findAssetByUuid,
+  findVersionByAssetAndNumber,
+  findVersionById,
+} from "../assets/repository";
 import { generateSignedUrlForVersion } from "../assets/access";
 import type { PetGlbServiceDeps } from "./service";
 import type { ValidationReport } from "./validation";
@@ -21,20 +26,88 @@ import { petGlbProductCapabilities } from "./capabilities";
  * the existing signed-URL path. No stubs.
  */
 
-async function loadRigProfileJoints(): Promise<string[]> {
+export async function loadRigProfileJoints(): Promise<string[]> {
   try {
     const { readFile } = await import("node:fs/promises");
     const { resolve } = await import("node:path");
-    const raw = await readFile(resolve(process.cwd(), "bonemap.json"), "utf8");
+    const raw = await readFile(
+      resolve(process.cwd(), "blender-worker", "profiles", "quadruped.dog.medium.json"),
+      "utf8",
+    );
     const parsed = JSON.parse(raw);
-    const joints = Array.isArray(parsed?.joints)
+    const joints: unknown[] = Array.isArray(parsed?.joints)
       ? parsed.joints
-      : Object.keys(parsed?.bones || parsed || {});
-    return joints.filter((j: unknown): j is string => typeof j === "string");
-  } catch {
-    // Absent profile => rig coverage reports UNMEASURED, never a silent pass.
-    return [];
+      : parsed?.joints && typeof parsed.joints === "object"
+        ? Object.keys(parsed.joints)
+        : [];
+    const names = joints.reduce<string[]>((result, joint) => {
+      if (typeof joint === "string" && joint.trim().length > 0) result.push(joint);
+      return result;
+    }, []);
+    if (!names.length) throw new Error("profile contains no joints");
+    return [...new Set(names)];
+  } catch (error) {
+    throw new PetGenerationError(
+      "RIG_PROFILE_UNAVAILABLE",
+      "The pinned quadruped rig validation profile is unavailable",
+    );
   }
+}
+
+type ReferenceUrlField = "frontUrl" | "leftUrl" | "rightUrl" | "rearUrl" | "threeQuarterUrl";
+
+const REFERENCE_FIELD_BY_KIND: Record<string, ReferenceUrlField> = {
+  front: "frontUrl",
+  left: "leftUrl",
+  right: "rightUrl",
+  rear: "rearUrl",
+  front_three_quarter: "threeQuarterUrl",
+};
+
+const ASSET_VERSION_REFERENCE = /^asset:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/versions\/([1-9][0-9]*)$/i;
+
+async function signDurableReferenceManifest(
+  pool: mysql.Pool,
+  manifest: PetModelGenerationInput,
+  ownerPhone: string,
+  ttlSeconds: number,
+): Promise<PetModelGenerationInput> {
+  const signed: Partial<Record<ReferenceUrlField, string>> = {};
+  for (const field of Object.values(REFERENCE_FIELD_BY_KIND)) {
+    const reference = manifest[field];
+    if (reference === undefined) continue;
+    const match = ASSET_VERSION_REFERENCE.exec(reference);
+    if (!match) {
+      throw new PetGenerationError(
+        "REFERENCE_VERSION_BINDING_INVALID",
+        "The approved reference binding is not an exact asset version",
+      );
+    }
+    const asset = await findAssetByUuid(pool, match[1]);
+    const versionNumber = Number(match[2]);
+    const version = asset
+      ? await findVersionByAssetAndNumber(pool, asset.id, versionNumber)
+      : null;
+    if (!asset
+      || !version
+      || asset.owner_id !== ownerPhone
+      || version.asset_id !== asset.id) {
+      throw new PetGenerationError(
+        "REFERENCE_LINEAGE_INVALID",
+        "The approved reference asset version is unavailable for this account",
+      );
+    }
+    signed[field] = await generateSignedUrlForVersion(asset, version, ownerPhone, false, ttlSeconds);
+  }
+  const required = petGlbProductCapabilities().reference.requiredViewKinds
+    .map((kind) => REFERENCE_FIELD_BY_KIND[kind]);
+  if (required.some((field) => typeof signed[field] !== "string")) {
+    throw new PetGenerationError(
+      "REFERENCES_MISSING",
+      `The approved reference binding is missing required views: ${required.join(", ")}`,
+    );
+  }
+  return signed as PetModelGenerationInput;
 }
 
 /** Operator role. Distinct from is_admin by design — see service.assertOperator. */
@@ -64,7 +137,7 @@ export async function buildPetGlbDeps(
     isOperator: (phone) => isUserOperator(getPool, phone),
     rigProfileJoints,
 
-    async resolveReferenceSession({ ownerPhone, ttlSeconds, sessionUuid, sessionId }) {
+    async resolveReferenceSession({ ownerPhone, ttlSeconds, sessionUuid, sessionId, durableManifest }) {
       const pool = getPool();
       const session = sessionUuid
         ? await findSessionByUuid(pool, sessionUuid)
@@ -74,23 +147,29 @@ export async function buildPetGlbDeps(
       if (!session || session.owner_id !== ownerPhone) {
         throw new PetGenerationError("REFERENCE_SESSION_INVALID", "Reference session was not found for this account");
       }
+      if (durableManifest) {
+        return {
+          sessionId: session.id,
+          sessionUuid: session.session_uuid,
+          sourceAttemptCount: session.source_attempt_count,
+          signedManifest: await signDurableReferenceManifest(
+            pool,
+            durableManifest,
+            ownerPhone,
+            ttlSeconds,
+          ),
+          durableManifest,
+        };
+      }
       const attemptId = session.approved_attempt_id || session.current_attempt_id;
       if (!attemptId) {
         throw new PetGenerationError("REFERENCES_MISSING", "Reference session has no completed view set");
       }
       const views = await findViewsByAttemptId(pool, attemptId);
-      type ReferenceUrlField = "frontUrl" | "leftUrl" | "rightUrl" | "rearUrl" | "threeQuarterUrl";
       const signed: Partial<Record<ReferenceUrlField, string>> = {};
       const durable: Partial<Record<ReferenceUrlField, string>> = {};
-      const fieldByKind: Record<string, ReferenceUrlField> = {
-        front: "frontUrl",
-        left: "leftUrl",
-        right: "rightUrl",
-        rear: "rearUrl",
-        front_three_quarter: "threeQuarterUrl",
-      };
       for (const view of views) {
-        const field = fieldByKind[view.view_kind];
+        const field = REFERENCE_FIELD_BY_KIND[view.view_kind];
         if (!field) continue;
         const version = await findVersionById(pool, view.asset_version_id);
         const asset = version ? await findAssetById(pool, version.asset_id) : null;
@@ -101,7 +180,7 @@ export async function buildPetGlbDeps(
         durable[field] = `asset://${asset.asset_uuid}/versions/${version.version_number}`;
       }
       const required = petGlbProductCapabilities().reference.requiredViewKinds
-        .map((kind) => fieldByKind[kind]);
+        .map((kind) => REFERENCE_FIELD_BY_KIND[kind]);
       if (required.some((field) => typeof signed[field] !== "string" || typeof durable[field] !== "string")) {
         throw new PetGenerationError(
           "REFERENCES_MISSING",

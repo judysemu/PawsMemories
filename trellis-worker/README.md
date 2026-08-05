@@ -11,7 +11,8 @@ private worker, preventing the GPU service from becoming an SSRF proxy.
 Endpoints:
 
 - `GET /healthz`: process liveness only.
-- `GET /readyz`: authenticated CUDA/model readiness.
+- `GET /readyz`: authenticated aggregate CUDA/model plus Blender bridge,
+  Blender version, and Blender worker-revision readiness.
 - `POST /v1/jobs`: authenticated multipart image submission.
 - `GET /v1/jobs/{id}`: authenticated durable status.
 - `GET /v1/jobs/{id}/artifact`: authenticated GLB download.
@@ -32,4 +33,12 @@ the rig rules pass and the saved GLB bytes themselves contain `idle` and
 `walk` animations.
 
 `WORKER_SHARED_SECRET` must have the same value in the TRELLIS and Blender
-secret files. Do not place its value in Compose or this repository.
+secret files. `BLENDER_VERSION` and `BLENDER_WORKER_REVISION` must also pin the
+exact Blender runtime expected by both the API and GPU workers. Do not place a
+secret value in Compose or this repository.
+
+The earlier cached TRELLIS and Blender images predate this aggregate response
+contract and do not expose the required Blender revision evidence. They must
+fail readiness. Rebuild and tag both images from one reviewed checkpoint,
+verify their private-cache readback, update the runtime pins, and only then run
+the live GPU acceptance command.

@@ -40,6 +40,11 @@ test("body rigging is selectable without texture and facial blendshapes stay sep
   assert.match(studio, /Facial blendshapes are separate from the body\/skeletal rig above/i);
 });
 
+test("body rigging stays unselected when the product capability is unavailable", () => {
+  assert.match(studio, /\[includeRig, setIncludeRig\] = useState\(false\)/);
+  assert.match(studio, /setIncludeRig\(nextProduct\.rigGeneration\.available\)/);
+});
+
 test("collar submission stays disabled until the production worker chain is ready", () => {
   assert.match(studio, /fetchCollarReadiness\(\)/);
   assert.match(studio, /collarReadiness\?\.ready !== true/);

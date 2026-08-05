@@ -24,8 +24,21 @@ test("Studio binds orders to durable reference sessions and never treats signed 
   assert.match(studio, /referenceSessionUuid:\s*session\.sessionUuid/);
   assert.match(service, /persistedManifest = resolved\.durableManifest/);
   assert.match(service, /manifest:\s*resolved\.signedManifest/);
+  assert.match(service, /durableManifest:\s*order\.referenceManifest/);
   assert.match(wiring, /asset:\/\/\$\{asset\.asset_uuid\}\/versions\/\$\{version\.version_number\}/);
+  assert.match(wiring, /findVersionByAssetAndNumber/);
+  assert.match(wiring, /signDurableReferenceManifest/);
   assert.match(repository, /reference_session_id = COALESCE/);
+});
+
+test("rig validation loads the committed quadruped profile rather than a missing root bonemap", async () => {
+  const { loadRigProfileJoints } = await import("../server/pet-generation/wiring.ts");
+  const joints = await loadRigProfileJoints();
+  assert.equal(joints.includes("hip"), true);
+  assert.equal(joints.includes("leg_front.L"), true);
+  assert.equal(joints.includes("tail.02"), true);
+  assert.equal(joints.includes("id"), false);
+  assert.ok(joints.length >= 16);
 });
 
 test("an unrefreshable legacy capability URL is never returned as a poster", async () => {

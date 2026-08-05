@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "images": [
+    {
+      "component": "trellis2",
+      "imageRef": "paws-trellis2:75fbf018-b74ca0c",
+      "buildRevision": "b74ca0c",
+      "blobPrefix": "runtime-images/b74ca0c",
+      "archiveName": "paws-trellis2.oci.tar.zst",
+      "manifestName": "paws-trellis2-image-manifest.json",
+      "cacheState": "verified-private-readback"
+    },
+    {
+      "component": "blender-worker",
+      "imageRef": "paws-blender-worker:e2cb178",
+      "buildRevision": "e2cb178",
+      "blobPrefix": "runtime-images/blender-worker/e2cb178",
+      "archiveName": "blender-worker.oci.tar.zst",
+      "manifestName": "blender-worker-image-manifest.json",
+      "cacheState": "pending-private-readback"
+    }
+  ]
+}

@@ -50,8 +50,17 @@ interface WorkerReadinessResponse {
   cuda?: boolean;
   modelPresent?: boolean;
   modelLoaded?: boolean;
+  modelBundleVerified?: boolean;
   modelRevision?: string;
   sourceRevision?: string;
+  runtimeRepositoryRevision?: string | null;
+  runtimeRevisionVerified?: boolean;
+  blender?: {
+    status?: string;
+    bridgeConnected?: boolean;
+    version?: string | null;
+    revision?: string | null;
+  };
 }
 
 function privateIpv4(hostname: string): boolean {
@@ -209,7 +218,23 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
   }
 
   async preflightForCharge(): Promise<void> {
+    const expectedBlenderRevision = String(process.env.BLENDER_WORKER_REVISION || "").trim();
+    const expectedBlenderVersion = String(process.env.BLENDER_VERSION || "5.1.2").trim();
+    if (!expectedBlenderRevision || !expectedBlenderVersion) {
+      throw new ModelBuildProviderError(
+        "Blender worker revision is not pinned",
+        "BLENDER_REVISION_NOT_PINNED",
+        false,
+      );
+    }
     const response = await this.workerFetch("/readyz", {}, PROVIDER_CONNECT_TIMEOUT_MS);
+    // NOTE: `response.ok` is deliberately evaluated LAST, after every specific
+    // attestation gate below. A not-ready worker answers /readyz with 503 AND a
+    // body explaining why, and an operator needs "Blender revision mismatch",
+    // not a generic "pipeline not ready". Reading the body of a non-200 is safe
+    // here because the body can only ever cause a REFUSAL — every gate throws,
+    // and reaching the end still requires `response.ok && status === "ready"`.
+    // Do not "fix" this ordering; it is load-bearing for diagnostics.
     const bytes = await readLimited(response, 64 * 1024);
     let body: WorkerReadinessResponse;
     try {
@@ -219,15 +244,32 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
     }
     const expectedModelRevision = process.env.TRELLIS_MODEL_REVISION || "af44b45f2e35a493886929c6d786e563ec68364d";
     const expectedSourceRevision = process.env.TRELLIS_SOURCE_REVISION || "75fbf0183001ed9876c8dbb35de6b68552ee08bd";
-    if (!response.ok
-      || body.status !== "ready"
-      || body.cuda !== true
+    if (body.cuda !== true
       || body.modelPresent !== true
-      || body.modelLoaded !== true) {
+      || body.modelLoaded !== true
+      || body.modelBundleVerified !== true) {
       throw new ModelBuildProviderError("TRELLIS worker is not ready", "TRELLIS_WORKER_NOT_READY", true);
     }
     if (body.modelRevision !== expectedModelRevision || body.sourceRevision !== expectedSourceRevision) {
       throw new ModelBuildProviderError("TRELLIS worker revision does not match the approved lock", "TRELLIS_REVISION_MISMATCH", false);
+    }
+    if (body.runtimeRevisionVerified !== true
+      || body.runtimeRepositoryRevision !== expectedBlenderRevision) {
+      throw new ModelBuildProviderError(
+        "TRELLIS image is not bound to the approved repository revision",
+        "TRELLIS_RUNTIME_REVISION_MISMATCH",
+        false,
+      );
+    }
+    if (body.blender?.status !== "ready" || body.blender.bridgeConnected !== true) {
+      throw new ModelBuildProviderError("Blender worker is not ready", "BLENDER_WORKER_NOT_READY", true);
+    }
+    if (body.blender.version !== expectedBlenderVersion
+      || body.blender.revision !== expectedBlenderRevision) {
+      throw new ModelBuildProviderError("Blender worker revision does not match the approved pin", "BLENDER_REVISION_MISMATCH", false);
+    }
+    if (!response.ok || body.status !== "ready") {
+      throw new ModelBuildProviderError("The in-house 3D pipeline is not ready", "INHOUSE_PIPELINE_NOT_READY", true);
     }
   }
 
@@ -242,6 +284,9 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
     form.set("decimation_target", String(Math.max(10_000, Math.min(1_000_000, requestedFaces))));
     form.set("texture_size", input.geometry?.geometryQuality === "standard" ? "2048" : "4096");
 
+    // Loading the signed reference can take time. Re-prove aggregate readiness
+    // after that work and make this the final await before the worker POST.
+    await this.preflightForCharge();
     let response: Response;
     try {
       response = await this.fetchImpl(new URL("/v1/jobs", this.workerUrl), {
@@ -299,6 +344,9 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
 
   async startFinalization(sourceTaskHandle: string): Promise<void> {
     const id = requireJobId(sourceTaskHandle, TASK_PREFIX);
+    // Finalization is a second provider submission. It receives its own
+    // immediately-adjacent authenticated readiness proof.
+    await this.preflightForCharge();
     const response = await this.workerFetch(`/v1/jobs/${id}/finalize`, { method: "POST" }, PROVIDER_CONNECT_TIMEOUT_MS);
     const body = await this.readJson(response);
     if (![200, 202].includes(response.status) || body.id !== id || !["queued", "running", "succeeded"].includes(body.status)) {

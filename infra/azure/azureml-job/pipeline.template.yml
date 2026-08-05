@@ -1,0 +1,100 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: paws-inhouse-image-to-animated-glb-spot
+experiment_name: paws-inhouse-3d-acceptance
+description: >-
+  One finite, customer-billing-free in-house run: one real image through the
+  accepted TRELLIS.2 image, then the accepted Blender image, with no external
+  generative provider.
+tags:
+  execution_lane: azureml-serverless-spot
+  external_generative_calls: "0"
+  runtime_repository_revision: __RUNTIME_REPOSITORY_REVISION__
+  trellis_source_revision: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+  trellis_model_revision: af44b45f2e35a493886929c6d786e563ec68364d
+settings:
+  default_compute: azureml:serverless
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+  force_rerun: true
+inputs:
+  input_image:
+    type: uri_file
+    path: "__INPUT_IMAGE__"
+    mode: download
+  models_bundle:
+    type: uri_folder
+    path: "__MODELS_URI__"
+    mode: download
+  models_manifest_sha256: "__MODELS_MANIFEST_SHA256__"
+outputs:
+  final_glb:
+    type: uri_folder
+    mode: upload
+jobs:
+  trellis_generate:
+    type: command
+    display_name: accepted-trellis-a100-one-shot
+    code: "__CODE_PATH__"
+    command: >-
+      /opt/conda/bin/python trellis_once.py
+      --input ${{inputs.input_image}}
+      --models-bundle ${{inputs.models_bundle}}
+      --models-manifest-sha256 ${{inputs.models_manifest_sha256}}
+      --output-dir ${{outputs.base_glb}}
+    environment:
+      image: __TRELLIS_IMAGE__
+    environment_variables:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TRELLIS_PRELOAD: "false"
+      PAWS_RUNTIME_REPOSITORY_REVISION: __RUNTIME_REPOSITORY_REVISION__
+      TRELLIS_SOURCE_REVISION: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
+      TRELLIS_MODEL_REVISION: af44b45f2e35a493886929c6d786e563ec68364d
+    identity:
+      type: managed
+    inputs:
+      input_image: ${{parent.inputs.input_image}}
+      models_bundle: ${{parent.inputs.models_bundle}}
+      models_manifest_sha256: ${{parent.inputs.models_manifest_sha256}}
+    outputs:
+      base_glb:
+        type: uri_folder
+        mode: upload
+    resources:
+      instance_count: 1
+      instance_type: Standard_NC24ads_A100_v4
+      shm_size: 32g
+    queue_settings:
+      job_tier: spot
+      priority: high
+    limits:
+      timeout: 7200
+  blender_finalize:
+    type: command
+    display_name: accepted-blender-rig-animation-one-shot
+    code: "__CODE_PATH__"
+    command: >-
+      node blender_once.mjs
+      --input-dir ${{inputs.base_glb}}
+      --output-dir ${{outputs.final_glb}}
+    environment:
+      image: __BLENDER_IMAGE__
+    environment_variables:
+      BLENDER_VERSION: 5.1.2
+      PAWS_RUNTIME_REPOSITORY_REVISION: __RUNTIME_REPOSITORY_REVISION__
+    identity:
+      type: managed
+    inputs:
+      base_glb: ${{parent.jobs.trellis_generate.outputs.base_glb}}
+    outputs:
+      final_glb: ${{parent.outputs.final_glb}}
+    resources:
+      instance_count: 1
+      instance_type: Standard_A8m_v2
+      shm_size: 8g
+    queue_settings:
+      job_tier: spot
+      priority: high
+    limits:
+      timeout: 3600

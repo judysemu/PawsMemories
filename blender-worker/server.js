@@ -38,6 +38,15 @@ const BRIDGE_PORT = parseInt(process.env.BLENDER_BRIDGE_PORT || "9876", 10);
 const BRIDGE_SCRIPT_PATH = process.env.BLENDER_BRIDGE_SCRIPT || path.join(__dirname, "bridge", "tcp_server.py");
 const SHOULD_AUTOSTART_BRIDGE = process.env.BLENDER_AUTOSTART_BRIDGE !== "false";
 const BRIDGE_REQUEST_TIMEOUT_MS = boundedTimeoutEnv("BLENDER_BRIDGE_REQUEST_TIMEOUT_MS", 1_850_000);
+const CONFIGURED_WORKER_REVISION = String(process.env.BLENDER_WORKER_REVISION || "").trim() || null;
+const RUNTIME_REVISION_FILE = process.env.PAWS_RUNTIME_REVISION_FILE || path.join(__dirname, "PAWS_RUNTIME_REVISION");
+let IMAGE_WORKER_REVISION = null;
+try {
+  IMAGE_WORKER_REVISION = fs.readFileSync(RUNTIME_REVISION_FILE, "utf8").trim() || null;
+} catch {}
+const WORKER_REVISION = IMAGE_WORKER_REVISION || CONFIGURED_WORKER_REVISION;
+const REVISION_VERIFIED = /^[0-9a-f]{40}$/.test(IMAGE_WORKER_REVISION || "")
+  && IMAGE_WORKER_REVISION === CONFIGURED_WORKER_REVISION;
 let bridgeProcess = null;
 
 class BlenderBridgeClient {
@@ -344,9 +353,18 @@ app.get("/health", async (req, res) => {
       activeJobs: jobs.size,
       bridge: bridgeStatus ? "connected" : "disconnected",
       blenderVersion: bridgeStatus?.blender_version || null,
+      workerRevision: WORKER_REVISION,
+      revisionVerified: REVISION_VERIFIED,
     });
   } catch {
-    res.status(200).json({ status: "ok", activeJobs: jobs.size, bridge: "disconnected" });
+    res.status(200).json({
+      status: "ok",
+      activeJobs: jobs.size,
+      bridge: "disconnected",
+      blenderVersion: null,
+      workerRevision: WORKER_REVISION,
+      revisionVerified: REVISION_VERIFIED,
+    });
   }
 });
 

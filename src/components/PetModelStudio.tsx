@@ -272,7 +272,7 @@ export default function PetModelStudio() {
   const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(false);
-  const [includeRig, setIncludeRig] = useState(true);
+  const [includeRig, setIncludeRig] = useState(false);
   const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
   const [stylePreset, setStylePreset] = useState("reference");
   const [styleDirection, setStyleDirection] = useState("");
@@ -326,6 +326,7 @@ export default function PetModelStudio() {
         const nextProduct = productBody as Product;
         setProduct(nextProduct);
         setIncludeTexture(nextProduct.textureGeneration.defaultSelected);
+        setIncludeRig(nextProduct.rigGeneration.available);
         if (ordersResponse.ok) {
           const orders = await ordersResponse.json() as OrderView[];
           setRecentOrders(orders);

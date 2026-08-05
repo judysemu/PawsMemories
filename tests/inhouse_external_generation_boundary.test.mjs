@@ -14,6 +14,7 @@ import {
   startTripoImageToMultiview,
 } from "../tripo.ts";
 import { generateFalPbrMaterial } from "../server/pbr/falPbr.ts";
+import { TripoModelBuildAdapter } from "../server/model-builds/provider.ts";
 import { isInHouseOnly, rejectLegacyExternal3dRoute } from "../server/externalGenerativePolicy.ts";
 
 const BLOCKED_CODE = "INHOUSE_EXTERNAL_PROVIDER_BLOCKED";
@@ -51,6 +52,7 @@ test("in-house-only mode blocks every Tripo network entry point before fetch", a
   await rejectsAtBoundary(() => startTextureModel("tripo:legacy"));
   await rejectsAtBoundary(() => startRetarget("tripo:legacy", "preset:walk"));
   await rejectsAtBoundary(() => pollImageTo3D("tripo:legacy"));
+  await rejectsAtBoundary(() => new TripoModelBuildAdapter().download("https://cdn.tripo3d.ai/model.glb"));
   assert.equal(fetchCalls, 0);
 });
 
@@ -86,6 +88,11 @@ test("example production configuration points at in-house generation and keeps c
   assert.match(example, /^TRELLIS_WORKER_URL=""$/m);
   assert.match(example, /^TRELLIS_WORKER_SHARED_SECRET=""$/m);
   assert.match(example, /^TRELLIS_SOURCE_REVISION="75fbf0183001ed9876c8dbb35de6b68552ee08bd"$/m);
+  assert.match(example, /^BLENDER_VERSION="5\.1\.2"$/m);
+  assert.match(example, /^BLENDER_WORKER_REVISION=""$/m);
+  assert.match(example, /^BLENDER_WORKER_URL=""$/m);
+  assert.match(example, /^WORKER_SHARED_SECRET=""$/m);
+  assert.doesNotMatch(example, /pawsmemories\.onrender\.com\/render/);
   assert.match(example, /^TRIPO_API_KEY=""$/m);
 });
 

@@ -6,6 +6,7 @@ import type {
   PetModelGenerationInput,
   GenerationJob,
   GenerationArtifacts,
+  PetGlbStageKind,
   SubjectProfile,
   TextureQuality,
 } from "./types";
@@ -31,6 +32,8 @@ export class StubPetGenerationProvider implements PetModelGenerationProvider {
   constructor(fixturePath = resolve(process.cwd(), "fixtures/1m-cube.glb")) {
     this.fixture = readFileSync(fixturePath);
   }
+
+  async preflightForCharge(_stage: Exclude<PetGlbStageKind, "reference">): Promise<void> {}
 
   async createJob(_input: PetModelGenerationInput): Promise<GenerationJob> {
     const jobId = crypto.randomUUID();

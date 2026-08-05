@@ -25,6 +25,7 @@
     "test:contracts": "tsx --test tests/contracts/*.test.mjs",
     "test:security": "tsx --test tests/security/*.test.mjs",
     "test:coverage": "node --import tsx --experimental-test-coverage --test tests/*.test.mjs tests/contracts/*.test.mjs tests/security/*.test.mjs",
+    "accept:inhouse-e2e": "tsx scripts/run-inhouse-e2e.mjs",
     "animator:doctor": "node scripts/animator-doctor.mjs",
     "seed:wags": "node scripts/seed-wags-catalog.mjs",
     "stationery:worker": "tsx stationery-worker/index.ts",

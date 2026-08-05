@@ -3,6 +3,7 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import { MAX_GLB_DOWNLOAD_BYTES, PROVIDER_CONNECT_TIMEOUT_MS, PROVIDER_READ_TIMEOUT_MS } from "./types";
 import { startImageTo3D, pollImageTo3D, isTripoHandle, TripoError, type TripoJobInput } from "../../tripo";
+import { assertExternalGenerativeProviderAllowed } from "../externalGenerativePolicy";
 
 // ─── Provider Port ──────────────────────────────────────────────────────────
 
@@ -232,6 +233,9 @@ export class TripoModelBuildAdapter implements ModelBuildProvider {
   }
 
   async download(glbUrl: string): Promise<Buffer> {
+    // Direct adapter imports must respect the same last-line boundary as every
+    // Tripo submission/poll helper. In strict mode this throws before DNS.
+    assertExternalGenerativeProviderAllowed("tripo");
     if (!isAllowedUrl(glbUrl)) {
       throw new Error(`Blocked download URL: host not in allowlist`);
     }
