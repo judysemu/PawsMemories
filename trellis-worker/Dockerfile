@@ -40,8 +40,9 @@ RUN /opt/conda/bin/pip install \
 RUN printf '#!/bin/sh\nexit 0\n' >/usr/local/bin/nvidia-smi && \
     chmod +x /usr/local/bin/nvidia-smi && \
     bash -lc 'source /opt/conda/etc/profile.d/conda.sh && conda activate base && cd /opt/trellis2 && source ./setup.sh --basic --flash-attn --nvdiffrast --nvdiffrec --cumesh --o-voxel --flexgemm' && \
-    rm /usr/local/bin/nvidia-smi && \
-    /opt/conda/bin/pip install \
+    rm /usr/local/bin/nvidia-smi
+
+RUN /opt/conda/bin/pip install \
       fastapi==0.116.1 \
       huggingface-hub==1.26.0 \
       python-multipart==0.0.20 \
