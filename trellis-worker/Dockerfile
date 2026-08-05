@@ -29,6 +29,11 @@ RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /opt/trelli
     git checkout "${TRELLIS2_COMMIT}" && \
     git submodule update --init --recursive
 
+RUN /opt/conda/bin/pip install \
+      torch==2.6.0 \
+      torchvision==0.21.0 \
+      --index-url https://download.pytorch.org/whl/cu124
+
 # TRELLIS.2's setup script only needs nvidia-smi to select the CUDA build path.
 # Docker image builds do not expose the host GPU, so a build-only probe is used;
 # the real driver and GPU are verified by /readyz at runtime.
