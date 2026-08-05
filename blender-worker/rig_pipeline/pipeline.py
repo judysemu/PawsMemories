@@ -18,7 +18,7 @@ from pathlib import Path
 from validation import canonical_target_name, facial_capability, measure_morph, print_metrics_pass, quaternion_xyzw
 
 
-PIPELINE_ALGORITHM_VERSION = "paws-rig-blender-2"
+PIPELINE_ALGORITHM_VERSION = "paws-rig-blender-3"
 MIN_SEMANTIC_REGION_VERTICES = 12
 PARENT_BY_BONE = {
     "spine": "hip",
@@ -60,8 +60,12 @@ def _rule(rule: str, passed: bool, detail: str, metrics: dict | None = None) -> 
 def _clear_scene(bpy) -> None:
     if bpy.context.object and bpy.context.object.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete(use_global=False)
+    # Selection-based deletion misses hidden or non-selectable imported
+    # objects. A long-running worker would then measure geometry left by a
+    # previous customer job. Unlink every object directly so each request
+    # begins from a genuinely empty Blender database.
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
     for collection in (
         bpy.data.armatures,
         bpy.data.meshes,
