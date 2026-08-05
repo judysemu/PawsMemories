@@ -30,11 +30,11 @@ interface ModelRow {
 }
 
 const tierLabels: Record<Tier, string> = {
-  ready: "Ready candidate",
-  remap: "Joint remap",
-  animate: "Needs animation",
-  rig: "Needs rigging",
-  reject: "Reject",
+  ready: "Likely passable",
+  remap: "Passable after joint mapping",
+  animate: "Passable after animation",
+  rig: "Passable after rigging",
+  reject: "Not passable",
 };
 
 function escapeHtml(value: unknown): string {
@@ -175,6 +175,7 @@ function classify(bytes: Buffer, relativeFile: string): Omit<ModelRow, "duplicat
 
 function reportHtml(rows: ModelRow[]): string {
   const counts = Object.fromEntries(Object.keys(tierLabels).map((tier) => [tier, rows.filter((row) => row.tier === tier).length])) as Record<Tier, number>;
+  const repairable = counts.remap + counts.animate + counts.rig;
   const duplicateCopies = [...new Set(rows.map((row) => row.sha256))]
     .reduce((sum, hash) => sum + Math.max(0, rows.filter((row) => row.sha256 === hash).length - 1), 0);
   const flaggedFiles = rows.filter((row) => row.sensitiveFlags.length > 0).length;
@@ -212,6 +213,9 @@ function reportHtml(rows: ModelRow[]): string {
     .metric strong { display:block; font-size:1.8rem; } .metric span { color:var(--muted); } .metric.active { outline:2px solid currentColor; }
     .ready { color:var(--ready); } .remap { color:var(--remap); } .animate { color:var(--animate); } .rig { color:var(--rig); } .reject,.sensitive { color:var(--reject); }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; margin-top:14px; }
+    .answer { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; margin-top:14px; }
+    .answer div { background:#0f172a; border:1px solid var(--line); border-radius:10px; padding:12px; }
+    .answer strong { display:block; font-size:1.45rem; }
     .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; } input { flex:1; min-width:240px; color:var(--text); background:#0f172a; border:1px solid var(--line); border-radius:9px; padding:10px 12px; }
     button.reset { color:var(--text); background:#26344d; border:1px solid var(--line); border-radius:9px; padding:10px 12px; cursor:pointer; }
     .badge { display:inline-block; border:1px solid currentColor; border-radius:999px; padding:2px 7px; font-size:.72rem; font-weight:800; white-space:nowrap; }
@@ -221,28 +225,37 @@ function reportHtml(rows: ModelRow[]): string {
   </style>
 </head>
 <body><main>
-  <h1>Model intake: what is passable?</h1>
+  <h1>Which models can we use?</h1>
   <p class="muted">Generated ${escapeHtml(generated)} · ${rows.length} GLB files · Structural inspection only</p>
   <p><a href="AZURE_TRELLIS_STATUS.html">← Back to Azure/TRELLIS status</a></p>
+  <section class="panel">
+    <strong>Plain answer</strong>
+    <div class="answer">
+      <div><strong class="ready">${counts.ready}</strong>likely passable after a visual playback check</div>
+      <div><strong class="animate">${repairable}</strong>usable after a known repair</div>
+      <div><strong class="reject">${counts.reject}</strong>broken or structurally unusable</div>
+    </div>
+    <p class="muted">No file is being discarded. Automated checks can confirm structure, textures, rig data, and clip names; they cannot tell whether the animal looks right or moves naturally.</p>
+  </section>
   <div class="metrics">${cards}</div>
   <section class="panel">
     <strong>${duplicateCopies} duplicate file ${duplicateCopies === 1 ? "copy" : "copies"}</strong> by exact SHA-256 · <strong>${flaggedFiles} sensitive-string ${flaggedFiles === 1 ? "flag" : "flags"}</strong>
-    <p class="muted">Potentially sensitive values are never printed here; only the flag category is shown. “Ready candidate” still requires a visual render check for anatomy, texture quality, deformation, scale, and orientation.</p>
+    <p class="muted">Potentially sensitive values are never printed here; only the flag category is shown. “Likely passable” still requires a visual render check for anatomy, texture quality, deformation, scale, orientation, and natural-looking movement.</p>
   </section>
   <section class="panel">
     <strong>How the buckets work</strong>
     <ul class="legend">
-      <li><span class="ready">Ready candidate:</span> textured mesh, weighted rig, idle + walk, valid targets, matching quadruped joint profile.</li>
-      <li><span class="remap">Joint remap:</span> good rig and motion, but joint names do not match the delivery profile.</li>
-      <li><span class="animate">Needs animation:</span> usable weighted rig, but missing required idle/walk motion.</li>
-      <li><span class="rig">Needs rigging:</span> useful textured base mesh without a delivery-ready weighted rig.</li>
-      <li><span class="reject">Reject:</span> broken container, mesh, texture, or self-contained asset gate.</li>
+      <li><span class="ready">Likely passable:</span> textured mesh, weighted rig, idle + walk, valid targets, and a matching quadruped joint profile. Visual review is the last gate.</li>
+      <li><span class="remap">Passable after joint mapping:</span> good rig and motion, but joint names need a small compatibility repair.</li>
+      <li><span class="animate">Passable after animation:</span> usable weighted rig, but missing required idle/walk motion.</li>
+      <li><span class="rig">Passable after rigging:</span> useful textured base mesh that still needs a skeleton and skin weights.</li>
+      <li><span class="reject">Not passable:</span> broken container, mesh, texture, or self-contained asset gate. Keep the source, but do not send it into production.</li>
     </ul>
   </section>
   <section class="panel">
     <div class="toolbar"><input id="search" type="search" placeholder="Search filename, batch, or reason"><button class="reset" id="reset" type="button">Show all</button><span id="visible" class="muted"></span></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Bucket</th><th>File</th><th>Why</th><th>Mesh</th><th>Rig / clips</th><th>Duplicate</th><th>Sensitive strings</th></tr></thead>
+      <thead><tr><th>Decision</th><th>File</th><th>Why</th><th>Mesh</th><th>Rig / clips</th><th>Duplicate</th><th>Sensitive strings</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table></div>
   </section>
