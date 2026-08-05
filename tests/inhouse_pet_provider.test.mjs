@@ -18,7 +18,20 @@ const references = {
 };
 
 function validGlb() {
-  const json = Buffer.from(JSON.stringify({ asset: { version: "2.0" }, scenes: [{}], scene: 0 }));
+  const json = Buffer.from(JSON.stringify({
+    asset: { version: "2.0" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, material: 0 }] }],
+    accessors: [
+      { count: 3, type: "VEC3", componentType: 5126, min: [-1, -1, -1], max: [1, 1, 1] },
+      { count: 3, type: "SCALAR", componentType: 5125 },
+    ],
+    materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }],
+    textures: [{ source: 0 }],
+    images: [{ uri: "data:image/png;base64,AA==" }],
+  }));
   const padded = Buffer.concat([json, Buffer.alloc((4 - (json.length % 4)) % 4, 0x20)]);
   const bytes = Buffer.alloc(20 + padded.length);
   bytes.write("glTF", 0, "ascii");
@@ -58,7 +71,7 @@ test("in-house paid adapter completes only the TRELLIS base boundary", async () 
   assert.deepEqual(calls, { start: 1, poll: 1, download: 1 });
 });
 
-test("in-house paid adapter refuses unfinished stages without provider calls", async () => {
+test("in-house paid adapter refuses separately priced texture and rig without a finalizer", async () => {
   let externalCalls = 0;
   const provider = {
     async start() { externalCalls += 1; throw new Error("not expected"); },
@@ -80,7 +93,6 @@ test("in-house paid adapter refuses unfinished stages without provider calls", a
   const adapter = new InHousePetGenerationAdapter(provider, store, "pinned");
   for (const operation of [
     () => adapter.createTextureJob("00000000-0000-4000-8000-000000000002", { quality: "standard" }),
-    () => adapter.createRigCheckJob("00000000-0000-4000-8000-000000000002"),
     () => adapter.createRigJob("00000000-0000-4000-8000-000000000002", "pet"),
   ]) {
     await assert.rejects(operation, (error) => error instanceof PetGenerationError && error.code === "INHOUSE_STAGE_NOT_READY");
@@ -88,13 +100,19 @@ test("in-house paid adapter refuses unfinished stages without provider calls", a
   assert.equal(externalCalls, 0);
 });
 
-test("in-house paid adapter uses the internal finalizer for honest rig-check and final GLB", async () => {
+test("in-house rig-check is local and only the paid rig starts finalization", async () => {
   const artifact = validGlb();
-  const calls = { startFinalization: 0, pollFinalization: 0, downloadFinal: 0 };
+  const calls = { poll: 0, download: 0, startFinalization: 0, pollFinalization: 0, downloadFinal: 0 };
   const provider = {
     async start() { throw new Error("base start is not used in this fixture"); },
-    async poll() { return { done: true, glbUrl: "trellis2-artifact:00000000-0000-4000-8000-000000000001" }; },
-    async download() { return artifact; },
+    async poll() {
+      calls.poll += 1;
+      return { done: true, glbUrl: "trellis2-artifact:00000000-0000-4000-8000-000000000001" };
+    },
+    async download() {
+      calls.download += 1;
+      return artifact;
+    },
     async startFinalization(handle) {
       calls.startFinalization += 1;
       assert.equal(handle, "trellis2:00000000-0000-4000-8000-000000000001");
@@ -135,7 +153,13 @@ test("in-house paid adapter uses the internal finalizer for honest rig-check and
   assert.deepEqual(final.glb.data, artifact);
   assert.equal(final.metadata.stage, "rig");
   assert.deepEqual(final.metadata.animations, ["idle", "walk"]);
-  assert.deepEqual(calls, { startFinalization: 2, pollFinalization: 3, downloadFinal: 1 });
+  assert.deepEqual(calls, {
+    poll: 1,
+    download: 1,
+    startFinalization: 1,
+    pollFinalization: 2,
+    downloadFinal: 1,
+  });
 });
 
 test("paid SKU factory selects TRELLIS and rejects Tripo in in-house-only mode", () => {

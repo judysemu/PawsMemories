@@ -13,8 +13,8 @@ import {
   findViewsByAttemptId as findRefViews,
   findReportByAttemptId as findRefReport,
 } from "../reference-sessions/repository";
-import { computeOrderedManifestHash } from "../reference-sessions/service";
-import type { ViewKind } from "../reference-sessions/types";
+import { computeOrderedManifestHash, resolveReferenceManifestViewKinds } from "../reference-sessions/service";
+import { ORDERED_VIEW_KINDS, type ViewKind } from "../reference-sessions/types";
 import {
   insertJob,
   findJobByUuid,
@@ -88,6 +88,19 @@ export class ModelBuildServiceError extends Error {
   }
 }
 
+function providerReferenceViewKinds(provider: ModelBuildProvider): readonly ViewKind[] {
+  return provider.requiredReferenceViewKinds?.length
+    ? provider.requiredReferenceViewKinds
+    : ORDERED_VIEW_KINDS;
+}
+
+function providerAuditIdentity(provider: ModelBuildProvider): { provider: string; model: string } {
+  return {
+    provider: provider.providerId || "configured",
+    model: provider.modelId || "configured",
+  };
+}
+
 // ─── Service ────────────────────────────────────────────────────────────────
 
 export class ModelBuildService {
@@ -151,14 +164,23 @@ export class ModelBuildService {
       }
     }
 
-    // 6. Verify Tripo's four canonical views
+    // 6. Verify the immutable manifest and the selected provider's input needs.
     const views = await findRefViews(pool, attempt.id);
-    const requiredKinds = ["front", "left", "right", "rear"];
+    let manifestKinds: readonly ViewKind[] = [];
+    try {
+      manifestKinds = resolveReferenceManifestViewKinds(
+        views.map((view) => view.view_kind),
+        attempt.provider,
+      );
+    } catch (error: any) {
+      errors.push(error?.message || "Approved reference manifest shape is invalid");
+    }
+    const requiredKinds = providerReferenceViewKinds(this.provider);
     const viewManifestItems: { viewKind: ViewKind; assetUuid: string; sha256: string }[] = [];
     if (requiredKinds.some((kind) => !views.some((view) => view.view_kind === kind))) {
-      errors.push("Approved attempt must contain front, left, right, and rear views");
+      errors.push(`Selected provider requires approved references: ${requiredKinds.join(", ")}`);
     }
-    for (const kind of requiredKinds) {
+    for (const kind of manifestKinds) {
       const view = views.find(v => v.view_kind === kind);
       if (!view) {
         errors.push(`Missing required view: ${kind}`);
@@ -187,9 +209,9 @@ export class ModelBuildService {
       if (!reportAsset || !reportVersion || reportAsset.owner_id !== ownerId || reportVersion.asset_id !== reportAsset.id || reportVersion.sha256 !== report.report_hash) {
         errors.push("Reference report canonical identity is invalid");
       }
-      if (viewManifestItems.length === 4) {
+      if (manifestKinds.length > 0 && viewManifestItems.length === manifestKinds.length) {
         try {
-          if (computeOrderedManifestHash(viewManifestItems, report.report_hash) !== approval.manifest_hash) {
+          if (computeOrderedManifestHash(viewManifestItems, report.report_hash, manifestKinds) !== approval.manifest_hash) {
             errors.push("Approved manifest hash no longer matches its views and report");
           }
         } catch {
@@ -198,11 +220,21 @@ export class ModelBuildService {
       }
     }
 
-    // 8. Pricing
+    // 8. Validate authenticated worker readiness before any debit. Provider
+    // submission still rechecks availability and owns its ambiguity handling.
+    if (errors.length === 0 && this.provider.preflightForCharge) {
+      try {
+        await this.provider.preflightForCharge();
+      } catch {
+        errors.push("Selected 3D worker is not ready for a charged build");
+      }
+    }
+
+    // 9. Pricing
     const pricingKey = "STATIC_3D_PHOTO";
     const quotedCredits = CREDIT_PRICES.STATIC_3D_PHOTO;
 
-    // 9. Balance check
+    // 10. Balance check
     const [userRows]: any = await pool.query("SELECT credits FROM users WHERE phone = ?", [ownerId]);
     const currentBalance = userRows[0] ? Number(userRows[0].credits || 0) : 0;
     if (currentBalance < quotedCredits) {
@@ -299,12 +331,13 @@ export class ModelBuildService {
         .update(`${pf.manifestHash}:${input.requestedOutput || "glb"}`)
         .digest("hex");
 
+      const providerIdentity = providerAuditIdentity(this.provider);
       const attempt = await insertAttempt(connection, {
         jobId: job.id,
         attemptNumber: 1,
         idempotencyKey: input.idempotencyKey,
-        provider: "tripo",
-        model: process.env.TRIPO_MODEL_VERSION || "default",
+        provider: providerIdentity.provider,
+        model: providerIdentity.model,
         inputConfigHash,
       });
 
@@ -430,7 +463,7 @@ export class ModelBuildService {
       let providerName = attempt.provider;
       if (isNewSubmission) {
         const views = await findRefViews(pool, job.reference_attempt_id);
-        const viewUrls: ModelBuildProviderInput = { frontUrl: "", leftUrl: "", rightUrl: "", rearUrl: "" };
+        const viewUrls: ModelBuildProviderInput = { frontUrl: "" };
         for (const view of views) {
           const asset = await findAssetById(pool, view.asset_id);
           const version = await findVersionById(pool, view.asset_version_id);
@@ -443,8 +476,23 @@ export class ModelBuildService {
           else if (view.view_kind === "rear") viewUrls.rearUrl = url;
           else if (view.view_kind === "front_three_quarter") viewUrls.threeQuarterUrl = url;
         }
-        if ([viewUrls.frontUrl, viewUrls.leftUrl, viewUrls.rightUrl, viewUrls.rearUrl].some((url) => !url)) {
-          await this.failJob(jobUuid, attemptId, "REFERENCE_URL_FAILED", "All four approved reference URLs are required", leaseOwner);
+        const requiredKinds = providerReferenceViewKinds(this.provider);
+        const referenceUrls: Record<ViewKind, string | undefined> = {
+          front: viewUrls.frontUrl,
+          left: viewUrls.leftUrl,
+          right: viewUrls.rightUrl,
+          rear: viewUrls.rearUrl,
+          front_three_quarter: viewUrls.threeQuarterUrl,
+        };
+        const missingKinds = requiredKinds.filter((kind) => !referenceUrls[kind]);
+        if (missingKinds.length > 0) {
+          await this.failJob(
+            jobUuid,
+            attemptId,
+            "REFERENCE_URL_FAILED",
+            `Approved reference URLs are missing: ${missingKinds.join(", ")}`,
+            leaseOwner,
+          );
           return;
         }
         try {
@@ -686,7 +734,7 @@ export class ModelBuildService {
           sha256: providerGlbStored.sha256,
           bucket: "private",
           objectKey: providerGlbStored.objectKey,
-          sourceProvider: "tripo",
+          sourceProvider: providerName,
           license: "proprietary",
           commercialUseEligible: false,
           metadata: { phase: 3, role: "provider_glb", jobUuid },
@@ -761,7 +809,7 @@ export class ModelBuildService {
           sha256: validatedGlbStored.sha256,
           bucket: "private",
           objectKey: validatedGlbStored.objectKey,
-          sourceProvider: "tripo",
+          sourceProvider: providerName,
           license: "proprietary",
           commercialUseEligible: false,
           metadata: {
@@ -1230,12 +1278,13 @@ export class ModelBuildService {
         .update(`${job.manifest_hash}:${job.requested_output}:${nextNumber}:${input.correctionNotes || ""}`)
         .digest("hex");
 
+      const providerIdentity = providerAuditIdentity(this.provider);
       const attempt = await insertAttempt(conn, {
         jobId: job.id,
         attemptNumber: nextNumber,
         idempotencyKey: input.idempotencyKey,
-        provider: "tripo",
-        model: process.env.TRIPO_MODEL_VERSION || "default",
+        provider: providerIdentity.provider,
+        model: providerIdentity.model,
         inputConfigHash,
       });
 

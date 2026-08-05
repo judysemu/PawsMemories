@@ -7,6 +7,11 @@ export class ExternalGenerativeProviderBlockedError extends Error {
   }
 }
 
+/** One canonical parser for the fail-closed in-house generation switch. */
+export function isInHouseOnly(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.PAWS_3D_INHOUSE_ONLY || "").trim().toLowerCase() === "true";
+}
+
 /**
  * Last-line network boundary for paid external generative providers.
  *
@@ -18,7 +23,7 @@ export function assertExternalGenerativeProviderAllowed(
   providerId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  if (env.PAWS_3D_INHOUSE_ONLY === "true") {
+  if (isInHouseOnly(env)) {
     throw new ExternalGenerativeProviderBlockedError(providerId);
   }
 }
@@ -30,7 +35,7 @@ export function rejectLegacyExternal3dRoute(
   },
   next: () => void,
 ): unknown {
-  if (process.env.PAWS_3D_INHOUSE_ONLY !== "true") {
+  if (!isInHouseOnly()) {
     next();
     return undefined;
   }

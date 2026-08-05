@@ -17,12 +17,22 @@ type MeshProfile = "hd" | "smart_mesh";
 type SubjectProfile = "pet" | "humanoid";
 type TextureQuality = "standard" | "detailed";
 type StageKind = "reference" | "base" | "texture" | "rig_check" | "rig";
+type RequiredReferenceViewKind = "front" | "left" | "right" | "rear";
 type CollarSizeClass = "kitten_toy" | "cat_mini" | "medium_dog" | "large_dog";
 
 interface Product {
   name: string;
   deliverables: string[];
   prices: { base: number; texture: number; rig: number; currency: string };
+  providerId: string;
+  textureGeneration: {
+    includedInBase: boolean;
+    separateStageAvailable: boolean;
+    defaultSelected: boolean;
+    priceCredits: number;
+    styleDirectionAvailable: boolean;
+    reason: string | null;
+  };
   meshProfiles: Record<MeshProfile, {
     faceLimit: number;
     maxTriangles: number;
@@ -43,6 +53,8 @@ interface Product {
     requiredSourceUploads: number;
     optionalSourceAngles: string[];
     generatedForApproval: string[];
+    requiredViewKinds: RequiredReferenceViewKind[];
+    canRegenerate: boolean;
     guidance: string[];
   };
 }
@@ -103,6 +115,27 @@ interface OrderView {
 interface GeneratedReferenceView {
   viewKind: "front" | "left" | "right" | "rear" | "front_three_quarter";
   signedUrl: string;
+}
+
+const REFERENCE_FIELD_BY_KIND = {
+  front: "frontUrl",
+  left: "leftUrl",
+  right: "rightUrl",
+  rear: "rearUrl",
+} as const;
+
+export function manifestFromRequiredReferenceViews(
+  views: GeneratedReferenceView[],
+  requiredViewKinds: RequiredReferenceViewKind[],
+): Record<string, string> {
+  const byKind = new Map(views.map((item) => [item.viewKind, item.signedUrl]));
+  const manifest: Record<string, string> = {};
+  for (const kind of requiredViewKinds) {
+    const url = byKind.get(kind);
+    if (!url) throw new Error(`The prepared reference set is missing its required ${kind} view.`);
+    manifest[REFERENCE_FIELD_BY_KIND[kind]] = url;
+  }
+  return manifest;
 }
 
 export interface CollarReadiness {
@@ -200,7 +233,7 @@ const STYLE_PRESETS = [
 ] as const;
 
 const STAGE_LABELS: Record<StageKind, string> = {
-  reference: "360° views",
+  reference: "Reference photo review",
   base: "Blank base mesh",
   texture: "Texture",
   rig_check: "Body-rig readiness",
@@ -238,7 +271,7 @@ export default function PetModelStudio() {
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
   const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
-  const [includeTexture, setIncludeTexture] = useState(true);
+  const [includeTexture, setIncludeTexture] = useState(false);
   const [includeRig, setIncludeRig] = useState(true);
   const [textureQuality, setTextureQuality] = useState<TextureQuality>("standard");
   const [stylePreset, setStylePreset] = useState("reference");
@@ -290,7 +323,9 @@ export default function PetModelStudio() {
       .then(async ([productResponse, ordersResponse]) => {
         const productBody = await productResponse.json();
         if (!productResponse.ok) throw new Error(productBody?.message || "Model generator is unavailable.");
-        setProduct(productBody);
+        const nextProduct = productBody as Product;
+        setProduct(nextProduct);
+        setIncludeTexture(nextProduct.textureGeneration.defaultSelected);
         if (ordersResponse.ok) {
           const orders = await ordersResponse.json() as OrderView[];
           setRecentOrders(orders);
@@ -362,7 +397,9 @@ export default function PetModelStudio() {
     }
   }, []);
 
-  const selectedStyle = styleDirection.trim() || STYLE_PRESETS.find((preset) => preset.id === stylePreset)?.text || "";
+  const selectedStyle = includeTexture && product?.textureGeneration.styleDirectionAvailable
+    ? styleDirection.trim() || STYLE_PRESETS.find((preset) => preset.id === stylePreset)?.text || ""
+    : "";
 
   const total = useMemo(() => {
     if (!product) return 0;
@@ -461,7 +498,7 @@ export default function PetModelStudio() {
     try {
       const sourceImage = references.frontUrl;
       if (!sourceImage) {
-        throw new Error("Add one clear pet photo to generate the 360° views.");
+        throw new Error("Add one clear pet photo to prepare the model reference.");
       }
       const session = await createReferenceSession(
         "photo",
@@ -470,23 +507,17 @@ export default function PetModelStudio() {
         sourceImage,
       );
       setReferenceSessionUuid(session.sessionUuid);
-      setGenerationMessage("Generating left, right, and rear views…");
+      const requiredViewKinds = product.referenceRequirements.requiredViewKinds;
+      setGenerationMessage(product.referenceRequirements.generatedForApproval.length
+        ? "Generating left, right, and rear views…"
+        : "Preparing your uploaded photo inside Pawsome3D…");
       const generated = await startReferenceAttempt(session.sessionUuid, `views_${crypto.randomUUID()}`);
       const generatedViews = (generated.session.views || []) as GeneratedReferenceView[];
       const manifestHash = String(generated.session.manifestHash || "");
-      if (generatedViews.length !== 4 || !manifestHash) {
-        throw new Error("The image generator did not return a complete 360° view set.");
+      if (generatedViews.length !== requiredViewKinds.length || !manifestHash) {
+        throw new Error("Reference preparation did not return the selected provider's complete view set.");
       }
-      const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
-      const generatedManifest = {
-        frontUrl: byKind.get("front"),
-        leftUrl: byKind.get("left"),
-        rightUrl: byKind.get("right"),
-        rearUrl: byKind.get("rear"),
-      };
-      if (Object.values(generatedManifest).some((value) => !value)) {
-        throw new Error("The generated 360° view set is missing a required angle.");
-      }
+      const generatedManifest = manifestFromRequiredReferenceViews(generatedViews, requiredViewKinds);
       setGenerationMessage("Creating your private model build…");
       const created = await requestJson("/api/pet-glb/orders", {
         method: "POST",
@@ -513,9 +544,11 @@ export default function PetModelStudio() {
       }) as OrderView;
       setReferences(generatedManifest as Record<string, string>);
       applyView(awaitingApproval);
-      setGenerationMessage("Review the views, then approve them or request one free remake.");
+      setGenerationMessage(product.referenceRequirements.canRegenerate
+        ? "Review the views, then approve them or request one free remake."
+        : "Review and approve your prepared front photo to start the private model build.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not generate the 360° views.");
+      setError(cause instanceof Error ? cause.message : "Could not prepare the model reference.");
       setGenerationMessage(null);
     } finally {
       startInFlightRef.current = false;
@@ -586,6 +619,10 @@ export default function PetModelStudio() {
   const regenerateReferenceStage = async () => {
     const stage = view?.currentStage;
     if (!view || !stage || stage.stage !== "reference" || stage.state !== "awaiting_customer_approval") return;
+    if (!view.referenceSession?.canRegenerate) {
+      setError("This in-house build uses your approved front photo directly. Start a new build to choose a different photo.");
+      return;
+    }
     if (!referenceSessionUuid) {
       setError("This older reference set cannot be remade in place. Start a new pet build with the source photo.");
       return;
@@ -609,19 +646,11 @@ export default function PetModelStudio() {
         "Generate a new canonical left, right, and rear view set.",
       );
       const generatedViews = (retried.session.views || []) as GeneratedReferenceView[];
-      if (generatedViews.length !== 4 || !retried.session.manifestHash) {
+      const requiredViewKinds = product.referenceRequirements.requiredViewKinds;
+      if (generatedViews.length !== requiredViewKinds.length || !retried.session.manifestHash) {
         throw new Error("The remake did not return the complete reference set.");
       }
-      const byKind = new Map(generatedViews.map((item) => [item.viewKind, item.signedUrl]));
-      const regeneratedManifest = {
-        frontUrl: byKind.get("front"),
-        leftUrl: byKind.get("left"),
-        rightUrl: byKind.get("right"),
-        rearUrl: byKind.get("rear"),
-      };
-      if (Object.values(regeneratedManifest).some((value) => !value)) {
-        throw new Error("The remake is missing a required view.");
-      }
+      const regeneratedManifest = manifestFromRequiredReferenceViews(generatedViews, requiredViewKinds);
       const awaitingApproval = await requestJson(`/api/pet-glb/orders/${view.order.orderUuid}/references`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -818,16 +847,23 @@ export default function PetModelStudio() {
                 </button>
               ))}
             </div>
-            <label className="mt-3 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-3 text-xs">
-              <input type="checkbox" checked={includeTexture} disabled={Boolean(view)} onChange={(event) => setIncludeTexture(event.target.checked)} />
-              <span><strong className="block">Add lifelike color</strong><span className="text-on-surface-variant">Uses your pet's markings and coat colors.</span></span>
-            </label>
+            {product.textureGeneration.separateStageAvailable ? (
+              <label className="mt-3 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-3 text-xs">
+                <input type="checkbox" checked={includeTexture} disabled={Boolean(view)} onChange={(event) => setIncludeTexture(event.target.checked)} />
+                <span><strong className="block">Add lifelike color</strong><span className="text-on-surface-variant">Uses your pet's markings and coat colors.</span></span>
+              </label>
+            ) : (
+              <div className="mt-3 rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
+                <strong className="block">Lifelike PBR color included</strong>
+                <span className="text-on-surface-variant">{product.textureGeneration.reason}</span>
+              </div>
+            )}
             <label className="mt-2 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-3 text-xs">
               <input type="checkbox" checked={includeRig} disabled={Boolean(view) || !product.rigGeneration.available} onChange={(event) => setIncludeRig(event.target.checked)} />
               <span><strong className="block">Make animation-ready</strong><span className="text-on-surface-variant">{product.rigGeneration.available ? "Adds a pet body skeleton after texturing." : product.rigGeneration.reason}</span></span>
             </label>
             <p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">Animation-ready body rig · {product.prices.rig} PupCoins. Facial blendshapes are separate from the body/skeletal rig above and are not for sale. AI behavior is not embedded in the GLB.</p>
-            {includeTexture && (
+            {includeTexture && product.textureGeneration.styleDirectionAvailable && (
               <div className="mt-3">
                 <label className="text-xs font-bold text-on-surface-variant">Color style</label>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -878,7 +914,7 @@ export default function PetModelStudio() {
             </div>
           ) : stage?.stage === "reference" && view?.order.referenceManifest ? (
             <div className="grid h-full grid-cols-2 gap-2 p-12 sm:grid-cols-3">
-              {REFERENCE_FIELDS.map(([key, label]) => (
+              {REFERENCE_FIELDS.filter(([key]) => Boolean(view.order.referenceManifest?.[key])).map(([key, label]) => (
                 <figure key={key} className="overflow-hidden rounded-xl border border-white/60 bg-white/70 shadow">
                   <img src={view.order.referenceManifest?.[key]} alt={label} className="h-[calc(100%-28px)] w-full object-cover" />
                   <figcaption className="px-2 py-1 text-center text-[10px] font-black text-slate-700">{label}</figcaption>
@@ -972,11 +1008,11 @@ export default function PetModelStudio() {
                 </p>
               )}
               <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} title={approvalBlockedReason || undefined} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
-                {stage?.stage === "reference" ? `Approve generated views & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
+                {stage?.stage === "reference" ? `Approve reference & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
-              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !referenceSessionUuid)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
+              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !view.referenceSession?.canRegenerate)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
                 {stage?.stage === "reference"
-                  ? !referenceSessionUuid ? "Start a new build to remake" : "Remake these views"
+                  ? !view.referenceSession?.canRegenerate ? "Start a new build to change photo" : "Remake these views"
                   : "This needs a remake"}
               </button>
             </section>

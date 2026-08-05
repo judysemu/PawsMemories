@@ -18,6 +18,10 @@ import {
   StageRetrySchema,
 } from "./contracts";
 import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
+import {
+  assertPetGlbConfigurationSupported,
+  petGlbProductCapabilities,
+} from "./capabilities";
 
 function phoneOf(req: Request): string | null {
   return (req as AuthedRequest).user?.phone || null;
@@ -56,6 +60,7 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
   // ── Product / quote ───────────────────────────────────────────────────────
   router.get("/product", (_req, res) => {
     const rigGeneration = rigGenerationAvailability();
+    const capabilities = petGlbProductCapabilities();
     res.json({
       sku: "CUSTOM_RIGGED_PET_GLB_V1",
       name: "Custom 3D Model",
@@ -64,33 +69,39 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
       operatorApprovalRequired: false,
       prices: {
         base: PET_GLB_STAGE_PRICES.BASE,
-        texture: PET_GLB_STAGE_PRICES.TEXTURE,
+        texture: capabilities.texture.priceCredits,
         rig: PET_GLB_STAGE_PRICES.RIG,
         currency: "PupCoins",
       },
+      providerId: capabilities.providerId,
+      textureGeneration: capabilities.texture,
       meshProfiles: {
         hd: meshProfilePolicy("hd"),
         smart_mesh: meshProfilePolicy("smart_mesh"),
       },
-      subjectProfiles: [
-        { id: "pet", label: "Pet / animal", rigType: "quadruped" },
-        { id: "humanoid", label: "Humanoid character", rigType: "biped" },
-      ],
+      subjectProfiles: capabilities.subjectProfiles,
       facialRig: FACIAL_RIG_POLICY,
       rigGeneration,
       styleDirection: {
-        stage: "texture",
+        available: capabilities.texture.styleDirectionAvailable,
+        stage: capabilities.texture.styleDirectionAvailable ? "texture" : null,
         maxCharacters: 400,
         presets: ["reference-faithful", "soft-stylized", "toy-collectible", "studio-realistic"],
       },
       referenceRequirements: {
         requiredSourceUploads: 1,
         optionalSourceAngles: [],
-        generatedForApproval: ["left", "right", "rear"],
+        requiredViewKinds: capabilities.reference.requiredViewKinds,
+        generatedForApproval: capabilities.reference.generatedForApproval,
+        canRegenerate: capabilities.reference.canRegenerate,
         guidance: [
           "Upload one clear, full-body pet photo.",
-          "Pawsome3D generates the left, right, and rear views before model building.",
-          "Approve the views or request one free remake.",
+          ...(capabilities.reference.generatedForApproval.length
+            ? [
+                "Pawsome3D generates the left, right, and rear views before model building.",
+                "Approve the views or request one free remake.",
+              ]
+            : ["Approve the exact uploaded front photo before model building."]),
           "Avoid filters and motion blur.",
           "Include clear views of distinctive markings.",
           "Measurements improve scale confidence.",
@@ -113,20 +124,22 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
       });
     }
     try {
-      if (parsed.data.includeRig && !rigGenerationAvailability().available) {
-        return res.status(503).json({
-          error: "RIG_GENERATION_DISABLED",
-          message: rigGenerationAvailability().reason,
-        });
-      }
-      res.json(await service.createConfiguredOrder(phone, {
+      const configuration = {
         meshProfile: parsed.data.meshProfile,
         subjectProfile: parsed.data.subjectProfile,
         includeTexture: parsed.data.includeTexture,
         includeRig: parsed.data.includeRig,
         textureQuality: parsed.data.textureQuality,
         styleDirection: parsed.data.styleDirection || null,
-      }));
+      };
+      assertPetGlbConfigurationSupported(configuration);
+      if (parsed.data.includeRig && !rigGenerationAvailability().available) {
+        return res.status(503).json({
+          error: "RIG_GENERATION_DISABLED",
+          message: rigGenerationAvailability().reason,
+        });
+      }
+      res.json(await service.createConfiguredOrder(phone, configuration));
     } catch (err) { fail(res, err); }
   });
 

@@ -5,10 +5,6 @@ param adminUsername string
 param sshPublicKey string
 param adminSourceCidr string
 param coreVmSize string
-param gpuVmSize string
-param deployGpuVm bool
-param gpuAutoShutdownEnabled bool
-param gpuAutoShutdownTime string
 param deployGibiWorldVm bool
 param gibiWorldVmSize string
 
@@ -19,7 +15,6 @@ var resourceSuffix = uniqueString(subscription().id, resourceGroup().id, prefix)
 var storageName = take(toLower('st${replace(prefix, '-', '')}${resourceSuffix}'), 24)
 var keyVaultName = take(toLower('${prefix}-kv-${resourceSuffix}'), 24)
 var coreCloudInit = loadTextContent('./cloud-init/core.yaml')
-var gpuCloudInit = loadTextContent('./cloud-init/gpu.yaml')
 var keyVaultSecretsUserRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
 var storageBlobContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 
@@ -334,27 +329,6 @@ resource coreNic 'Microsoft.Network/networkInterfaces@2024-01-01' = {
   }
 }
 
-resource gpuNic 'Microsoft.Network/networkInterfaces@2024-01-01' = if (deployGpuVm) {
-  name: '${prefix}-gpu-nic'
-  location: location
-  properties: {
-    enableAcceleratedNetworking: true
-    ipConfigurations: [
-      {
-        name: 'primary'
-        properties: {
-          primary: true
-          privateIPAllocationMethod: 'Static'
-          privateIPAddress: '10.42.2.10'
-          subnet: {
-            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, 'gpu-workers')
-          }
-        }
-      }
-    ]
-  }
-}
-
 resource gibiWorldPublicIp 'Microsoft.Network/publicIPAddresses@2024-01-01' = if (deployGibiWorldVm) {
   name: '${prefix}-gibi-pip'
   location: location
@@ -451,97 +425,6 @@ resource coreVm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
   }
 }
 
-resource gpuVm 'Microsoft.Compute/virtualMachines@2024-03-01' = if (deployGpuVm) {
-  name: '${prefix}-gpu-01'
-  location: location
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    hardwareProfile: {
-      vmSize: gpuVmSize
-    }
-    networkProfile: {
-      networkInterfaces: [
-        {
-          id: gpuNic.id
-          properties: {
-            deleteOption: 'Detach'
-            primary: true
-          }
-        }
-      ]
-    }
-    osProfile: {
-      computerName: '${prefix}-gpu-01'
-      adminUsername: adminUsername
-      customData: base64(gpuCloudInit)
-      linuxConfiguration: {
-        disablePasswordAuthentication: true
-        provisionVMAgent: true
-        ssh: {
-          publicKeys: [
-            {
-              keyData: sshPublicKey
-              path: '/home/${adminUsername}/.ssh/authorized_keys'
-            }
-          ]
-        }
-      }
-    }
-    storageProfile: {
-      imageReference: {
-        publisher: 'Canonical'
-        offer: '0001-com-ubuntu-server-jammy'
-        sku: '22_04-lts-gen2'
-        version: 'latest'
-      }
-      osDisk: {
-        name: '${prefix}-gpu-os'
-        createOption: 'FromImage'
-        deleteOption: 'Detach'
-        diskSizeGB: 512
-        managedDisk: {
-          storageAccountType: 'Premium_LRS'
-        }
-      }
-    }
-  }
-  tags: {
-    role: 'trellis-blender-worker'
-    workload: 'paws-platform'
-  }
-}
-
-resource gpuDriver 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = if (deployGpuVm) {
-  parent: gpuVm
-  name: 'NvidiaGpuDriverLinux'
-  location: location
-  properties: {
-    publisher: 'Microsoft.HpcCompute'
-    type: 'NvidiaGpuDriverLinux'
-    typeHandlerVersion: '1.10'
-    autoUpgradeMinorVersion: true
-  }
-}
-
-resource gpuShutdown 'Microsoft.DevTestLab/schedules@2018-09-15' = if (deployGpuVm && gpuAutoShutdownEnabled) {
-  name: 'shutdown-computevm-${gpuVm.name}'
-  location: location
-  properties: {
-    status: 'Enabled'
-    taskType: 'ComputeVmShutdownTask'
-    dailyRecurrence: {
-      time: gpuAutoShutdownTime
-    }
-    timeZoneId: 'UTC'
-    notificationSettings: {
-      status: 'Disabled'
-    }
-    targetResourceId: gpuVm.id
-  }
-}
-
 resource gibiWorldVm 'Microsoft.Compute/virtualMachines@2024-03-01' = if (deployGibiWorldVm) {
   name: '${prefix}-gibi-01'
   location: location
@@ -624,26 +507,6 @@ resource coreStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-resource gpuKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployGpuVm) {
-  name: guid(keyVault.id, gpuVm.id, 'secrets-user')
-  scope: keyVault
-  properties: {
-    principalId: gpuVm!.identity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: keyVaultSecretsUserRole
-  }
-}
-
-resource gpuStorageRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployGpuVm) {
-  name: guid(storage.id, gpuVm.id, 'blob-contributor')
-  scope: storage
-  properties: {
-    principalId: gpuVm!.identity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: storageBlobContributorRole
-  }
-}
-
 resource gibiKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployGibiWorldVm) {
   name: guid(keyVault.id, gibiWorldVm.id, 'secrets-user')
   scope: keyVault
@@ -655,7 +518,6 @@ resource gibiKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 }
 
 output corePublicIp string = corePublicIp.properties.ipAddress
-output gpuPrivateIp string = deployGpuVm ? '10.42.2.10' : ''
 output gibiWorldPublicIp string = deployGibiWorldVm ? gibiWorldPublicIp!.properties.ipAddress : ''
 output keyVaultName string = keyVault.name
 output storageAccountName string = storage.name

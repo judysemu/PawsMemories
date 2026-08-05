@@ -45,6 +45,15 @@ interface WorkerJobResponse {
   };
 }
 
+interface WorkerReadinessResponse {
+  status?: string;
+  cuda?: boolean;
+  modelPresent?: boolean;
+  modelLoaded?: boolean;
+  modelRevision?: string;
+  sourceRevision?: string;
+}
+
 function privateIpv4(hostname: string): boolean {
   if (net.isIP(hostname) !== 4) return false;
   const [a, b] = hostname.split(".").map(Number);
@@ -165,11 +174,17 @@ function parseDataImage(raw: string): { bytes: Buffer; mimeType: string } | null
 }
 
 export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifactFinalizer {
+  readonly providerId = "trellis2";
+  readonly requiredReferenceViewKinds = ["front"] as const;
   private readonly workerUrl: URL;
   private readonly sharedSecret: string;
   private readonly fetchImpl: FetchImplementation;
   private readonly referenceHosts: Set<string>;
   private readonly selectReference: (input: ModelBuildProviderInput) => string;
+
+  get modelId(): string {
+    return `${process.env.TRELLIS_MODEL_ID || "microsoft/TRELLIS.2-4B"}@${process.env.TRELLIS_MODEL_REVISION || "af44b45f2e35a493886929c6d786e563ec68364d"}`;
+  }
 
   constructor(options: TrellisModelBuildAdapterOptions = {}) {
     const rawUrl = options.baseUrl || process.env.TRELLIS_WORKER_URL || "";
@@ -191,6 +206,29 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
       };
       return candidates[view] || input.frontUrl;
     });
+  }
+
+  async preflightForCharge(): Promise<void> {
+    const response = await this.workerFetch("/readyz", {}, PROVIDER_CONNECT_TIMEOUT_MS);
+    const bytes = await readLimited(response, 64 * 1024);
+    let body: WorkerReadinessResponse;
+    try {
+      body = JSON.parse(bytes.toString("utf8")) as WorkerReadinessResponse;
+    } catch {
+      throw new ModelBuildProviderError("TRELLIS readiness response is invalid", "TRELLIS_RESPONSE_INVALID", false);
+    }
+    const expectedModelRevision = process.env.TRELLIS_MODEL_REVISION || "af44b45f2e35a493886929c6d786e563ec68364d";
+    const expectedSourceRevision = process.env.TRELLIS_SOURCE_REVISION || "75fbf0183001ed9876c8dbb35de6b68552ee08bd";
+    if (!response.ok
+      || body.status !== "ready"
+      || body.cuda !== true
+      || body.modelPresent !== true
+      || body.modelLoaded !== true) {
+      throw new ModelBuildProviderError("TRELLIS worker is not ready", "TRELLIS_WORKER_NOT_READY", true);
+    }
+    if (body.modelRevision !== expectedModelRevision || body.sourceRevision !== expectedSourceRevision) {
+      throw new ModelBuildProviderError("TRELLIS worker revision does not match the approved lock", "TRELLIS_REVISION_MISMATCH", false);
+    }
   }
 
   async start(input: ModelBuildProviderInput, configHash: string): Promise<ModelBuildProviderResult> {
@@ -228,7 +266,7 @@ export class TrellisModelBuildAdapter implements ModelBuildProvider, ModelArtifa
     return {
       providerTaskHandle: `${TASK_PREFIX}${body.id}`,
       provider: "trellis2",
-      model: `${process.env.TRELLIS_MODEL_ID || "microsoft/TRELLIS.2-4B"}@${process.env.TRELLIS_MODEL_REVISION || "af44b45f2e35a493886929c6d786e563ec68364d"}`,
+      model: this.modelId,
     };
   }
 

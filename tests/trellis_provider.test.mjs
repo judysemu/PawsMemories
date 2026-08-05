@@ -58,6 +58,50 @@ test("TRELLIS provider submits approved bytes only to the private worker", async
   assert.equal(calls.some(({ url }) => /tripo|fal\.ai|huggingface/i.test(url.hostname)), false);
 });
 
+test("TRELLIS provider proves authenticated locked-model readiness before charge", async () => {
+  const calls = [];
+  const provider = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async (request, init = {}) => {
+      const url = new URL(String(request));
+      calls.push(url.pathname);
+      assert.equal(init.headers["x-worker-secret"], "test-worker-secret");
+      return jsonResponse({
+        status: "ready",
+        cuda: true,
+        modelPresent: true,
+        modelLoaded: true,
+        modelRevision: "af44b45f2e35a493886929c6d786e563ec68364d",
+        sourceRevision: "75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+      });
+    },
+  });
+  await provider.preflightForCharge();
+  assert.deepEqual(calls, ["/readyz"]);
+});
+
+test("TRELLIS provider fails readiness on stale or unloaded workers", async () => {
+  const provider = new TrellisModelBuildAdapter({
+    baseUrl: "http://10.42.2.10:8000",
+    sharedSecret: "test-worker-secret",
+    referenceHosts: [],
+    fetchImpl: async () => jsonResponse({
+      status: "not_ready",
+      cuda: true,
+      modelPresent: true,
+      modelLoaded: false,
+      modelRevision: "stale",
+      sourceRevision: "stale",
+    }, 503),
+  });
+  await assert.rejects(
+    () => provider.preflightForCharge(),
+    (error) => error.code === "TRELLIS_WORKER_NOT_READY",
+  );
+});
+
 test("TRELLIS provider polls and verifies the worker artifact", async () => {
   const glb = minimalGlb();
   const digest = crypto.createHash("sha256").update(glb).digest("hex");
@@ -163,7 +207,11 @@ test("TRELLIS provider rejects public workers and unallowlisted references", asy
 test("in-house-only provider selection fails closed without TRELLIS", () => {
   assert.equal(selectedPaws3dProvider({ PAWS_3D_PROVIDER: "trellis2", PAWS_3D_INHOUSE_ONLY: "true" }), "trellis2");
   assert.throws(
-    () => selectedPaws3dProvider({ PAWS_3D_PROVIDER: "tripo", PAWS_3D_INHOUSE_ONLY: "true" }),
+    () => selectedPaws3dProvider({
+      PAWS_3D_PROVIDER: "tripo",
+      PAWS_3D_INHOUSE_ONLY: " TRUE ",
+      PAWS_3D_EXTERNAL_PROVIDER_IDS: "fal",
+    }),
     (error) => error.code === "INHOUSE_PROVIDER_REQUIRED",
   );
   assert.throws(

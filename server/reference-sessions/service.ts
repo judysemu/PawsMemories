@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from "uuid";
 import type mysql from "mysql2/promise";
 import sharp from "sharp";
 import { getPool } from "../../db";
-import { getPrivateObjectBuffer } from "../../storage.private";
 import { addLineage, registerAsset } from "../assets/service";
 import { generateSignedUrlForVersion } from "../assets/access";
 import { findAssetById, findVersionById, hardDeleteUnpublishedAsset } from "../assets/repository";
@@ -38,6 +37,7 @@ import {
 import { privateReferenceStorage, type ReferenceStorageAdapter } from "./storage";
 import { evaluateReferenceConsistency } from "./consistency";
 import { inspectReferenceImage, MIN_REFERENCE_DIMENSION_PX, type ReferenceImageProvider } from "./provider";
+import { ORDERED_VIEW_KINDS } from "./types";
 import type {
   ReferenceSessionRecord,
   ReferenceAttemptRecord,
@@ -46,7 +46,6 @@ import type {
   ViewItemPublic,
   ReportPublic,
   ViewKind,
-  ORDERED_VIEW_KINDS,
 } from "./types";
 
 export class ReferenceSessionError extends Error {
@@ -69,11 +68,11 @@ function decodeBase64Image(value: string): Buffer {
 export function computeOrderedManifestHash(
   views: { viewKind: ViewKind; assetUuid: string; sha256: string }[],
   reportHash: string,
+  orderedViewKinds: readonly ViewKind[] = ORDERED_VIEW_KINDS,
 ): string {
-  const ordered = ["front", "left", "right", "rear"] as const;
   const parts: string[] = [];
 
-  for (const kind of ordered) {
+  for (const kind of orderedViewKinds) {
     const found = views.find((v) => v.viewKind === kind);
     if (!found) {
       throw new ReferenceSessionError(`Missing required view kind: ${kind}`, "INCOMPLETE_MANIFEST");
@@ -85,6 +84,57 @@ export function computeOrderedManifestHash(
     throw new ReferenceSessionError("A canonical report hash is required.", "INCOMPLETE_MANIFEST");
   }
   return crypto.createHash("sha256").update(`${parts.join("|")}|report:${reportHash.toLowerCase()}`).digest("hex");
+}
+
+function configuredProviderViewKinds(provider: ReferenceImageProvider): readonly ViewKind[] {
+  return provider.outputViewKinds?.length ? provider.outputViewKinds : ORDERED_VIEW_KINDS;
+}
+
+export function assertReferenceProviderOutput(
+  views: readonly { viewKind: ViewKind }[],
+  expectedViewKinds: readonly ViewKind[],
+): void {
+  const expected = new Set(expectedViewKinds);
+  const actual = new Set(views.map((view) => view.viewKind));
+  if (expected.size === 0
+    || views.length !== expected.size
+    || actual.size !== expected.size
+    || [...actual].some((kind) => !expected.has(kind))) {
+    throw new ReferenceSessionError(
+      `Provider must return exactly: ${[...expected].join(", ")}.`,
+      "INVALID_PROVIDER_OUTPUT",
+    );
+  }
+}
+
+/**
+ * Canonical manifests may truthfully contain one front upload or the legacy
+ * four-view set. Partial side-view sets are never accepted. Existing Tripo
+ * attempts retain their original four-view requirement.
+ */
+export function resolveReferenceManifestViewKinds(
+  availableViewKinds: readonly ViewKind[],
+  attemptProvider?: string | null,
+): readonly ViewKind[] {
+  const available = new Set(availableViewKinds);
+  if (available.size !== availableViewKinds.length) {
+    throw new ReferenceSessionError("Reference manifest contains duplicate view kinds.", "INCOMPLETE_VIEWS");
+  }
+  // Historical attempts may also contain an advisory front-three-quarter view;
+  // it was never part of the signed four-view manifest.
+  const hasFour = ORDERED_VIEW_KINDS.every((kind) => available.has(kind))
+    && [...available].every((kind) => ORDERED_VIEW_KINDS.includes(kind) || kind === "front_three_quarter");
+  if (hasFour) return ORDERED_VIEW_KINDS;
+
+  const isFrontOnly = available.size === 1 && available.has("front");
+  if (isFrontOnly && attemptProvider === "uploaded_front") return ["front"] as const;
+
+  const message = attemptProvider === "tripo"
+    ? "Approval requires the uploaded front plus left, right, and rear reference views."
+    : attemptProvider === "uploaded_front"
+      ? "Approval requires one truthful uploaded front reference."
+      : "Approval cannot infer a reference manifest contract for an unknown provider.";
+  throw new ReferenceSessionError(message, "INCOMPLETE_VIEWS");
 }
 
 export class ReferenceSessionService {
@@ -111,6 +161,12 @@ export class ReferenceSessionService {
       const mimeTypes = validated.sourceMimeTypes?.length
         ? validated.sourceMimeTypes
         : [validated.sourceMimeType!];
+      if (this.provider.maxSourceImages && encodedImages.length > this.provider.maxSourceImages) {
+        throw new ReferenceSessionError(
+          `This reference path accepts at most ${this.provider.maxSourceImages} source image.`,
+          "TOO_MANY_SOURCE_IMAGES",
+        );
+      }
       const inspectedInputs = await Promise.all(encodedImages.map(async (encoded, index) => {
         const imageBuffer = decodeBase64Image(encoded);
         const inspected = await inspectReferenceImage(imageBuffer, mimeTypes[index] || mimeTypes[0], 1);
@@ -274,7 +330,7 @@ export class ReferenceSessionService {
         if (!session.source_asset_version_id) throw new ReferenceSessionError("Photo session has no source image.", "MISSING_SOURCE");
         const sourceVersion = await findVersionById(pool, session.source_asset_version_id);
         if (!sourceVersion || sourceVersion.asset_id !== session.source_asset_id) throw new ReferenceSessionError("Source image reference is corrupt.", "CORRUPT_SOURCE");
-        photoBuffer = await getPrivateObjectBuffer(sourceVersion.object_key);
+        photoBuffer = await this.storage.loadReferenceObject(sourceVersion.object_key);
         photoMimeType = sourceVersion.mime_type;
       }
       const genResult = await this.provider.generateMultiview(
@@ -289,10 +345,8 @@ export class ReferenceSessionService {
         },
         session.input_mode,
       );
-      const requiredKinds = new Set(["front", "left", "right", "rear"]);
-      if (genResult.views.length !== requiredKinds.size || new Set(genResult.views.map((view) => view.viewKind)).size !== requiredKinds.size || genResult.views.some((view) => !requiredKinds.has(view.viewKind))) {
-        throw new ReferenceSessionError("Provider must return exactly one of each required view.", "INVALID_PROVIDER_OUTPUT");
-      }
+      const requiredKinds = configuredProviderViewKinds(this.provider);
+      assertReferenceProviderOutput(genResult.views, requiredKinds);
       for (const view of genResult.views) {
         const inspected = await inspectReferenceImage(view.imageBuffer, view.mimeType);
         view.widthPx = inspected.widthPx;
@@ -350,6 +404,8 @@ export class ReferenceSessionService {
       const { payload: reportPayload, hash: reportHash } = evaluateReferenceConsistency(
         genResult.views,
         session.input_mode,
+        undefined,
+        requiredKinds,
       );
 
       const reportBytes = Buffer.from(JSON.stringify(reportPayload), "utf8");
@@ -484,15 +540,15 @@ export class ReferenceSessionService {
       }
 
       const views = await findViewsByAttemptId(connection, attempt.id);
-      const requiredKinds = ["front", "left", "right", "rear"] as const;
-      const availableKinds = new Set(views.map((view) => view.view_kind));
-      if (!requiredKinds.every((kind) => availableKinds.has(kind))) {
-        throw new ReferenceSessionError("Approval requires the uploaded front plus left, right, and rear reference views.", "INCOMPLETE_VIEWS");
-      }
+      const requiredKinds = resolveReferenceManifestViewKinds(
+        views.map((view) => view.view_kind),
+        attempt.provider,
+      );
 
       // Compute server-side ordered manifest hash and verify match
       const viewManifestItems: { viewKind: ViewKind; assetUuid: string; sha256: string }[] = [];
-      for (const v of views) {
+      for (const kind of requiredKinds) {
+        const v = views.find((view) => view.view_kind === kind)!;
         const asset = await findAssetById(connection, v.asset_id);
         const version = await findVersionById(connection, v.asset_version_id);
         if (!asset || !version) {
@@ -518,7 +574,7 @@ export class ReferenceSessionService {
       if (!reportVersion || reportVersion.asset_id !== report.report_asset_id || reportVersion.sha256 !== report.report_hash) {
         throw new ReferenceSessionError("Consistency report identity does not match its canonical bytes.", "CORRUPT_REPORT");
       }
-      const computedHash = computeOrderedManifestHash(viewManifestItems, report.report_hash);
+      const computedHash = computeOrderedManifestHash(viewManifestItems, report.report_hash, requiredKinds);
       if (computedHash !== manifestHash) {
         throw new ReferenceSessionError(
           "Manifest hash mismatch. Reviewed views or report have changed.",
@@ -603,6 +659,7 @@ export class ReferenceSessionService {
 
     if (targetAttemptId) {
       const views = await findViewsByAttemptId(pool, targetAttemptId);
+      const targetAttempt = await findAttemptById(pool, targetAttemptId);
       const manifestItems: { viewKind: ViewKind; assetUuid: string; sha256: string }[] = [];
 
       for (const v of views) {
@@ -635,7 +692,15 @@ export class ReferenceSessionService {
           reportHash: reportRecord.report_hash,
           metrics: reportRecord.metrics_json,
         };
-        if (viewsPublic.length >= 4) manifestHash = computeOrderedManifestHash(manifestItems, reportRecord.report_hash);
+        try {
+          const manifestViewKinds = resolveReferenceManifestViewKinds(
+            manifestItems.map((item) => item.viewKind),
+            targetAttempt?.provider,
+          );
+          manifestHash = computeOrderedManifestHash(manifestItems, reportRecord.report_hash, manifestViewKinds);
+        } catch {
+          manifestHash = null;
+        }
       }
     }
 

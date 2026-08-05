@@ -10,8 +10,10 @@ packages:
   - jq
   - libjpeg-dev
   - ninja-build
+  - rsync
   - unzip
   - unattended-upgrades
+  - zstd
 
 write_files:
   - path: /etc/docker/daemon.json

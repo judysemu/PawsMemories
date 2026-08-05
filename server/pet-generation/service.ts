@@ -22,6 +22,12 @@ import {
   stagePrice,
 } from "./contracts";
 import {
+  assertPetGlbConfigurationSupported,
+  nextPetGlbStage,
+  normalizeHistoricalConfiguration,
+  petGlbProductCapabilities,
+} from "./capabilities";
+import {
   PetGlbStageRepository,
   type ExactStageApproval,
   type PetGlbStageAttempt,
@@ -123,6 +129,9 @@ export class PetGlbService {
     ownerPhone: string,
     configuration: PetGlbOrderConfiguration,
   ): Promise<PetGlbOrderView> {
+    // Enforce capabilities at the service boundary as well as the HTTP route:
+    // no alternate caller can persist an unsupported order or reserve credits.
+    assertPetGlbConfigurationSupported(configuration);
     const order = await this.orders.createConfigured(
       ownerPhone,
       CUSTOM_RIGGED_PET_GLB_V1,
@@ -509,11 +518,13 @@ export class PetGlbService {
     let stageFinalized = false;
     try {
       const artifacts = await provider.fetchArtifacts(attempt.providerJobId);
+      const textureCapabilities = petGlbProductCapabilities().texture;
       const report = validatePetGlbStage(artifacts.glb.data, {
         stage: attempt.stage,
         meshProfile: order.meshProfile,
         rigProfileJoints: attempt.stage === "rig" ? this.deps.rigProfileJoints : undefined,
-        requireTexture: attempt.stage === "rig" ? order.includeTexture : undefined,
+        requireTexture: textureCapabilities.includedInBase
+          || (attempt.stage === "rig" && order.includeTexture),
       });
       const reportSha256 = canonicalHash(report);
       const { assetId, versionId } = await this.deps.persistVersion({
@@ -631,6 +642,12 @@ export class PetGlbService {
     if (!current || current.attemptUuid !== input.attemptUuid) {
       throw new PetGenerationError("STALE_STAGE", "Retry does not match the current stage");
     }
+    if (current.stage === "texture" && !petGlbProductCapabilities().texture.separateStageAvailable) {
+      throw new PetGenerationError(
+        "TEXTURE_INCLUDED_IN_BASE",
+        "The selected provider includes PBR materials in the base model and cannot retry a separate texture stage",
+      );
+    }
     const retryPrice = stagePrice(current.stage);
     const retry = await this.stages.queueRetry({
       orderId: order.id,
@@ -661,17 +678,19 @@ export class PetGlbService {
     if (!source.referenceManifest) {
       throw new PetGenerationError("REFERENCES_MISSING", "The original pet photos are not available for this retry");
     }
+    const retryConfiguration = normalizeHistoricalConfiguration({
+      meshProfile: source.meshProfile,
+      subjectProfile: source.subjectProfile,
+      includeTexture: source.includeTexture,
+      includeRig: source.includeRig,
+      textureQuality: source.textureQuality,
+      styleDirection: source.styleDirection,
+    });
+    assertPetGlbConfigurationSupported(retryConfiguration);
     let retry = await this.orders.createConfiguredRetry(
       ownerPhone,
       CUSTOM_RIGGED_PET_GLB_V1,
-      {
-        meshProfile: source.meshProfile,
-        subjectProfile: source.subjectProfile,
-        includeTexture: source.includeTexture,
-        includeRig: source.includeRig,
-        textureQuality: source.textureQuality,
-        styleDirection: source.styleDirection,
-      },
+      retryConfiguration,
       source.id,
       idempotencyKey,
       source.referenceSessionId,
@@ -726,6 +745,15 @@ export class PetGlbService {
   ): Promise<void> {
     if (attempt.state !== "queued") return;
     const order = await this.requireOwned(orderUuid, ownerPhone);
+    if (attempt.stage === "texture" && !petGlbProductCapabilities().texture.separateStageAvailable) {
+      await this.stages.failAndRefund(
+        order.id,
+        attempt.id,
+        ownerPhone,
+        "TEXTURE_INCLUDED_IN_BASE",
+      );
+      return;
+    }
     const provider = this.provider();
     let startedJobId: string | null = null;
     try {
@@ -810,15 +838,7 @@ export class PetGlbService {
     order: PetGlbOrder,
     current: PetGlbStageKind,
   ): Exclude<PetGlbStageKind, "reference"> | null {
-    if (current === "reference") return "base";
-    if (current === "base") {
-      if (order.includeTexture) return "texture";
-      if (order.includeRig) return "rig_check";
-      return null;
-    }
-    if (current === "texture") return order.includeRig ? "rig_check" : null;
-    if (current === "rig_check") return "rig";
-    return null;
+    return nextPetGlbStage(order, current);
   }
 
   private async advanceCompletedStage(
@@ -888,7 +908,7 @@ export class PetGlbService {
         ? {
             sessionUuid: referenceContext.sessionUuid,
             attemptsUsed: referenceContext.sourceAttemptCount || 0,
-            canRegenerate: true,
+            canRegenerate: petGlbProductCapabilities().reference.canRegenerate,
           }
         : null,
     };

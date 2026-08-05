@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { putPrivateObject, deletePrivateObject, extensionForMime } from "../../storage.private";
+import { putPrivateObject, deletePrivateObject, extensionForMime, getPrivateObjectBuffer } from "../../storage.private";
 import type { ViewKind } from "./types";
 
 export type StoredReferenceObject = { objectKey: string; sizeBytes: number; sha256: string };
@@ -15,6 +15,7 @@ export interface ReferenceStorageAdapter {
   storeReferenceSource(sessionUuid: string, imageBuffer: Buffer, mimeType: string): Promise<StoredReferenceObject>;
   storeReferenceReport(sessionUuid: string, attemptNumber: number, reportBuffer: Buffer): Promise<StoredReferenceObject>;
   storeReferenceManifest(sessionUuid: string, manifestBuffer: Buffer): Promise<StoredReferenceObject>;
+  loadReferenceObject(objectKey: string): Promise<Buffer>;
   cleanupReferenceImage(objectKey: string): Promise<void>;
 }
 
@@ -85,10 +86,18 @@ export async function cleanupReferenceImage(objectKey: string): Promise<void> {
   });
 }
 
+export async function loadReferenceObject(objectKey: string): Promise<Buffer> {
+  if (!objectKey.startsWith("references/")) {
+    throw new Error("Refusing to load object outside references/ prefix.");
+  }
+  return getPrivateObjectBuffer(objectKey);
+}
+
 export const privateReferenceStorage: ReferenceStorageAdapter = {
   storeReferenceImage,
   storeReferenceSource,
   storeReferenceReport,
   storeReferenceManifest,
+  loadReferenceObject,
   cleanupReferenceImage,
 };

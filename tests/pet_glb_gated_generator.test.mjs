@@ -17,6 +17,7 @@ const { TripoPetGenerationAdapter } = await import("../server/pet-generation/tri
 const { InMemoryJobStore } = await import("../server/pet-generation/provider.ts");
 const { validatePetGlb, validatePetGlbStage } = await import("../server/pet-generation/validation.ts");
 const { PetGlbStageRepository } = await import("../server/pet-generation/stageRepository.ts");
+const { petGlbProductCapabilities } = await import("../server/pet-generation/capabilities.ts");
 const { PET_GLB_STAGE_PRICES, petGlbTotalCost } = await import("../src/pricing.ts");
 const { MIGRATIONS, CURRENT_SCHEMA_VERSION } = await import("../server/migrations/runner.ts");
 
@@ -259,7 +260,10 @@ test("model studio accepts one photo, supports Tripo view remakes, and requires 
   assert.match(studio, /stages\/\$\{stage\.stage\}\/approve/);
   assert.doesNotMatch(studio, /Check stage progress|Load secure 3D preview|Back to model builds/);
   assert.match(routes, /requiredSourceUploads:\s*1/);
-  assert.match(routes, /generatedForApproval:\s*\["left", "right", "rear"\]/);
+  assert.deepEqual(
+    petGlbProductCapabilities({ PAWS_3D_PROVIDER: "tripo" }).reference.generatedForApproval,
+    ["left", "right", "rear"],
+  );
 });
 
 test("migration 39 persists immutable customer stage attempts", () => {

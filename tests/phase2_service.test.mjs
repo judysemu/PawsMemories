@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import mysql from "mysql2/promise";
+import sharp from "sharp";
 import { runMigrations } from "../server/migrations/runner.ts";
 import { ReferenceSessionService, ReferenceSessionError, computeOrderedManifestHash } from "../server/reference-sessions/service.ts";
-import { FakeReferenceImageProvider } from "../server/reference-sessions/provider.ts";
+import { FakeReferenceImageProvider, UploadedFrontReferenceImageProvider } from "../server/reference-sessions/provider.ts";
 import { ORDERED_VIEW_KINDS } from "../server/reference-sessions/types.ts";
 import { createReferenceStorageTestDouble } from "./helpers/referenceStorage.mjs";
 
@@ -230,6 +231,35 @@ test("Phase 2 Production Reference Session Service Suite", async (t) => {
 
     const repeatedApproval = await service.approveManifest(ownerId, session.session_uuid, validHash);
     assert.equal(repeatedApproval.state, "approved");
+  });
+
+  await t.test("4b. strict internal photo session approves one truthful canonical front", async () => {
+    const ownerId = "+15551117777";
+    const internalService = new ReferenceSessionService(
+      new UploadedFrontReferenceImageProvider(),
+      () => pool,
+      referenceStorage,
+    );
+    const source = await sharp({
+      create: { width: 800, height: 600, channels: 3, background: "#6f523b" },
+    }).jpeg().toBuffer();
+    const session = await internalService.createSession(ownerId, {
+      inputMode: "photo",
+      sourceImageBase64: source.toString("base64"),
+      sourceMimeType: "image/jpeg",
+    });
+
+    await internalService.startOrRetryAttempt(ownerId, session.session_uuid, "strict-front-only");
+    const ready = await internalService.getSessionPublic(session.session_uuid, ownerId, false);
+    assert.equal(ready.state, "ready");
+    assert.equal(ready.views.length, 1);
+    assert.equal(ready.views[0].viewKind, "front");
+    assert.equal(ready.views[0].isSynthesized, false);
+    assert.match(ready.manifestHash, /^[a-f0-9]{64}$/);
+
+    const approved = await internalService.approveManifest(ownerId, session.session_uuid, ready.manifestHash);
+    assert.equal(approved.state, "approved");
+    assert.equal(approved.views.length, 1);
   });
 
   await t.test("5. Retry attempt creates attempt #2 and preserves history", async () => {

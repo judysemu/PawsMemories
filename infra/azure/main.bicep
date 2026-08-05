@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
-@description('Azure region for the platform. GPU quota and SKU capacity must be verified before deployment.')
-param location string = 'eastus'
+@description('Stable Azure region for the core/orchestrator and optional GibiWorld lane. The GPU worker is deployed separately and may use any approved region.')
+param coreLocation string = 'eastus'
 
 @description('Resource group that owns the Paws/TRELLIS platform.')
 param resourceGroupName string = 'Trellis'
@@ -24,18 +24,6 @@ param adminSourceCidr string
 @description('Always-on API/orchestrator VM. This host does not run TRELLIS inference.')
 param coreVmSize string = 'Standard_D8ads_v7'
 
-@description('Single-GPU TRELLIS/Blender worker. H100 v5 is the preferred net-new Azure capacity.')
-param gpuVmSize string = 'Standard_NC40ads_H100_v5'
-
-@description('Set false to deploy only the low-cost foundation while GPU quota is pending.')
-param deployGpuVm bool = false
-
-@description('Enable a daily safety shutdown for the GPU VM. Azure deallocation is still verified after testing.')
-param gpuAutoShutdownEnabled bool = true
-
-@description('Daily GPU safety shutdown in UTC, HHmm format.')
-param gpuAutoShutdownTime string = '0700'
-
 @description('Optional separate GibiWorld application VM. Keep false until its backend deployment contract is ready.')
 param deployGibiWorldVm bool = false
 
@@ -44,7 +32,7 @@ param gibiWorldVmSize string = 'Standard_D4ads_v7'
 
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName
-  location: location
+  location: coreLocation
   tags: {
     workload: 'paws-platform'
     environment: 'production'
@@ -56,16 +44,12 @@ module platform './platform.bicep' = {
   name: 'paws-platform'
   scope: resourceGroup
   params: {
-    location: location
+    location: coreLocation
     prefix: prefix
     adminUsername: adminUsername
     sshPublicKey: sshPublicKey
     adminSourceCidr: adminSourceCidr
     coreVmSize: coreVmSize
-    gpuVmSize: gpuVmSize
-    deployGpuVm: deployGpuVm
-    gpuAutoShutdownEnabled: gpuAutoShutdownEnabled
-    gpuAutoShutdownTime: gpuAutoShutdownTime
     deployGibiWorldVm: deployGibiWorldVm
     gibiWorldVmSize: gibiWorldVmSize
   }
@@ -73,7 +57,6 @@ module platform './platform.bicep' = {
 
 output resourceGroupName string = resourceGroup.name
 output corePublicIp string = platform.outputs.corePublicIp
-output gpuPrivateIp string = platform.outputs.gpuPrivateIp
 output gibiWorldPublicIp string = platform.outputs.gibiWorldPublicIp
 output keyVaultName string = platform.outputs.keyVaultName
 output storageAccountName string = platform.outputs.storageAccountName

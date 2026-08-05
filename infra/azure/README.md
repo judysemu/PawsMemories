@@ -1,144 +1,193 @@
 # Azure TRELLIS.2 Platform
 
-This directory defines the Azure foundation for PawsMemories/Pawsome3D and
-GibiWorld. It is intentionally separate from the current Hostinger and Render
-production deployments. Azure must pass readiness checks before any DNS or
-customer traffic is moved.
+This directory keeps the stable Paws core/GibiWorld foundation separate from a
+replaceable GPU worker lane. A GPU quota grant can now name any Azure region or
+an additional startup-credit subscription without moving or redeploying the
+existing East US services.
 
-## Topology
+Azure remains separate from the current Hostinger and Render production
+deployments. No DNS, paid customer traffic, or database writes move until the
+live acceptance gates below pass.
 
-- `pawstrellis-core-01` (`Standard_D8ads_v7`): public HTTPS entry point,
-  backend services, durable orchestration, and CPU workers.
-- `pawstrellis-gpu-01` (`Standard_NC40ads_H100_v5`): private-only 94 GB H100
-  worker for TRELLIS.2 plus Blender/rigging/animation jobs. Only the core subnet
-  can reach its worker ports.
-- `pawstrellis-gibi-01` (`Standard_D4ads_v7`): separate GibiWorld backend lane.
-- Key Vault: secrets are retrieved through VM managed identities; secrets are
-  not embedded in Bicep, cloud-init, Git, or VM command history.
-- Blob Storage: private model cache and generated artifact containers.
-- Daily GPU auto-shutdown: a cost-containment backstop, not a substitute for
-  explicit deallocation after validation.
+## Topology and ownership
 
-## Why the H100 VM
+- `main.bicep` + `platform.bicep`: stable core/orchestrator, storage, Key Vault,
+  and optional GibiWorld resources in `coreLocation` (currently East US).
+- `gpu-lane-main.bicep`: independent subscription-level GPU entry point. It
+  creates only the GPU resource group and delegates the private lane and core
+  integration modules.
+- `gpu-lane.bicep`: one private-only TRELLIS/Blender VM, its non-overlapping
+  regional VNet, NSG, managed identity, NVIDIA extension, and shutdown guard.
+- `core-gpu-integration.bicep`: adds the reverse VNet peering and grants the GPU
+  identity access to the existing private model/artifact storage and Key Vault.
+  It does not redeploy the core VM, GibiWorld VM, their NICs, or their disks.
 
-Microsoft's TRELLIS.2 repository requires Linux, CUDA, and at least 24 GB of
-NVIDIA VRAM, and reports its reference timings on H100. Azure's
-`Standard_NC40ads_H100_v5` provides one 94 GB H100, 40 vCPUs, and 320 GiB RAM.
-Microsoft states that net-new NC capacity is being added to the H100 v5 family,
-whereas A100 v4 is no longer the net-new-capacity line.
+The stable VNet uses `10.42.0.0/16`, with the exact core subnet
+`10.42.1.0/24`. The independent GPU VNet defaults to `10.43.0.0/16`, with the
+worker at `10.43.2.10`. Two-way global VNet peering provides private routing.
+The GPU VM has no public IP. Its subnet uses an explicit egress-only NAT
+gateway because new Azure VNets do not receive implicit default outbound
+access. The NAT address is not attached to the VM and creates no inbound path.
+The NSG allows TCP 22, 8000, and 10000 only from `10.42.1.0/24`, then explicitly
+denies other peered-network and Internet inbound traffic.
 
-At the 2026-08-05 East US retail rates observed during setup:
-
-- H100 worker: about USD 6.98/hour, about USD 5,095/month if left on 24/7.
-- D8 core: about USD 0.456/hour, about USD 333/month if left on 24/7.
-- GibiWorld D4: about USD 0.228/hour, about USD 166/month, plus disks/logs.
-
-The worker must be deallocated when it is not serving or building. Stopping the
-guest OS is not enough; verify Azure reports `PowerState/deallocated`.
-
-At runtime, TRELLIS and Blender exchange artifacts only within the private GPU
+At runtime, TRELLIS and Blender exchange artifacts only on the private GPU
 host. `/opt/paws-gpu/jobs` is writable by TRELLIS and mounted read-only at
-`/shared-model-artifacts` in Blender. The Blender pipeline consumes a generic
-artifact locator through an injected resolver; the shared volume is an Azure
-deployment adapter, not a required storage or generator architecture. The
-shared `WORKER_SHARED_SECRET` authenticates the container-network calls; its
-value belongs in both service secret files, never in Compose or Git.
+`/shared-model-artifacts` in Blender. The shared `WORKER_SHARED_SECRET`
+authenticates service calls and belongs only in the VM secret files.
 
-## Deployment gates
+## Same-subscription and cross-subscription modes
 
-1. `Microsoft.Compute`, `Microsoft.Network`, `Microsoft.Storage`,
-   `Microsoft.KeyVault`, `Microsoft.ManagedIdentity`,
-   `Microsoft.OperationalInsights`, `Microsoft.DevTestLab`, and
-   `Microsoft.Quota` are registered.
-2. East US quota for `StandardNCadsH100v5Family` is at least 40 vCPUs.
-3. Total regional vCPU quota is at least 52 vCPUs for the three-VM layout.
-4. `infra/azure/main.bicep` compiles and Azure What-If reports only the expected
-   resource changes.
-5. The operator has explicitly acknowledged current Azure spend.
-
-## Commands
-
-Read-only preflight:
+The default is the existing subscription:
 
 ```bash
-./infra/azure/scripts/preflight.sh
+export AZURE_CORE_SUBSCRIPTION_ID="<existing-core-subscription-id>"
+export AZURE_GPU_LOCATION="<approved-region>"
 ```
 
-Foundation only, while GPU quota is pending:
+If Microsoft grants GPU quota on another subscription under the same startup
+billing account, add:
+
+```bash
+export AZURE_GPU_SUBSCRIPTION_ID="<gpu-quota-subscription-id>"
+```
+
+The deploy helper keeps the core subscription unchanged and submits the GPU
+deployment to `AZURE_GPU_SUBSCRIPTION_ID`. Cross-subscription mode requires:
+
+1. Both subscriptions are enabled in the same Microsoft Entra tenant.
+2. The deployment identity can create resources in the GPU subscription.
+3. It has Network Contributor permission on the existing core VNet so it can
+   add the reverse peering.
+4. It has permission to create role assignments on the existing Key Vault and
+   storage account (Owner or User Access Administrator plus the needed resource
+   write permissions).
+5. `Microsoft.Network` is registered in both subscriptions; the GPU
+   subscription also has the providers checked by `preflight.sh` registered.
+6. The two VNet address spaces remain non-overlapping.
+
+The script stops if the subscription tenant IDs differ. Cross-tenant peering is
+deliberately outside this deployment contract. It reads every address prefix on
+the existing core VNet plus the exact core subnet before planning, and rejects
+any overlapping or invalid GPU network range before any Azure write.
+
+## Foundation commands
+
+Foundation only:
 
 ```bash
 CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh foundation
 ```
 
-Core plus isolated GibiWorld VM, while GPU quota is pending:
+Core plus isolated GibiWorld VM:
 
 ```bash
 CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh core-gibi
 ```
 
-Full three-VM layout after H100 quota approval:
+`deploy.sh full` is intentionally refused. The GPU lane must never be smuggled
+into a foundation redeployment.
+
+## GPU quota and regional preflight
+
+Set the exact region and SKU from the approved support response. The current
+24-vCPU A100 request is the default:
 
 ```bash
-CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh full
+AZURE_GPU_LOCATION="<approved-region>" \
+AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 \
+./infra/azure/scripts/preflight.sh
 ```
 
-The pinned source and model set is recorded in
-`models/trellis2.lock.json`. While gated model access is pending, the public
-subset can be staged on any Azure disk without claiming readiness:
+Preflight reads quota and usage from the GPU subscription and GPU region only.
+It does not add core or GibiWorld vCPUs to the regional requirement. It verifies
+the applied family limit, remaining family and total regional quota, the SKU's
+subscription restriction list, providers, and current retail rate. Quota and a
+clean SKU listing do not guarantee physical capacity; the first allocation is
+still the capacity proof.
+
+For an H100 approval, override the size explicitly:
 
 ```bash
-TRELLIS_STAGE_ROOT=/opt/paws-model-staging ./infra/azure/scripts/stage-trellis-models.sh public-only
+AZURE_GPU_LOCATION="<approved-region>" \
+AZURE_GPU_VM_SIZE=Standard_NC40ads_H100_v5 \
+./infra/azure/scripts/preflight.sh
 ```
 
-This explicit partial mode writes an `incomplete` hash manifest. After DINOv3
-and RMBG access is granted, provide a read-only `HF_TOKEN` only to the install
-process and rerun with `complete`. The token is neither written to the manifest
-nor needed by the offline serving container. The bundle location is an install
-artifact rather than an application contract; generation and finalization stay
-behind provider-neutral ports.
+## GPU plan and deployment
 
-For the verified 80 GB A100 fallback, run preflight and deployment with the
-same explicit size. The worker image compiles CUDA extensions for A100
-(SM 8.0), A10 (SM 8.6), and H100 (SM 9.0):
+The GPU helper defaults to a read-only What-If. Review it and confirm that the
+stable core and GibiWorld VMs, NICs, public IPs, and disks have no changes:
 
 ```bash
-AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 ./infra/azure/scripts/preflight.sh
-CONFIRM_AZURE_SPEND=YES AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 ./infra/azure/scripts/deploy.sh full
+AZURE_GPU_LOCATION="<approved-region>" \
+./infra/azure/scripts/deploy-gpu-lane.sh what-if
 ```
 
-The A100 and H100 families both require quota. A failed self-service quota
-request is terminal, even when the portal previously showed it as processing;
-open an Azure Support quota request or select another verified region/SKU.
+Only after quota, physical capacity expectations, What-If, and spend are
+accepted:
 
-The script uses `$HOME/.ssh/id_ed25519.pub` by default and restricts SSH to the
-current public IPv4 address. Override with `AZURE_SSH_PUBLIC_KEY_FILE` or
-`AZURE_ADMIN_IP` when necessary.
+```bash
+CONFIRM_AZURE_SPEND=YES \
+AZURE_GPU_LOCATION="<approved-region>" \
+./infra/azure/scripts/deploy-gpu-lane.sh apply
+```
 
-## Service readiness contract
+The deployment adds a peering and two narrowly scoped managed-identity roles to
+the existing foundation. It does not run `main.bicep` and does not move or
+recreate core/GibiWorld.
 
-Infrastructure deployment alone is not completion. Before Azure is called
-ready, verify separately:
+## Accepted worker and model contract
 
-- Core liveness and authenticated backend readiness.
-- GPU driver, CUDA 12.4-compatible runtime, and `nvidia-smi`.
-- TRELLIS.2 model load and a real image-to-GLB job. Model installation also
-  downloads the pinned TRELLIS-image-large decoder, DINOv3, and RMBG-2.0
-  dependencies. The DINOv3 and RMBG repositories require accepted Hugging Face
-  access and an `HF_TOKEN` in `/opt/paws-gpu/secrets/model-download.env`.
-  Keep that install-only token out of `trellis.env`; serving stays offline after
-  installation and needs only its worker authentication secret.
-- GLB geometry, PBR textures, finite transforms, and no external URIs.
-- Blender worker health plus a real rig/animation fixture.
-- Private core-to-GPU connectivity and rejection from the public internet.
-- GibiWorld backend readiness and a real Unity-client contract test.
-- GPU deallocation behavior and restart/cold-start recovery.
+The pinned source and four-model set are recorded in
+`models/trellis2.lock.json`. The accepted worker image is
+`paws-trellis2:75fbf018-b74ca0c`; its private-cache readback is the deployment
+source. `compose/gpu.compose.yml` uses that exact tag by default and no longer
+rebuilds a different image on the GPU host. A later accepted image can be
+selected with `TRELLIS_WORKER_IMAGE` without changing the infrastructure.
 
-Do not cut over DNS, database writes, credit charging, or customer jobs until
-these gates pass.
+The image uses the Miniconda `base` environment. Model initialization invokes
+`/opt/conda/bin/hf` directly; there is no nonexistent `trellis2` Conda
+environment. Serving remains offline with `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1`.
 
-## Application cutover switches
+The already-verified image archive and model bundle can be transferred from the
+core cache to `10.43.2.10` over the private peering. Reverify the recorded
+archive SHA-256, manifest bytes, 37 model-file hashes, and lock revision before
+loading the image or starting Compose. Do not download models from Hugging Face
+during serving.
 
-Keep the paid customer path closed until the live GPU and Blender proof passes:
+Compose binds both host ports to `GPU_PRIVATE_IP` rather than every interface.
+The TRELLIS healthcheck calls authenticated `/readyz` and requires CUDA plus a
+loaded model. It reads the secret inside the check process without placing its
+value in Compose, command arguments, or logs. Blender is healthy only when its
+Express relay reports the Blender bridge connected.
+
+## Live acceptance gates
+
+Infrastructure deployment alone is not completion. Verify independently:
+
+1. GPU VM has no public IP and the two peerings report connected.
+2. The subnet's NAT gateway provides outbound bootstrap/Azure access but no
+   unsolicited inbound route to the VM.
+3. TCP 22, 8000, and 10000 work from the exact core subnet and are rejected
+   from public and other peered sources.
+4. NVIDIA driver, CUDA runtime, and `nvidia-smi` pass.
+5. The accepted image and complete model manifest pass private-cache readback.
+6. Authenticated `/readyz` proves CUDA, the pinned model, and the pipeline are
+   loaded; `/healthz` alone is insufficient.
+7. A real pet image produces a valid PBR GLB with finite geometry and no
+   external URIs.
+8. The same job completes in-house Blender rigging and animation and returns a
+   verified final GLB.
+9. Restart recovery is tested and the VM is explicitly deallocated afterward.
+   Guest shutdown alone does not stop compute billing.
+10. GibiWorld is evaluated separately with a real backend and Unity-client
+   contract test; GPU success does not imply GibiWorld readiness.
+
+## Customer cutover switches
+
+Keep customer work closed until all live gates pass:
 
 ```dotenv
 PAWS_3D_PROVIDER=trellis2
@@ -148,16 +197,6 @@ PET_GLB_ENABLED=false
 PET_GLB_BODY_RIG_ENABLED=false
 ```
 
-`PAWS_3D_INHOUSE_ONLY=true` is the no-fallback safety boundary: a Tripo-bound
-paid SKU is rejected rather than called. The paid adapter supports the TRELLIS
-base stage and the internal rig-check, rig, and animation finalization contract.
-A separate paid texture stage remains closed because TRELLIS already produces
-PBR texture; it must not become a charged no-op. Enable the two `PET_GLB_*`
-switches only after a live GPU run and the full paid-order refund/recovery path
-pass.
-
-The same boundary is enforced again at the Tripo and fal network entry points,
-so legacy routes, retries, background pollers, and direct imports cannot bypass
-provider selection. Strict mode also refuses historical Tripo polling; there is
-no automatic migration-drain exception. This lets old records remain auditable
-without allowing them to keep the application dependent on an outside modeler.
+Strict mode rejects an external-provider SKU rather than falling back. Enable
+the two customer switches only after the real image-to-rigged/animated-GLB run
+and the paid-order refund/recovery lifecycle pass.

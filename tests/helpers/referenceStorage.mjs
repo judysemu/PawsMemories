@@ -44,6 +44,11 @@ export function createReferenceStorageTestDouble() {
         manifestBuffer,
       );
     },
+    async loadReferenceObject(objectKey) {
+      const stored = objects.get(objectKey);
+      if (!stored) throw new Error(`Test reference object not found: ${objectKey}`);
+      return Buffer.from(stored.body);
+    },
     async cleanupReferenceImage(objectKey) {
       objects.delete(objectKey);
     },

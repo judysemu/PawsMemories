@@ -10,9 +10,9 @@
 
 export interface PetModelGenerationInput {
   frontUrl: string;
-  leftUrl: string;
-  rightUrl: string;
-  rearUrl: string;
+  leftUrl?: string;
+  rightUrl?: string;
+  rearUrl?: string;
   /** Legacy fifth view retained for old manifests; Tripo consumes four views. */
   threeQuarterUrl?: string;
   meshProfile?: MeshProfile;

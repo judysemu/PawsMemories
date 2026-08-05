@@ -114,7 +114,7 @@ import { analyzePetImage, type PetAnalysis } from "./ollama-agent";
 import { getBlenderClient } from "./agent/tools/blender_client";
 import { startTalkingVideo, pollTalkingVideo, fetchMp4AsDataUrl, isHeyGenHandle } from "./heygen";
 import { startImageTo3D, pollImageTo3D, isTripoHandle, startRig, pollTripoTask, isTripoInsufficientCredit, TripoError } from "./tripo";
-import { rejectLegacyExternal3dRoute } from "./server/externalGenerativePolicy";
+import { isInHouseOnly, rejectLegacyExternal3dRoute } from "./server/externalGenerativePolicy";
 import { checkBudget, needsRetargetFallback, type BakeStats } from "./server/rigBudget";
 import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
@@ -4604,7 +4604,7 @@ async function startServer() {
       }
     }
   }
-  if (!isModelBuildV3Enabled() && process.env.PAWS_3D_INHOUSE_ONLY !== "true") {
+  if (!isModelBuildV3Enabled() && !isInHouseOnly()) {
     resumeStalledBuilds();
     setInterval(resumeStalledBuilds, 3 * 60 * 1000);
   }

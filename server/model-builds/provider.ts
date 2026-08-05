@@ -9,9 +9,9 @@ import { startImageTo3D, pollImageTo3D, isTripoHandle, TripoError, type TripoJob
 export interface ModelBuildProviderInput {
   /** Public URLs or data URIs for the approved reference views. */
   frontUrl: string;
-  leftUrl: string;
-  rightUrl: string;
-  rearUrl: string;
+  leftUrl?: string;
+  rightUrl?: string;
+  rearUrl?: string;
   threeQuarterUrl?: string;
   geometry?: {
     faceLimit?: number;
@@ -22,6 +22,8 @@ export interface ModelBuildProviderInput {
     geometryQuality?: "standard" | "detailed";
   };
 }
+
+export type ModelBuildReferenceViewKind = "front" | "left" | "right" | "rear";
 
 export interface ModelBuildProviderResult {
   providerTaskHandle: string;
@@ -92,6 +94,13 @@ function normalizeTripoError(error: unknown, fallbackCode: string): ModelBuildPr
 }
 
 export interface ModelBuildProvider {
+  /** Stable audit identity available before the first paid submission. */
+  readonly providerId?: string;
+  readonly modelId?: string;
+  /** Minimum approved references required by this implementation. */
+  readonly requiredReferenceViewKinds?: readonly ModelBuildReferenceViewKind[];
+  /** Authenticated readiness gate that must pass before customer credits move. */
+  preflightForCharge?(): Promise<void>;
   /** Submit a new generation task using approved reference views. */
   start(input: ModelBuildProviderInput, configHash: string): Promise<ModelBuildProviderResult>;
   /** Poll the task status. */
@@ -163,7 +172,20 @@ async function assertPublicDns(hostname: string): Promise<void> {
 // ─── Tripo Adapter ──────────────────────────────────────────────────────────
 
 export class TripoModelBuildAdapter implements ModelBuildProvider {
+  readonly providerId = "tripo";
+  readonly requiredReferenceViewKinds = ["front", "left", "right", "rear"] as const;
+  get modelId(): string {
+    return process.env.TRIPO_MODEL_VERSION || "default";
+  }
+
   async start(input: ModelBuildProviderInput, _configHash: string): Promise<ModelBuildProviderResult> {
+    if (!input.frontUrl || !input.leftUrl || !input.rightUrl || !input.rearUrl) {
+      throw new ModelBuildProviderError(
+        "Tripo requires approved front, left, right, and rear references",
+        "PROVIDER_REFERENCE_INCOMPLETE",
+        false,
+      );
+    }
     // Tripo's canonical multiview contract is [FRONT, LEFT, BACK, RIGHT].
     const tripoInput: TripoJobInput = {
       imageUrl: input.frontUrl,
@@ -359,6 +381,9 @@ function createMinimalGlb(): Buffer {
 }
 
 export class FakeModelBuildProvider implements ModelBuildProvider {
+  readonly providerId = "fake";
+  readonly modelId = "fake-v1";
+  readonly requiredReferenceViewKinds = ["front", "left", "right", "rear"] as const;
   public startCalls = 0;
   public pollCalls = 0;
   public downloadCalls = 0;

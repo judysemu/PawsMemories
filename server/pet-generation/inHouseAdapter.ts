@@ -20,10 +20,13 @@ import type {
   SubjectProfile,
   TextureQuality,
 } from "./types";
+import { validatePetGlbStage } from "./validation";
 
 function sha256(data: Buffer): string {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
+
+const LOCAL_RIG_CAPABILITY_HANDLE = "local-capability:quadruped";
 
 /**
  * Paid-pet adapter for the in-house generation lane.
@@ -92,9 +95,33 @@ export class InHousePetGenerationAdapter implements PetModelGenerationProvider {
 
   async createRigCheckJob(sourceJobId: string): Promise<GenerationJob> {
     const source = await this.requireRecord(sourceJobId);
-    const finalizer = this.requireFinalizer();
-    await finalizer.startFinalization(source.providerTaskHandle);
-    return this.persistFinalizationJob(source, "rig_check", { capability: "quadruped" });
+    let artifactReference = source.glbUrl;
+    if (!artifactReference) {
+      const poll = await this.provider.poll(source.providerTaskHandle);
+      if (!poll.done) {
+        throw new PetGenerationError("SOURCE_JOB_NOT_COMPLETE", "The base model is not ready for a rig capability check");
+      }
+      if (poll.error) {
+        throw new PetGenerationError(poll.failureCode || "PROVIDER_ERROR", "The base model failed before its rig capability check");
+      }
+      artifactReference = poll.glbUrl;
+    }
+    if (!artifactReference) {
+      throw new PetGenerationError("NO_ARTIFACT", "The base model has no artifact to inspect for rigging");
+    }
+    const bytes = await this.provider.download(artifactReference);
+    const report = validatePetGlbStage(bytes, {
+      stage: "base",
+      meshProfile: "hd",
+      requireTexture: true,
+    });
+    if (!report.operatorReady) {
+      throw new PetGenerationError(
+        "RIG_NOT_SUPPORTED",
+        `The base model did not pass the local rig-capability gates: ${report.reasonCodes.join(", ") || "VALIDATION_BLOCKED"}`,
+      );
+    }
+    return this.persistCapabilityJob(source);
   }
 
   async createRigJob(sourceJobId: string, subjectProfile: SubjectProfile): Promise<GenerationJob> {
@@ -110,6 +137,13 @@ export class InHousePetGenerationAdapter implements PetModelGenerationProvider {
   async getJob(jobId: string): Promise<GenerationJob> {
     const record = await this.requireRecord(jobId);
     if (record.cancelled) return { id: jobId, status: "cancelled", reason: "CANCELLED_BY_CALLER" };
+    if (record.stage === "rig_check" && record.providerTaskHandle === LOCAL_RIG_CAPABILITY_HANDLE) {
+      return {
+        id: jobId,
+        status: "completed",
+        capability: { riggable: true, rigType: "quadruped" },
+      };
+    }
     if (record.stage === "rig_check" || record.stage === "rig") {
       const poll = await this.requireFinalizer().pollFinalization(record.providerTaskHandle);
       if (poll.error) return {
@@ -235,6 +269,35 @@ export class InHousePetGenerationAdapter implements PetModelGenerationProvider {
       createdAt: Date.now(),
     });
     return { id: jobId, status: "pending" };
+  }
+
+  private async persistCapabilityJob(
+    source: ProviderJobRecord,
+  ): Promise<GenerationJob> {
+    const jobId = crypto.randomUUID();
+    const configHash = crypto.createHash("sha256").update(JSON.stringify({
+      source: source.configHash,
+      stage: "rig_check",
+      capability: "quadruped",
+    })).digest("hex");
+    await this.store.put({
+      jobId,
+      providerId: source.providerId,
+      providerVersion: this.providerVersion,
+      // Durable local marker: unlike a worker task handle this proves the free
+      // inspection completed without starting Blender finalization.
+      providerTaskHandle: LOCAL_RIG_CAPABILITY_HANDLE,
+      model: source.model,
+      configHash,
+      cancelled: false,
+      stage: "rig_check",
+      createdAt: Date.now(),
+    });
+    return {
+      id: jobId,
+      status: "completed",
+      capability: { riggable: true, rigType: "quadruped" },
+    };
   }
 
   private hashInput(input: PetModelGenerationInput): string {

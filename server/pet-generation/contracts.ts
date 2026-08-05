@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { PET_GLB_STAGE_PRICES, petGlbTotalCost } from "../../src/pricing";
+import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
 import type {
   MeshProfile,
   PetGlbOrderConfiguration,
   PetGlbStageKind,
   SubjectProfile,
 } from "./types";
+import { petGlbProductCapabilities } from "./capabilities";
 
 const httpsUrl = z.string().url().max(4096).refine((value) => {
   try {
@@ -32,11 +33,29 @@ export const CreatePetGlbOrderSchema = z.object({
 
 export const ReferenceManifestSchema = z.object({
   frontUrl: httpsUrl,
-  leftUrl: httpsUrl,
-  rightUrl: httpsUrl,
-  rearUrl: httpsUrl,
+  leftUrl: httpsUrl.optional(),
+  rightUrl: httpsUrl.optional(),
+  rearUrl: httpsUrl.optional(),
   threeQuarterUrl: httpsUrl.optional(),
-}).strict();
+}).strict().superRefine((manifest, context) => {
+  const required = petGlbProductCapabilities().reference.requiredViewKinds;
+  const fieldByKind = {
+    front: "frontUrl",
+    left: "leftUrl",
+    right: "rightUrl",
+    rear: "rearUrl",
+  } as const;
+  for (const kind of required) {
+    const field = fieldByKind[kind];
+    if (!manifest[field]) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `The selected provider requires an approved ${kind} reference.`,
+      });
+    }
+  }
+});
 
 export const ReferenceSubmissionSchema = z.object({
   references: ReferenceManifestSchema,
@@ -122,19 +141,31 @@ export function rigTypeForSubject(subject: SubjectProfile): "quadruped" | "biped
   return subject === "humanoid" ? "biped" : "quadruped";
 }
 
-export function stagePrice(stage: PetGlbStageKind): number {
+export function stagePrice(
+  stage: PetGlbStageKind,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
   if (stage === "base") return PET_GLB_STAGE_PRICES.BASE;
-  if (stage === "texture") return PET_GLB_STAGE_PRICES.TEXTURE;
+  if (stage === "texture") return petGlbProductCapabilities(env).texture.priceCredits;
   if (stage === "rig") return PET_GLB_STAGE_PRICES.RIG;
   return 0;
 }
 
-export function productQuote(config: PetGlbOrderConfiguration) {
+export function productQuote(
+  config: PetGlbOrderConfiguration,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const texture = petGlbProductCapabilities(env).texture;
+  const texturePrice = config.includeTexture && texture.separateStageAvailable
+    ? texture.priceCredits
+    : 0;
   return {
     base: PET_GLB_STAGE_PRICES.BASE,
-    texture: config.includeTexture ? PET_GLB_STAGE_PRICES.TEXTURE : 0,
+    texture: texturePrice,
     rig: config.includeRig ? PET_GLB_STAGE_PRICES.RIG : 0,
-    total: petGlbTotalCost({ texture: config.includeTexture, rig: config.includeRig }),
+    total: PET_GLB_STAGE_PRICES.BASE
+      + texturePrice
+      + (config.includeRig ? PET_GLB_STAGE_PRICES.RIG : 0),
   };
 }
 

@@ -15,6 +15,18 @@ const MYSQL_PASSWORD = process.env.MYSQL_TEST_PASSWORD || "";
 const TEST_DB = "paws_phase3_service_test_db";
 const FAST_DURABILITY_RUNTIME = { sleep: async () => {}, random: () => 0 };
 
+class FrontOnlyFakeModelBuildProvider extends FakeModelBuildProvider {
+  providerId = "trellis2";
+  modelId = "test-trellis2";
+  requiredReferenceViewKinds = ["front"];
+}
+
+class NotReadyFakeModelBuildProvider extends FakeModelBuildProvider {
+  async preflightForCharge() {
+    throw new Error("worker unavailable");
+  }
+}
+
 async function isMysqlServerReachable() {
   try {
     const connection = await mysql.createConnection({
@@ -111,7 +123,7 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
     await adminConn.end();
   });
 
-  async function createApprovedReferenceSession(ownerPhone) {
+  async function createApprovedReferenceSession(ownerPhone, { frontOnly = false } = {}) {
     const conn = await pool.getConnection();
     try {
       // 1. Ensure user exists with credits
@@ -133,14 +145,14 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
       // 3. Create approved attempt
       const [attRes] = await conn.query(
         `INSERT INTO reference_attempts (session_id, attempt_number, idempotency_key, provider, model, prompt_config_hash, state)
-         VALUES (?, 1, UUID(), 'gemini', 'm1', REPEAT('b', 64), 'ready')`,
-        [sRes.insertId],
+         VALUES (?, 1, UUID(), ?, 'm1', REPEAT('b', 64), 'ready')`,
+        [sRes.insertId, frontOnly ? "uploaded_front" : "gemini"],
       );
 
       await conn.query("UPDATE reference_sessions SET approved_attempt_id = ? WHERE id = ?", [attRes.insertId, sRes.insertId]);
 
-      // 4. Create 5 reference views
-      const kinds = ["front", "left", "right", "rear", "front_three_quarter"];
+      // 4. Create the canonical provider view set (plus legacy advisory view).
+      const kinds = frontOnly ? ["front"] : ["front", "left", "right", "rear", "front_three_quarter"];
       const manifestItems = [];
       for (const kind of kinds) {
         const [vAsset] = await conn.query(
@@ -178,7 +190,11 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
         [attRes.insertId, rAsset.insertId, rVer.insertId, reportHash],
       );
 
-      const manifestHash = computeOrderedManifestHash(manifestItems, reportHash);
+      const manifestHash = computeOrderedManifestHash(
+        manifestItems,
+        reportHash,
+        frontOnly ? ["front"] : undefined,
+      );
       const [mAsset] = await conn.query(
         "INSERT INTO assets (asset_uuid, owner_id, asset_type) VALUES (UUID(), ?, 'provider_manifest')",
         [ownerPhone],
@@ -214,6 +230,20 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
     assert.equal(quote.preflightErrors.length, 0);
   });
 
+  it("should accept a truthful front-only manifest for a front-only in-house provider", async () => {
+    const owner = "+15553011";
+    const { sessionUuid } = await createApprovedReferenceSession(owner, { frontOnly: true });
+    const frontOnlyService = new ModelBuildService(
+      new FrontOnlyFakeModelBuildProvider(),
+      () => pool,
+      FAST_DURABILITY_RUNTIME,
+    );
+
+    const quote = await frontOnlyService.getQuote(owner, sessionUuid);
+    assert.equal(quote.preflightPassed, true);
+    assert.deepEqual(quote.preflightErrors, []);
+  });
+
   it("should fail preflight for non-existent reference session", async () => {
     const owner = "+15553002";
     const quote = await service.getQuote(owner, "00000000-0000-0000-0000-000000000000");
@@ -243,6 +273,33 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
       (error) => error.code === "PREFLIGHT_FAILED",
     );
     assert.equal(fakeProvider.startCalls, 0);
+  });
+
+  it("should not create a job or debit credits when provider readiness fails", async () => {
+    const owner = "+15553012";
+    const { sessionUuid } = await createApprovedReferenceSession(owner);
+    const notReadyProvider = new NotReadyFakeModelBuildProvider();
+    const notReadyService = new ModelBuildService(
+      notReadyProvider,
+      () => pool,
+      FAST_DURABILITY_RUNTIME,
+    );
+
+    await assert.rejects(
+      notReadyService.startBuild(owner, {
+        referenceSessionUuid: sessionUuid,
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
+      }),
+      (error) => error.code === "PREFLIGHT_FAILED",
+    );
+
+    const [userRows] = await pool.query("SELECT credits FROM users WHERE phone = ?", [owner]);
+    const [jobs] = await pool.query("SELECT id FROM model_build_jobs WHERE owner_id = ?", [owner]);
+    const [events] = await pool.query("SELECT id FROM model_build_credit_events WHERE owner_id = ?", [owner]);
+    assert.equal(userRows[0].credits, 100);
+    assert.equal(jobs.length, 0);
+    assert.equal(events.length, 0);
+    assert.equal(notReadyProvider.startCalls, 0);
   });
 
   it("should execute full build pipeline: start -> background process -> ready -> accept", async () => {

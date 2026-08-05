@@ -1,12 +1,7 @@
 services:
   trellis-model-init:
     profiles: ["model-download"]
-    build:
-      context: ../../../trellis-worker
-      args:
-        TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
-        TORCH_CUDA_ARCH_LIST: "8.0;8.6;9.0"
-    image: paws-trellis2:75fbf018
+    image: ${TRELLIS_WORKER_IMAGE:-paws-trellis2:75fbf018-b74ca0c}
     user: "10001:10001"
     env_file:
       - /opt/paws-gpu/secrets/model-download.env
@@ -21,8 +16,7 @@ services:
       - -c
       - |
         hf_download() {
-          /opt/conda/bin/conda run --no-capture-output -n trellis2 \
-            huggingface-cli download "$@"
+          /opt/conda/bin/hf download "$@"
         }
         hf_download microsoft/TRELLIS.2-4B \
           --revision af44b45f2e35a493886929c6d786e563ec68364d \
@@ -47,12 +41,7 @@ services:
         mv "$${patched_pipeline}" /models/TRELLIS.2-4B/pipeline.json
 
   trellis-api:
-    build:
-      context: ../../../trellis-worker
-      args:
-        TRELLIS2_COMMIT: 75fbf0183001ed9876c8dbb35de6b68552ee08bd
-        TORCH_CUDA_ARCH_LIST: "8.0;8.6;9.0"
-    image: paws-trellis2:75fbf018
+    image: ${TRELLIS_WORKER_IMAGE:-paws-trellis2:75fbf018-b74ca0c}
     restart: unless-stopped
     env_file:
       - /opt/paws-gpu/secrets/trellis.env
@@ -67,8 +56,11 @@ services:
       TRELLIS_PRELOAD: "true"
       BLENDER_WORKER_URL: http://blender-worker:10000
       BLENDER_INTERNAL_HOSTS: blender-worker
+    depends_on:
+      blender-worker:
+        condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${GPU_PRIVATE_IP:-10.43.2.10}:8000:8000"
     volumes:
       - /opt/paws-gpu/models:/models:ro
       - /opt/paws-gpu/jobs:/jobs
@@ -80,16 +72,27 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      test:
+        - CMD
+        - /opt/conda/bin/python
+        - -c
+        - |
+          import json, os, urllib.request
+          request = urllib.request.Request(
+              "http://127.0.0.1:8000/readyz",
+              headers={"X-Worker-Secret": os.environ["WORKER_SHARED_SECRET"]},
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              body = json.load(response)
+          if body.get("status") != "ready" or body.get("cuda") is not True or body.get("modelLoaded") is not True:
+              raise SystemExit(1)
       interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 120s
+      timeout: 15s
+      retries: 10
+      start_period: 15m
 
   blender-worker:
-    build:
-      context: ../../../blender-worker
-    image: paws-blender-worker:5.1.2
+    image: ${BLENDER_WORKER_IMAGE:-paws-blender-worker:5.1.2}
     restart: unless-stopped
     env_file:
       - /opt/paws-gpu/secrets/blender.env
@@ -98,14 +101,24 @@ services:
       IFC_MAX_CONCURRENT: "1"
       RIG_PIPELINE_SHARED_ARTIFACTS_DIR: /shared-model-artifacts
     ports:
-      - "10000:10000"
+      - "${GPU_PRIVATE_IP:-10.43.2.10}:10000:10000"
     volumes:
       - /opt/paws-gpu/blender-checkpoints:/tmp/blender_checkpoints
       - /opt/paws-gpu/blender-viewports:/tmp/blender_viewports
       - /opt/paws-gpu/jobs:/shared-model-artifacts:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10000/health"]
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          fetch("http://127.0.0.1:10000/health")
+            .then(async (response) => {
+              const body = await response.json();
+              process.exit(response.ok && body.status === "ok" && body.bridge === "connected" ? 0 : 1);
+            })
+            .catch(() => process.exit(1));
       interval: 30s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 10
       start_period: 90s

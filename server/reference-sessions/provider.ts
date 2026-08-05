@@ -6,6 +6,7 @@ import {
 } from "../../tripo";
 import type { GeneratedViewPayload, ProviderGenerationResult, ViewKind } from "./types";
 import { ORDERED_VIEW_KINDS } from "./types";
+import { isInHouseOnly } from "../externalGenerativePolicy";
 
 export const MIN_REFERENCE_DIMENSION_PX = 256;
 export const CANONICAL_REFERENCE_DIMENSION_PX = 1024;
@@ -24,6 +25,10 @@ export interface ReferenceGenerationInput {
 export interface ReferenceImageProvider {
   readonly name: string;
   readonly model: string;
+  /** Exact canonical view set this provider promises for every successful attempt. */
+  readonly outputViewKinds: readonly ViewKind[];
+  /** Optional upper bound used before source photos are combined or submitted. */
+  readonly maxSourceImages?: number;
   generateMultiview(
     input: ReferenceGenerationInput,
     inputMode: "text" | "photo",
@@ -54,6 +59,7 @@ export async function inspectReferenceImage(
 export class FakeReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "fake_tripo";
   readonly model = "fake-reference-provider-v1";
+  readonly outputViewKinds = ORDERED_VIEW_KINDS;
   calls = 0;
 
   async generateMultiview(
@@ -100,10 +106,43 @@ async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPa
   };
 }
 
+/**
+ * Internal reference preparation for single-image TRELLIS builds.
+ *
+ * The customer's upload is decoded, orientation-corrected, padded, and encoded
+ * as one immutable front reference. No side/rear views are inferred or copied,
+ * so the resulting manifest remains truthful about the evidence supplied.
+ */
+export class UploadedFrontReferenceImageProvider implements ReferenceImageProvider {
+  readonly name = "uploaded_front";
+  readonly model = "canonical-front-v1";
+  readonly outputViewKinds = ["front"] as const;
+  readonly maxSourceImages = 1;
+
+  async generateMultiview(
+    input: ReferenceGenerationInput,
+    inputMode: "text" | "photo",
+  ): Promise<ProviderGenerationResult> {
+    if (inputMode !== "photo") {
+      throw new Error("The internal reference path requires one uploaded front photo.");
+    }
+    if (!input.photoBuffer || !input.photoMimeType) {
+      throw new Error("A source front photo is required.");
+    }
+    await inspectReferenceImage(input.photoBuffer, input.photoMimeType);
+    return {
+      provider: this.name,
+      model: this.model,
+      views: [await canonicalFrontImage(input.photoBuffer)],
+    };
+  }
+}
+
 /** Production reference provider: one uploaded image -> Tripo left/back/right views. */
 export class TripoReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "tripo";
   readonly model = "generate-multiview-image-v2";
+  readonly outputViewKinds = ORDERED_VIEW_KINDS;
 
   async generateMultiview(
     input: ReferenceGenerationInput,
@@ -148,4 +187,61 @@ export class TripoReferenceImageProvider implements ReferenceImageProvider {
     }
     throw new Error("Tripo is still preparing the reference views. Please try again shortly.");
   }
+}
+
+export type ReferenceImageProviderFactory = () => ReferenceImageProvider;
+
+export class ReferenceProviderConfigurationError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = "ReferenceProviderConfigurationError";
+  }
+}
+
+function configuredExternalReferenceProviders(env: NodeJS.ProcessEnv): Set<string> {
+  return new Set([
+    "tripo",
+    ...String(env.PAWS_REFERENCE_EXTERNAL_PROVIDER_IDS || "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  ]);
+}
+
+/** Select a reference-preparation implementation without constructing it. */
+export function selectedReferenceImageProvider(env: NodeJS.ProcessEnv = process.env): string {
+  const strictInHouse = isInHouseOnly(env);
+  const fallback = strictInHouse ? "uploaded_front" : "tripo";
+  const selected = String(env.PAWS_REFERENCE_PROVIDER || fallback).trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{1,39}$/.test(selected)) {
+    throw new ReferenceProviderConfigurationError(
+      "Configured reference provider id is invalid",
+      "REFERENCE_PROVIDER_CONFIG_INVALID",
+    );
+  }
+  if (strictInHouse && configuredExternalReferenceProviders(env).has(selected)) {
+    throw new ReferenceProviderConfigurationError(
+      "In-house-only mode rejects the selected external reference provider",
+      "INHOUSE_REFERENCE_PROVIDER_REQUIRED",
+    );
+  }
+  return selected;
+}
+
+export function createConfiguredReferenceImageProvider(
+  env: NodeJS.ProcessEnv = process.env,
+  factories: ReadonlyMap<string, ReferenceImageProviderFactory> = new Map<string, ReferenceImageProviderFactory>([
+    ["uploaded_front", () => new UploadedFrontReferenceImageProvider()],
+    ["tripo", () => new TripoReferenceImageProvider()],
+  ]),
+): ReferenceImageProvider {
+  const selected = selectedReferenceImageProvider(env);
+  const factory = factories.get(selected);
+  if (!factory) {
+    throw new ReferenceProviderConfigurationError(
+      "Configured reference provider is unavailable",
+      "REFERENCE_PROVIDER_CONFIG_UNAVAILABLE",
+    );
+  }
+  return factory();
 }

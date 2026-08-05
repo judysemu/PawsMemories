@@ -13,6 +13,7 @@ import {
 } from "../reference-sessions/repository";
 import type { PetModelGenerationInput } from "./types";
 import { privateReferenceObjectKey } from "../assets/privateObjectReference";
+import { petGlbProductCapabilities } from "./capabilities";
 
 /**
  * Concrete wiring of PetGlbService against this repo's real subsystems:
@@ -99,9 +100,13 @@ export async function buildPetGlbDeps(
         signed[field] = await generateSignedUrlForVersion(asset, version, ownerPhone, false, ttlSeconds);
         durable[field] = `asset://${asset.asset_uuid}/versions/${version.version_number}`;
       }
-      const required: ReferenceUrlField[] = ["frontUrl", "leftUrl", "rightUrl", "rearUrl"];
+      const required = petGlbProductCapabilities().reference.requiredViewKinds
+        .map((kind) => fieldByKind[kind]);
       if (required.some((field) => typeof signed[field] !== "string" || typeof durable[field] !== "string")) {
-        throw new PetGenerationError("REFERENCES_MISSING", "Reference session does not contain front, left, right, and rear views");
+        throw new PetGenerationError(
+          "REFERENCES_MISSING",
+          `Reference session does not contain the selected provider's required views: ${required.join(", ")}`,
+        );
       }
       return {
         sessionId: session.id,
@@ -114,7 +119,13 @@ export async function buildPetGlbDeps(
 
     async refreshLegacyReferenceManifest(manifest, ownerPhone, ttlSeconds) {
       type ReferenceUrlField = "frontUrl" | "leftUrl" | "rightUrl" | "rearUrl" | "threeQuarterUrl";
-      const fields: ReferenceUrlField[] = ["frontUrl", "leftUrl", "rightUrl", "rearUrl"];
+      const fields: ReferenceUrlField[] = petGlbProductCapabilities().reference.requiredViewKinds
+        .map((kind) => ({
+          front: "frontUrl",
+          left: "leftUrl",
+          right: "rightUrl",
+          rear: "rearUrl",
+        } as const)[kind]);
       const refreshed: Partial<Record<ReferenceUrlField, string>> = {};
       const pool = getPool();
       for (const field of fields) {

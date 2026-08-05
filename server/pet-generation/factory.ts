@@ -10,6 +10,7 @@ import {
   InMemoryJobStore,
   PetGenerationError,
 } from "./provider";
+import { isInHouseOnly } from "../externalGenerativePolicy";
 
 let defaultsRegistered = false;
 
@@ -43,13 +44,15 @@ export function createProviderForSku(
 
   // Fail closed BEFORE any override is considered.
   const binding = registry.resolve(sku);
-  const externalProviders = new Set(
-    String(process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS || "tripo")
+  const externalProviders = new Set([
+    "tripo",
+    ...String(process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS || "")
       .split(",")
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),
-  );
-  if (process.env.PAWS_3D_INHOUSE_ONLY === "true" && externalProviders.has(binding.providerId.toLowerCase())) {
+  ]);
+  if (isInHouseOnly()
+    && externalProviders.has(binding.providerId.toLowerCase())) {
     throw new PetGenerationError(
       "INHOUSE_PROVIDER_REQUIRED",
       `In-house-only mode rejects providerId '${binding.providerId}' for SKU ${sku}`,
