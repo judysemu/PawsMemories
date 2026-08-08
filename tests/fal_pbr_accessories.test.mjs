@@ -88,15 +88,13 @@ test("fal PBR input is deterministic, bounded, and always requests the web PBR m
 });
 
 test("fal PBR generation fails closed when the server key is absent", async () => {
-  const queue = makeQueue([]);
   await assert.rejects(
     generateFalPbrMaterial(
       { prompt: "woven navy cotton with a subtle durable diagonal texture", seed: 7 },
-      { apiKey: "", queue, fetchImpl: async () => new Response() },
+      { apiKey: "", fetchImpl: async () => new Response() },
     ),
     (error) => error instanceof FalPbrError && error.code === "FAL_PBR_NOT_CONFIGURED",
   );
-  assert.equal(queue.calls.length, 0);
 });
 
 test("fal PBR generation validates, downloads, and hashes exactly four trusted maps", async () => {

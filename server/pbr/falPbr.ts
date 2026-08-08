@@ -15,6 +15,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_DIMENSION = 1024;
 const TRUSTED_OUTPUT_SUFFIX = ".fal.media";
+const TRUSTED_OUTPUT_SUFFIX_AZURE = ".azurecontainerapps.io";
 
 const InputSchema = z.object({
   prompt: z.string().trim().min(24).max(600),
@@ -125,7 +126,7 @@ function validateOutputUrl(rawUrl: string): URL {
     throw new FalPbrError("PBR provider returned an invalid output URL", "FAL_PBR_OUTPUT_INVALID");
   }
   const host = parsed.hostname.toLowerCase();
-  if (parsed.protocol !== "https:" || (host !== "fal.media" && !host.endsWith(TRUSTED_OUTPUT_SUFFIX))) {
+  if (parsed.protocol !== "https:" || (host !== "fal.media" && !host.endsWith(TRUSTED_OUTPUT_SUFFIX) && !host.endsWith(TRUSTED_OUTPUT_SUFFIX_AZURE))) {
     throw new FalPbrError("PBR provider returned an untrusted output URL", "FAL_PBR_OUTPUT_INVALID");
   }
   if (parsed.username || parsed.password || parsed.port) {
@@ -263,17 +264,23 @@ export async function generateFalPbrMaterial(
 ): Promise<GeneratedFalPbrMaterial> {
   assertExternalGenerativeProviderAllowed("fal");
   const normalized = normalizeFalPbrInput(input);
-  const apiKey = String(options.apiKey ?? process.env.FAL_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new FalPbrError("FAL_KEY is not configured", "FAL_PBR_NOT_CONFIGURED");
-  }
 
-  const queue = options.queue || await createOfficialQueue(apiKey);
+  let resolvedQueue: FalPbrQueue;
+  if (options.queue) {
+    // Pre-built queue (e.g. Azure Container Apps adapter) — no FAL_KEY needed.
+    resolvedQueue = options.queue;
+  } else {
+    const apiKey = String(options.apiKey ?? process.env.FAL_KEY ?? "").trim();
+    if (!apiKey) {
+      throw new FalPbrError("FAL_KEY is not configured", "FAL_PBR_NOT_CONFIGURED");
+    }
+    resolvedQueue = await createOfficialQueue(apiKey);
+  }
   let submitted: { request_id?: unknown };
   try {
     // Do not auto-retry submit: a transport failure may still have accepted a
     // paid request. The authoring operator must reconcile it explicitly.
-    submitted = await queue.submit(FAL_PBR_ENDPOINT, { input: normalized });
+    submitted = await resolvedQueue.submit(FAL_PBR_ENDPOINT, { input: normalized });
   } catch {
     throw new FalPbrError("PBR request submission failed", "FAL_PBR_SUBMISSION_FAILED");
   }
@@ -285,14 +292,14 @@ export async function generateFalPbrMaterial(
   while (Date.now() <= deadline) {
     let status;
     try {
-      status = await queue.status(FAL_PBR_ENDPOINT, { requestId, logs: false });
+      status = await resolvedQueue.status(FAL_PBR_ENDPOINT, { requestId, logs: false });
     } catch {
       throw new FalPbrError("PBR request status failed", "FAL_PBR_PROVIDER_FAILED");
     }
     const state = String(status?.status || "").toUpperCase();
     if (state === "COMPLETED") {
       try {
-        rawResult = (await queue.result(FAL_PBR_ENDPOINT, { requestId })).data;
+        rawResult = (await resolvedQueue.result(FAL_PBR_ENDPOINT, { requestId })).data;
       } catch {
         throw new FalPbrError("PBR request result failed", "FAL_PBR_PROVIDER_FAILED");
       }

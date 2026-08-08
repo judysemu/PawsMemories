@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { createAzurePbrQueue } from "../server/pbr/azurePbrQueue";
+
 import {
   FAL_PBR_ENDPOINT,
   FAL_PBR_MAP_KINDS,
@@ -143,7 +145,21 @@ async function main(): Promise<void> {
   if (process.env.FAL_PBR_AUTHORING_ENABLED !== "1") {
     fail("Paid PBR authoring is disabled. Set FAL_PBR_AUTHORING_ENABLED=1 for an explicit authoring run.");
   }
-  if (!String(process.env.FAL_KEY || "").trim()) fail("FAL_KEY is required for PBR authoring");
+
+  // Build the queue adapter: Azure Container Apps or fal.ai
+  const azureUrl = String(process.env.AZURE_PBR_WORKER_URL || "").trim();
+  const azureSecret = String(process.env.AZURE_PBR_WORKER_SECRET || "").trim();
+  let queue: ReturnType<typeof createAzurePbrQueue> | undefined;
+
+  if (azureUrl) {
+    if (!azureSecret) fail("AZURE_PBR_WORKER_SECRET is required when AZURE_PBR_WORKER_URL is set");
+    queue = createAzurePbrQueue(azureUrl, azureSecret);
+    process.stdout.write(`Using Azure PBR worker at ${azureUrl}\n`);
+  } else {
+    if (!String(process.env.FAL_KEY || "").trim()) fail("FAL_KEY or AZURE_PBR_WORKER_URL is required for PBR authoring");
+    process.stdout.write("Using fal.ai PBR provider\n");
+  }
+
   const { ids, force } = parseArguments(process.argv.slice(2));
   await fs.mkdir(MATERIALS_ROOT, { recursive: true });
   const manifest = await readManifest();
@@ -160,8 +176,12 @@ async function main(): Promise<void> {
       fail(`${id}: existing material differs or is incomplete; inspect it, then pass --force to replace it`);
     }
 
-    process.stdout.write(`${id}: submitting one paid fal.ai PBR authoring request\n`);
-    const generated = await generateFalPbrMaterial({ prompt: profile.prompt, seed: profile.seed });
+    const providerLabel = azureUrl ? "Azure PBR worker" : "fal.ai";
+    process.stdout.write(`${id}: submitting one paid ${providerLabel} PBR authoring request\n`);
+    const generated = await generateFalPbrMaterial(
+      { prompt: profile.prompt, seed: profile.seed },
+      { ...(queue ? { queue } : {}) },
+    );
     manifest.materials[id] = await installMaterial(profile, generated, expectedHash);
     manifest.generatedAt = new Date().toISOString();
     await writeManifest(manifest);
