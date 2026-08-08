@@ -1,5 +1,501 @@
 {
   "schemaVersion": 1,
-  "generatedAt": null,
-  "materials": {}
+  "generatedAt": "2026-08-08T21:33:28.216Z",
+  "materials": {
+    "scarlet-leather": {
+      "materialId": "scarlet-leather",
+      "configHash": "a128f91db7e9d77385c063ffe4a213a45b2445b4c76c82ecb89e7d1da10a77e4",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1729,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/scarlet-leather/basecolor.png",
+          "sha256": "426ac313a05c00f4226f3b9bb33465f0c3511159e3f671209bc3a9078861e2cd",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/scarlet-leather/normal.png",
+          "sha256": "e2da006a63f85d22d60839086d688d69026bfbc2cd8c264088d295bfdd52925a",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/scarlet-leather/roughness.png",
+          "sha256": "95cb0bc990169944ca5804a7d8eb8396dc0363f08a04be1159d92efe275a1e96",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/scarlet-leather/metalness.png",
+          "sha256": "00f92828588e40ff44b934a83007c6d592f27f3d4195617f150b74bc4aeebb16",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "forest-leather": {
+      "materialId": "forest-leather",
+      "configHash": "da3dbf7cf3ec380917dda467955f4b08ee9c4c5bcc097dea4829870c5e17c80c",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1733,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/forest-leather/basecolor.png",
+          "sha256": "b9ba9d3e883b2e6257bc462221cfc0e96aa7e91d8b321ac48f42cb7dd9ee201b",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/forest-leather/normal.png",
+          "sha256": "b4c7146d1e8c01ccb73770f3c95fb65deb90a6f95213d5db133d5f2422dea641",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/forest-leather/roughness.png",
+          "sha256": "2eaf0540caf1ec7eb8fc2fe9cc9fb5bf82bfbc6f3a99aca0c8fcbef2a44b9b63",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/forest-leather/metalness.png",
+          "sha256": "31ec66b9f102f855e4923426ffdbd94271e39877aa237d5ba719545469f47e24",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "navy-textile": {
+      "materialId": "navy-textile",
+      "configHash": "4ba473826a19b0f0571cdd6f5ae23f27b7b615f748031423471492a0c37f2117",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1741,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/navy-textile/basecolor.png",
+          "sha256": "e1c50198f942dda12865eaf849692f42d1784d1bf917d899ff95b8d4f1795887",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/navy-textile/normal.png",
+          "sha256": "34abfc14e33bf33d1c402913664144c6d2a49cdc86e1c294ef3c7156d808af0e",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/navy-textile/roughness.png",
+          "sha256": "2eaf0540caf1ec7eb8fc2fe9cc9fb5bf82bfbc6f3a99aca0c8fcbef2a44b9b63",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/navy-textile/metalness.png",
+          "sha256": "15fbbf1a1271c402dda60cfd709b3a6918828c9d0acbcf754e7369f7ab59dae0",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "ranger-canvas": {
+      "materialId": "ranger-canvas",
+      "configHash": "e884a54017af14edca9860962a613ef2309448a2e45f33f543f26c7aaed72276",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1747,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/ranger-canvas/basecolor.png",
+          "sha256": "644feba10886ebffff4a561e83219993794801eca7cb53fe3064bd6a5c71ee42",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/ranger-canvas/normal.png",
+          "sha256": "069b3f21d929830881b30aeb3168f16d5ca9162d16fb95d552cdb27d02ba3330",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/ranger-canvas/roughness.png",
+          "sha256": "7a0f5e54c6a78c356ef5b03def979ca4f4a84080c51ace5c6857ae72981d3d4f",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/ranger-canvas/metalness.png",
+          "sha256": "f9d79320ce9c930c45e8e300f1790585e98d810b615a4a68a4baa523c6b9efd9",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "royal-velvet": {
+      "materialId": "royal-velvet",
+      "configHash": "1da09cbac24ac2c9551af2e3983f580ebe3785a80a16aea263cffab261681e29",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1753,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/royal-velvet/basecolor.png",
+          "sha256": "a1d3b4f3ba48c21ff5346cfaf92c2d021b586c776e71b96a3f321f3ca5320175",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/royal-velvet/normal.png",
+          "sha256": "90c9ae2301b07bd00e807edab035d8137002dcae17503d346272008b85260995",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/royal-velvet/roughness.png",
+          "sha256": "e5c514743e8635e69baa51ccabc73078e19258e99ea37c76e008dc2432c21693",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/royal-velvet/metalness.png",
+          "sha256": "0f38ac1da4c9542d903a8973f9931cec5ccfd221bbbc56483428fc9e7e877bbd",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "bright-felt": {
+      "materialId": "bright-felt",
+      "configHash": "c8f00f1674a67b46a58e7919b34bbf54ef7792e2b66ca31efd1f0d48ee6991c5",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1759,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/bright-felt/basecolor.png",
+          "sha256": "4696f197b985470a4624d0deb7df3b7aad554401993caa5b958eec07c9e0db69",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/bright-felt/normal.png",
+          "sha256": "2a18625e7b939faac9eb51e69e37120c6b1c3ce89c1bae4466ea572ad9120a48",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/bright-felt/roughness.png",
+          "sha256": "6ffc69e27a69adf5a8b9e5d3d660a5582a9911e845dd1281331335c953b96315",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/bright-felt/metalness.png",
+          "sha256": "c182e443e63b84471d4bd608abfe695a22aa4a64141ed2e816323b81d73927dc",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "burnished-gold": {
+      "materialId": "burnished-gold",
+      "configHash": "57fc03544e7ac91635363f9a9867573f67244a7322fcee1b46399f9ff43b52b8",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1777,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/burnished-gold/basecolor.png",
+          "sha256": "cf7cdc483587ecd3b835d30d914a441e740dbe56fd9b0a9bad7c70613582398f",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/burnished-gold/normal.png",
+          "sha256": "8245000137d460f1c6ddde60082ed17f8a24b17e1db3f75997a8120d3de5fea0",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/burnished-gold/roughness.png",
+          "sha256": "709b27975e4023a68bf56f4188b5c59b2b9c9dcf987c9ba846c022ab75577f85",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/burnished-gold/metalness.png",
+          "sha256": "88897ed6ead5a7fb8391b4bd07aef5e6750ee6fb4d253b729eb3778233ec2754",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "antique-silver": {
+      "materialId": "antique-silver",
+      "configHash": "487c928c179eb5255f9bf447221121c519113f1a9eb7ed71e3819f2f9becbd8b",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1783,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/antique-silver/basecolor.png",
+          "sha256": "8a782b7ececfc85f1397035dfbf8ef620c9bcd7784efd03901da7da0eadeca86",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/antique-silver/normal.png",
+          "sha256": "70d77123450f82230f172a1ef877e1247e18291286bc3667be8bfa0e4feb0693",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/antique-silver/roughness.png",
+          "sha256": "1cf6149a481bf6d4ebe5663af352cb7fe3594e59404f50e35086d18188f804a2",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/antique-silver/metalness.png",
+          "sha256": "c3a106c380b681208f4561ec65ca706bfe009c9f9abc2f87db920c73fd0adcf3",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "copper-leather": {
+      "materialId": "copper-leather",
+      "configHash": "e866168e6415b9b0f7eaecfefc44b82089ad714dc2f712870f5712f084158c3f",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1787,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/copper-leather/basecolor.png",
+          "sha256": "07ac350a25b425131b4db5cd6f856af06303ce598d0908775f6eaa263915e06b",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/copper-leather/normal.png",
+          "sha256": "660b5226ee3c3d8d92a89097b51c490f2afee03f1050d621cbb6c22f8052736f",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/copper-leather/roughness.png",
+          "sha256": "b03ab377ee6a7a3eb8a27b44003eccc0665d29a2e4ef3834f5848f427ff65c4d",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/copper-leather/metalness.png",
+          "sha256": "bace25e8c036caf321f525a75a7a22b240f91104c686e148603fe9d0ab4bbb3e",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "rose-leather": {
+      "materialId": "rose-leather",
+      "configHash": "c299b41b4c3f5558702d5d0a1c787b6bf70c7a4132db554090452af30382ed5c",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1789,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/rose-leather/basecolor.png",
+          "sha256": "5eb27679b4effd0bf87f07f91f980b631b15de1476330bd6e3046cc1a64fe561",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/rose-leather/normal.png",
+          "sha256": "8df0e35e2d2d8cbebf26964e809e94b96dbecba344cd9001c2b488b21fb7fa39",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/rose-leather/roughness.png",
+          "sha256": "7777304e0166ab775f283ba533e98636b67066cdaac9d8b5081ae7cf4ad7889a",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/rose-leather/metalness.png",
+          "sha256": "6dd99f9387a6beae23939c73b8221c0398deafad4bc671c3bbcc9fb59b8aadd0",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "midnight-leather": {
+      "materialId": "midnight-leather",
+      "configHash": "83bd118ed903b10b249f8837479f727179a7d647159d08a0d54bc1c9bea1c94d",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1801,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/midnight-leather/basecolor.png",
+          "sha256": "1591078fbebe35291900451c2be01a0ad737174624daf3d48c4649b5aed60c3b",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/midnight-leather/normal.png",
+          "sha256": "d49e798f8bf95f7fcbfdc9a83a1a215467a809705eab6e6d059864fc29bbb8c6",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/midnight-leather/roughness.png",
+          "sha256": "7a2fc6f4074328d5f7cc3c24e970a718fa99f80291a1b7fb3a21a8d5c415c722",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/midnight-leather/metalness.png",
+          "sha256": "7ccebf156aa28f2f539ff90e308bcf7308a8f91dcc25b5394377d11f97a7f855",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "optical-enamel": {
+      "materialId": "optical-enamel",
+      "configHash": "f339e66675710fb6ed42b363f6ac352e11653e246ed9ee1bc8f18cefa9400a34",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1811,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/optical-enamel/basecolor.png",
+          "sha256": "7371141a182c237fe8729d2c2c4c9b38d4abdbf725b25b107abfb237a2f40059",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/optical-enamel/normal.png",
+          "sha256": "fd057713feeb1f8efcf6c9d8be999c1f4a19e020c82ee5a4eba720b6e573a419",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/optical-enamel/roughness.png",
+          "sha256": "9bc9e4084e73d6b3fc2a8fdcaa963807d279f91dafd39219c22bc34c87e0c5df",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/optical-enamel/metalness.png",
+          "sha256": "715515e2c9c05c40dc3e98a307e8250c81fe01c097aac53730d49ec9514f8600",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "seasonal-cloth": {
+      "materialId": "seasonal-cloth",
+      "configHash": "f8907626266530de98bc422dbe293052150c4bcb1d7a1d7937f8e9afa3d9a2cb",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1823,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/seasonal-cloth/basecolor.png",
+          "sha256": "1f6c9f120dd0dc62b0b88210e13d23e91a4fd2b58beb76d47109eb7a9f8f91dd",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/seasonal-cloth/normal.png",
+          "sha256": "f40b2bdaa1ebf2dffcfaca32f26da5a5ca65fff571dba42315bd3f51a46dd353",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/seasonal-cloth/roughness.png",
+          "sha256": "b61533581f35af183b33c289677de7ad561ae438f5d44e3b432576d0f1260dcb",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/seasonal-cloth/metalness.png",
+          "sha256": "2af24d0390af59342e2020a01500a0c728511475d65f2f01764f2050b543fa0b",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "frosted-cloth": {
+      "materialId": "frosted-cloth",
+      "configHash": "9c790c2d99eedfc9dfe0a31aa2de36f496cd54a4c2513336b00d1fb765be266f",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1831,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/frosted-cloth/basecolor.png",
+          "sha256": "88c484997fd1bba2a6bcfbc02dd9e140bd32bb256e2e11c91c506af0eb83873d",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/frosted-cloth/normal.png",
+          "sha256": "1cdc1b37ff77af1bb3892852d34dfa2cb68cb3a44aed054901a8d79aab1a6fef",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/frosted-cloth/roughness.png",
+          "sha256": "2eaf0540caf1ec7eb8fc2fe9cc9fb5bf82bfbc6f3a99aca0c8fcbef2a44b9b63",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/frosted-cloth/metalness.png",
+          "sha256": "0d2b0fb9f0f52ea461b10b9278c341475b582f024d8e644f995688ca767e4a9d",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    },
+    "ember-cloth": {
+      "materialId": "ember-cloth",
+      "configHash": "8b97ddfa06af5661ea2d2584142543f8a0f2e530dfad5721f647c82435cc9d59",
+      "provider": "fal-ai",
+      "model": "fal-ai/patina/material",
+      "seed": 1847,
+      "maps": {
+        "basecolor": {
+          "path": "/wardrobe/materials/ember-cloth/basecolor.png",
+          "sha256": "c25dbfbb0c073bcd9d3d64f6ad334c3b16c58a8e0ef8fa1af984c82aa09f1393",
+          "width": 1024,
+          "height": 1024
+        },
+        "normal": {
+          "path": "/wardrobe/materials/ember-cloth/normal.png",
+          "sha256": "036d7f83d62aaaa607c457af9e44095ed4bb02003d40da1ad7517ba01f9a5d18",
+          "width": 1024,
+          "height": 1024
+        },
+        "roughness": {
+          "path": "/wardrobe/materials/ember-cloth/roughness.png",
+          "sha256": "2eaf0540caf1ec7eb8fc2fe9cc9fb5bf82bfbc6f3a99aca0c8fcbef2a44b9b63",
+          "width": 1024,
+          "height": 1024
+        },
+        "metalness": {
+          "path": "/wardrobe/materials/ember-cloth/metalness.png",
+          "sha256": "2c43ce72c80b7bd43ebc8da5149dbfae3f0982787a06fb28a47040babe5db744",
+          "width": 1024,
+          "height": 1024
+        }
+      }
+    }
+  }
 }
