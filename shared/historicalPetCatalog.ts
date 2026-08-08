@@ -99,6 +99,8 @@ export const FAMOUS_PORTRAIT_CATEGORIES = [
   "sports-legends",
   "myth-holiday",
   "arts-adventure",
+  "halloween",
+  "landmarks",
 ] as const;
 
 const FamousPortraitCategorySchema = z.enum(FAMOUS_PORTRAIT_CATEGORIES);
@@ -286,6 +288,52 @@ const artsAdventure: FamousPortraitRecord[] = [
   altText: `A pet portrayed as ${fictionalRole.toLowerCase()} in a ${stylePeriod.toLowerCase()} setting.`,
 }));
 
+const halloweenPets: FamousPortraitRecord[] = [
+  ["ghost-pet", "Ghost Pet", "A spooky yet adorable pet ghost", "haunted house"],
+  ["zombie-pet", "Zombie Pet", "A slightly decayed but friendly zombie pet", "graveyard at midnight"],
+  ["ghoul-pet", "Ghoul Pet", "A glowing-eyed pet ghoul", "misty crypt"],
+  ["pumpkin-pet", "Pumpkin Pet", "A pet disguised as a jack-o-lantern", "pumpkin patch"],
+  ["costume-pet", "Costumed Pet", "A pet in a silly animal costume", "halloween party"],
+  ["vampire-pet", "Vampire Pet", "A sophisticated pet vampire with a cape", "gothic castle"],
+  ["witch-pet", "Witch Pet", "A pet witch with a pointed hat and broom", "witches coven"],
+  ["mummy-pet", "Mummy Pet", "A pet wrapped in ancient bandages", "egyptian tomb"],
+].map(([id, displayName, fictionalRole, stylePeriod]) => plannedPortrait({
+  id, displayName, category: "halloween", fictionalRole, stylePeriod, species: "either",
+  altText: `A pet portrayed as ${fictionalRole.toLowerCase()} in a ${stylePeriod.toLowerCase()} setting.`,
+}));
+
+const landmarks: FamousPortraitRecord[] = [
+  ["eiffel-tower", "Eiffel Tower", "A pair posing in front of the Eiffel Tower", "Parisian day"],
+  ["great-wall", "Great Wall of China", "A pair standing on the Great Wall", "ancient China"],
+  ["taj-mahal", "Taj Mahal", "A pair visiting the Taj Mahal", "sunlit India"],
+  ["colosseum", "Colosseum", "A pair exploring the Colosseum", "historic Rome"],
+  ["statue-of-liberty", "Statue of Liberty", "A pair visiting the Statue of Liberty", "New York harbor"],
+  ["machu-picchu", "Machu Picchu", "A pair overlooking Machu Picchu", "Andes mountains"],
+  ["pyramids", "Pyramids of Giza", "A pair standing before the Pyramids", "Egyptian desert"],
+  ["mount-fuji", "Mount Fuji", "A pair viewing Mount Fuji", "cherry blossom season"],
+  ["stonehenge", "Stonehenge", "A pair visiting Stonehenge", "mystical England"],
+  ["sydney-opera", "Sydney Opera House", "A pair by the Sydney Opera House", "Sydney harbor"],
+].map(([id, displayName, fictionalRole, stylePeriod]) => plannedPortrait({
+  id, displayName, category: "landmarks", fictionalRole, stylePeriod, species: "either",
+  altText: `An owner and pet portrayed ${fictionalRole.toLowerCase()} in a ${stylePeriod.toLowerCase()} setting.`,
+}));
+
+const halloweenDuos: FamousPortraitRecord[] = [
+  ["duo-ghosts", "Duo Ghosts", "An owner and pet as spooky ghosts", "haunted house"],
+  ["duo-zombies", "Duo Zombies", "An owner and pet as friendly zombies", "graveyard at midnight"],
+  ["duo-ghouls", "Duo Ghouls", "An owner and pet as glowing-eyed ghouls", "misty crypt"],
+  ["duo-pumpkins", "Duo Pumpkins", "An owner and pet as jack-o-lanterns", "pumpkin patch"],
+  ["duo-costumes", "Duo Costumes", "An owner and pet in matching animal costumes", "halloween party"],
+  ["duo-vampires", "Duo Vampires", "An owner and pet as sophisticated vampires", "gothic castle"],
+  ["duo-witches", "Duo Witches", "An owner and pet as witches with brooms", "witches coven"],
+  ["duo-mummies", "Duo Mummies", "An owner and pet wrapped in ancient bandages", "egyptian tomb"],
+  ["duo-skeletons", "Duo Skeletons", "An owner and pet as dancing skeletons", "halloween night"],
+  ["duo-monsters", "Duo Monsters", "An owner and pet as classic monsters", "mad scientist lab"],
+].map(([id, displayName, fictionalRole, stylePeriod]) => plannedPortrait({
+  id, displayName, category: "halloween", fictionalRole, stylePeriod, species: "either",
+  altText: `An owner and pet portrayed as ${fictionalRole.toLowerCase()} in a ${stylePeriod.toLowerCase()} setting.`,
+}));
+
 export const FAMOUS_PORTRAIT_CATALOG: FamousPortraitRecord[] = FAMOUS_PORTRAIT_CATALOG_SCHEMA.parse([
   ...availableHistoricalPortraits,
   ...historicalWomen,
@@ -293,6 +341,9 @@ export const FAMOUS_PORTRAIT_CATALOG: FamousPortraitRecord[] = FAMOUS_PORTRAIT_C
   ...sports,
   ...mythHoliday,
   ...artsAdventure,
+  ...halloweenPets,
+  ...landmarks,
+  ...halloweenDuos,
 ]);
 
 export const FAMOUS_PORTRAIT_BY_ID = new Map(FAMOUS_PORTRAIT_CATALOG.map((entry) => [entry.id, entry]));

@@ -505,6 +505,32 @@ export async function fetchPawprintPrintOrders(): Promise<PawprintPrintOrder[]> 
   return (await res.json()).orders || [];
 }
 
+export interface CreatePawprintPrintOrderInput {
+  creationId: number;
+  productCode: string;
+  quantity: number;
+  recipient: {
+    name: string;
+    email: string;
+    address1: string;
+    city: string;
+    state_code?: string;
+    country_code: string;
+    zip: string;
+  };
+}
+
+export async function createPawprintPrintOrder(input: CreatePawprintPrintOrderInput, idempotencyKey: string) {
+  const res = await authedFetch("/api/pawprints/printful-order", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "The print order could not be created.");
+  return data;
+}
+
 export async function fetchAlbums(): Promise<Album[]> {
   try {
     const res = await authedFetch("/api/albums");

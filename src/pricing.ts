@@ -1,5 +1,7 @@
 export const CREDIT_PRICES = {
-  PAWPRINT: 75,
+  PAWPRINT: 50,
+  PAWPRINT_OWNER_PET: 70,
+  PAWPRINT_MULTI_PET: 70,
   HD_IMAGE: 10,
   ULTRA_HD_IMAGE: 15,
   FIRST_REGENERATION: 0,
@@ -74,7 +76,9 @@ export interface ServicePrice {
 }
 
 export const SERVICE_PRICES: readonly ServicePrice[] = [
-  { label: "Pawprint", credits: CREDIT_PRICES.PAWPRINT },
+  { label: "Pawprint (Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT },
+  { label: "Pawprint (Owner/Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT_OWNER_PET },
+  { label: "Pawprint (Multi-Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT_MULTI_PET },
   { label: "HD Image Generation", credits: CREDIT_PRICES.HD_IMAGE },
   { label: "Ultra HD Image Generation", credits: CREDIT_PRICES.ULTRA_HD_IMAGE },
   { label: "Image Regeneration", credits: CREDIT_PRICES.FIRST_REGENERATION, detail: "First retry" },

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import PawprintsLanding, { PawprintMode } from "./PawprintsLanding";
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, Download, ImagePlus, LayoutGrid, Loader2, PawPrint, Printer, Sparkles, Type, X } from "lucide-react";
 import type { Creation, PublicUser, UserProfile } from "../types";
-import { authedFetch } from "../api";
+import { authedFetch, createPawprintPrintOrder, fetchAlbums, fetchPawprintPrintOrders } from "../api";
 import { CREDIT_PRICES } from "../pricing";
 import { MAX_PAWPRINT_PHOTOS, planPawprintCollage, type PawprintLayoutId } from "../pawprints/collageEngine";
 import { renderPhotosWebGL2 } from "../pawprints/gpuCompositor";
@@ -537,6 +538,8 @@ const ROLE_GROUPS: Array<{ id: string; label: string; ids: string[] }> = [
   { id: "occupations", label: "Occupations", ids: ["the-composer", "the-chef", "the-rock-star", "the-moon-explorer"] },
   { id: "sports", label: "Sports", ids: ["championship-boxer", "the-gymnast", "purrs-23", "gridiron-12", "tennis-champion"] },
   { id: "seasonal", label: "Seasonal & Legends", ids: ["santa", "snow-guardian", "forest-legend"] },
+  { id: "halloween", label: "Halloween", ids: ["frankenstein-monster", "friendly-ghost", "mummy-wrap", "wicked-witch", "pumpkin-king", "vampire-count", "zombie-pet", "spooky-bat", "matching-skeletons", "matching-vampires", "matching-witches", "matching-ghosts", "matching-zombies", "matching-pumpkins", "matching-mummies", "matching-werewolves", "matching-devils", "matching-aliens", "double-witches", "double-vampires", "double-ghosts", "double-pumpkins", "double-skeletons", "double-zombies", "double-bats", "double-spiders"] },
+  { id: "landmarks", label: "Landmarks", ids: ["eiffel-tower", "colosseum", "statue-of-liberty", "taj-mahal", "machu-picchu", "great-wall", "sydney-opera-house", "mount-fuji", "pyramids", "stonehenge"] },
 ];
 
 /** Shown before "See all" is expanded — a scannable 7±2 rather than twenty. */
@@ -547,6 +550,8 @@ const FEATURED_ROLE_IDS = [
   "santa",
   "the-chef",
   "the-moon-explorer",
+  "frankenstein-monster",
+  "eiffel-tower"
 ];
 
 /**
@@ -594,14 +599,39 @@ function WizardSteps({ steps, activeIndex, onSelect }: {
   );
 }
 
-export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUserUpdate, onCreationSaved }: PawprintsStudioProps) {
+export default function PawprintsStudio(props: PawprintsStudioProps) {
+  const [mode, setMode] = useState<PawprintMode | null>(null);
+
+  if (!mode) {
+    return <PawprintsLanding onSelectMode={setMode} onBack={() => { window.history.back(); }} />;
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-surface text-on-surface">
+      <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-outline-variant/30 px-4 md:px-6">
+        <button
+          type="button"
+          onClick={() => setMode(null)}
+          className="flex items-center gap-2 text-sm font-black text-primary transition hover:text-primary/80"
+        >
+          <ArrowLeft size={16} /> Back to Modes
+        </button>
+      </header>
+      <div className="flex-1 overflow-hidden relative">
+        <PawprintsStudioInner mode={mode} {...props} />
+      </div>
+    </div>
+  );
+}
+
+function PawprintsStudioInner({ mode, userProfile, onOpenCreditStore, onUserUpdate, onCreationSaved }: PawprintsStudioProps & { mode: PawprintMode }) {
   const [categories, setCategories] = useState<string[]>([]);
   const [templates, setTemplates] = useState<PawprintTemplate[]>([]);
   const [category, setCategory] = useState("");
   const [template, setTemplate] = useState<PawprintTemplate | null>(null);
   const [photos, setPhotos] = useState<StudioPhoto[]>([]);
   const [photosConfirmed, setPhotosConfirmed] = useState(false);
-  const [intent, setIntent] = useState<"" | "digital" | "digital-printed">("");
+  const [intent, setIntent] = useState<"digital" | "digital-printed">("digital");
   const [title, setTitle] = useState("A little love, saved forever");
   const [message, setMessage] = useState("Every day is better with paws beside us.");
   const [variation, setVariation] = useState<Variation>("classic");
@@ -759,11 +789,17 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   }, [template, variation, photos, title, message, category]);
 
   const categoryTemplates = useMemo(() => {
-    const historic = templates.filter((item) => item.category === "historic_portraits");
-    if (intent !== "digital-printed") return historic;
+    let filtered = templates;
+    if (mode === "single_pet") {
+      filtered = templates.filter(t => !t.layoutId.startsWith("duo-") && t.category !== "landmarks");
+    } else {
+      filtered = templates.filter(t => t.layoutId.startsWith("duo-") || t.category === "landmarks");
+    }
+    
+    if (intent !== "digital-printed") return filtered;
     const physicalIds = new Set<string>(HISTORIC_PHYSICAL_TEMPLATE_IDS);
-    return historic.filter((item) => physicalIds.has(item.layoutId));
-  }, [templates, intent]);
+    return filtered.filter((item) => physicalIds.has(item.layoutId));
+  }, [templates, intent, mode]);
 
   // Products actually usable for the Digital + Printed flow: server-owned
   // (orderable) AND close enough in aspect to the fixed Pawprint canvas that
@@ -778,12 +814,14 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   const filteredRoleTemplates = useMemo(() => {
     const query = roleQuery.trim().toLowerCase();
     const groupIds = roleGroup ? new Set(ROLE_GROUPS.find((group) => group.id === roleGroup)?.ids || []) : null;
-    return categoryTemplates.filter((item) => {
+    return templates.filter((item) => {
+      // Filter out templates that don't match the current mode if applicable
+      // But we just show them based on groupIds or query.
       if (groupIds && !groupIds.has(item.layoutId)) return false;
       if (!query) return true;
       return `${item.name} ${item.tone}`.toLowerCase().includes(query);
     });
-  }, [categoryTemplates, roleQuery, roleGroup]);
+  }, [templates, roleQuery, roleGroup]);
 
   const roleFiltersActive = Boolean(roleQuery.trim() || roleGroup);
   const visibleRoleTemplates = useMemo(() => {
@@ -806,7 +844,7 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
   const activeStepIndex = !intent ? 0 : !template ? 1 : !photosConfirmed ? 2 : 3;
   const goToStep = (index: number) => {
     if (index > activeStepIndex) return; // never skip ahead past unfinished work
-    if (index <= 0) { setIntent(""); setCategory(""); setTemplate(null); setPhotosConfirmed(false); return; }
+    if (index <= 0) { setIntent("digital"); setCategory(""); setTemplate(null); setPhotosConfirmed(false); return; }
     if (index === 1) { setTemplate(null); setPhotosConfirmed(false); return; }
     if (index === 2) { setPhotosConfirmed(false); }
   };
@@ -887,13 +925,14 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
+          mode,
           category,
           layoutId: template.layoutId,
           fields,
           customName: title.trim(),
           customMessage: message.trim(),
           renderedImage,
-          photoBase64: category === "historic_portraits" ? photos[0]?.dataUrl : undefined,
+          photoBase64List: photos.map(p => p.dataUrl),
         }),
       });
       const data = await response.json();
@@ -920,13 +959,10 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
     setPrintOrder(null);
     setError("");
     try {
-      const response = await authedFetch("/api/pawprints/printful-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ creationId: savedCreationId, productCode: printProductCode, quantity: 1, recipient: shipping }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "The print order could not be created.");
+      const data = await createPawprintPrintOrder(
+        { creationId: savedCreationId, productCode: printProductCode, quantity: 1, recipient: shipping },
+        crypto.randomUUID()
+      );
       if (data.checkoutUrl) {
         window.location.assign(String(data.checkoutUrl));
         return;
@@ -957,39 +993,10 @@ export default function PawprintsStudio({ userProfile, onOpenCreditStore, onUser
       </button>
     </div>
   ) : null;
-
-  // Step 1: choose the keepsake first, in plain customer language.
-  // LIVE-5 (2026-08-04 deployment review): these four step containers were
-  // <main> elements rendered INSIDE App's own <main>, producing nested main
-  // landmarks. Only one main landmark may exist per page (WCAG 1.3.1 / ARIA),
-  // and a screen reader jumping "to main" landed ambiguously.
-  if (!intent) return (
-    <div className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
-      <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
-      {signInNotice}
-      <div className="mb-8 max-w-2xl"><p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p><h1 className="mt-2 text-3xl font-black text-on-surface">How will you celebrate your pet?</h1><p className="mt-2 text-on-surface-variant">Choose a portrait you can share online, or a physical keepsake delivered to your door.</p></div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <button type="button" onClick={() => { setIntent("digital"); setCategory("historic_portraits"); }} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition hover:-translate-y-1 hover:border-primary/60">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><Sparkles size={30} /></span>
-          <strong className="mt-4 block text-xl font-black">Historic Pawprint Pet Digital</strong>
-          <span className="mt-2 block text-sm leading-relaxed text-on-surface-variant">Turn your photo into a famous portrait to save, download, share, or email.</span>
-        </button>
-        <button type="button" onClick={() => { if (digitalPrintedAvailable) { setIntent("digital-printed"); setCategory("historic_portraits"); } }} disabled={!digitalPrintedAvailable} className="group rounded-3xl border-2 border-outline-variant/40 bg-surface p-8 text-left transition enabled:hover:-translate-y-1 enabled:hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-55">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary"><Printer size={30} /></span>
-          <strong className="mt-4 block text-xl font-black">Pawprint Pet Physical</strong>
-          <span className="mt-2 block text-sm leading-relaxed text-on-surface-variant">{digitalPrintedAvailable ? "Create a historic pet portrait and order it as a lasting printed keepsake." : "Physical ordering will appear here as soon as the configured print size is available."}</span>
-        </button>
-      </div>
-    </div>
-  );
-
-  // Step 2: choose one title from a compact click-through control. The master
-  // image shows the visual range without turning the page into twenty cards.
   if (!template) return (
     <div className="mx-auto w-full max-w-5xl px-4 pb-28 pt-8">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
-      <button onClick={() => { setIntent(""); setCategory(""); }} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Keepsake type</button>
       <p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p>
       <h1 className="mt-2 text-3xl font-black text-on-surface">Choose a portrait title</h1>
       <p className="mt-2 max-w-2xl text-on-surface-variant">Pick the role first — tap any portrait. On the next screen, add the pet photo that the portrait should preserve.</p>

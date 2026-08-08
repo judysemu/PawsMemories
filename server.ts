@@ -3136,6 +3136,14 @@ async function startServer() {
 
       const category = String(req.body?.category || "").trim();
       const layoutId = String(req.body?.layoutId || req.body?.templateId || "").trim();
+      const mode = String(req.body?.mode || "single_pet").trim();
+      
+      if (mode === "owner_pet") {
+        pawprintPrice = CREDIT_PRICES.PAWPRINT_OWNER_PET;
+      } else if (mode === "multi_pet") {
+        pawprintPrice = CREDIT_PRICES.PAWPRINT_MULTI_PET;
+      }
+      
       const fields = req.body?.fields && typeof req.body.fields === "object" ? req.body.fields as Record<string, string> : {};
       const customName = String(req.body?.customName || "").trim().slice(0, 80);
       const customMessage = String(req.body?.customMessage || "").trim().slice(0, 300);
@@ -3150,8 +3158,9 @@ async function startServer() {
         const value = String(fields[field.key] || "").trim();
         if (field.type === "image") {
           const media = value || String(req.body?.photoBase64 || "");
-          if (media && !/^data:image\/(png|jpe?g|webp);base64,/i.test(media)) {
-            return res.status(400).json({ error: `${field.label} must be an image file.` });
+          const mediaList = Array.isArray(req.body?.photoBase64List) ? req.body.photoBase64List : (media ? [media] : []);
+          if (mediaList.length > 0 && !mediaList.every(m => /^data:image\/(png|jpe?g|webp);base64,/i.test(m))) {
+            return res.status(400).json({ error: `${field.label} must be image files.` });
           }
         } else if (value.length > (field.maxLength || 120)) {
           return res.status(400).json({ error: `${field.label} is too long.` });
@@ -3169,8 +3178,8 @@ async function startServer() {
         reuseImageUrl = src.image_url as string;
       }
       pawprintPrice = reuseImageUrl
-        ? Math.round(CREDIT_PRICES.PAWPRINT * (1 - REUSE_DISCOUNT))
-        : CREDIT_PRICES.PAWPRINT;
+        ? Math.round(pawprintPrice * (1 - REUSE_DISCOUNT))
+        : pawprintPrice;
 
       const isAdmin = await isUserAdmin(req.user!.phone);
       if (!isAdmin) {
@@ -3182,24 +3191,32 @@ async function startServer() {
 
       let sourceBuffer: Buffer;
       if (category === "historic_portraits") {
-        const identityImage = String(req.body?.photoBase64 || "");
-        if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(identityImage)) {
+        const identityImages: string[] = Array.isArray(req.body?.photoBase64List) && req.body.photoBase64List.length > 0
+          ? req.body.photoBase64List
+          : [String(req.body?.photoBase64 || "")].filter(img => img !== "");
+        if (identityImages.length === 0 || !identityImages.every(img => /^data:image\/(png|jpe?g|webp);base64,/i.test(img))) {
           if (creditReservationId) {
             await refundReservedCredits(creditReservationId);
             creditReservationId = null;
           }
-          return res.status(400).json({ error: "Choose the pet photo to use in this historic portrait." });
+          return res.status(400).json({ error: "Choose the pet photo(s) to use in this historic portrait." });
         }
-        const identity = splitDataUrl(identityImage);
+        const inlineParts = identityImages.map(img => {
+          const identity = splitDataUrl(img);
+          return { inlineData: { data: identity.data, mimeType: identity.mimeType } };
+        });
+        
+        const isDuo = template.layoutId.startsWith("duo-") || template.category === "landmarks";
         const historicPrompt = [
-          "The uploaded image is the identity reference for the customer's pet.",
-          "Preserve the exact species, face, eye color, ear shape, muzzle, coat length, coat pattern, markings, proportions, and expression.",
+          isDuo ? "The uploaded images are the identity references for the customer's subjects (owner/pet or two pets)." : "The uploaded image is the identity reference for the customer's pet.",
+          "Preserve the exact species, faces, eye color, ear shape, muzzle, coat length, coat pattern, markings, proportions, and expressions of ALL subjects in the references.",
           template.imagePromptTemplate,
-          "Create one finished vertical 4:5 portrait with the pet facing the viewer.",
-          "Do not include captions, names, logos, watermarks, signatures, human faces, human hands, random text, extra limbs, or floating paws.",
+          "Create one finished vertical 4:5 portrait with the subjects facing the viewer.",
+          "Do not include captions, names, logos, watermarks, signatures, random text, extra limbs, or floating paws. Keep the subjects naturally placed.",
         ].join(" ");
+        
         const generated = await generateImageWithFallback(
-          [{ inlineData: { data: identity.data, mimeType: identity.mimeType } }, { text: historicPrompt }],
+          [...inlineParts, { text: historicPrompt }],
           "historic-pawprint-reference",
           req.user!.phone,
           undefined,

@@ -1,7 +1,7 @@
 import { FAMOUS_PORTRAIT_BY_ID } from "./historicalPetCatalog.ts";
 
 export interface HistoricPawprintTemplate {
-  category: "historic_portraits";
+  category: string;
   layoutId: string;
   name: string;
   tone: string;
@@ -81,10 +81,42 @@ export const HISTORIC_DIGITAL_TEMPLATES: HistoricPawprintTemplate[] = HISTORIC_R
   };
 });
 
+// Generate templates for the new portrait catalog items (halloween, landmarks)
+const ADDITIONAL_TEMPLATES: HistoricPawprintTemplate[] = [];
+for (const portrait of FAMOUS_PORTRAIT_BY_ID.values()) {
+  if (HISTORIC_ROLES.some(([id]) => id === portrait.id)) continue;
+  
+  const isDuo = portrait.id.startsWith("duo-") || portrait.category === "landmarks";
+  
+  let promptExtension = ` Preserve the pet's exact face, coat markings, eye color, ear shape, muzzle, anatomy, species, and proportions. Use natural grounded paws when visible. No human likeness, logos, signatures, sponsors, random text, extra limbs, or copied film costumes.`;
+  if (isDuo) {
+    promptExtension = ` Preserve the exact faces of BOTH the human owner (or second pet) and the primary pet, accurately reflecting their relationship and physical traits based on the inputs. Make sure both subjects are naturally integrated into the scene side-by-side. No random text, extra limbs, or logos.`;
+  }
+
+  ADDITIONAL_TEMPLATES.push({
+    category: portrait.category,
+    layoutId: portrait.id,
+    name: portrait.displayName,
+    tone: "cinematic",
+    sampleCopy: [`${portrait.displayName}, starring us.`, "A legend with a big story."],
+    fieldSchema: [
+      { key: "petPhoto", type: "image", label: isDuo ? "Owner & Pet Photo(s)" : "Pet Photo" },
+      { key: "petName", type: "name", label: isDuo ? "Names" : "Pet Name", maxLength: 60 },
+      { key: "message", type: "message", label: "Keepsake Message", maxLength: 220 },
+    ],
+    imagePromptTemplate: `${portrait.prompt} Compose the result as premium vertical 4:5 keepsake art.${promptExtension}`,
+    sourceUrl: portrait.previewAsset?.publicPath || "/collections/historic-pawprints/historic-pawprints-20-v1.webp",
+    sourceLicense: "owned-generated",
+    sourceName: "Pawsome3D Extended Portrait Collection",
+  });
+}
+
+export const ALL_DIGITAL_TEMPLATES = [...HISTORIC_DIGITAL_TEMPLATES, ...ADDITIONAL_TEMPLATES];
+
 const PHYSICAL_IDS = new Set<string>(HISTORIC_PHYSICAL_TEMPLATE_IDS);
 
 export function historicTemplatesForIntent(intent: "digital" | "digital-printed") {
   return intent === "digital"
-    ? HISTORIC_DIGITAL_TEMPLATES
-    : HISTORIC_DIGITAL_TEMPLATES.filter((template) => PHYSICAL_IDS.has(template.layoutId));
+    ? ALL_DIGITAL_TEMPLATES
+    : ALL_DIGITAL_TEMPLATES.filter((template) => PHYSICAL_IDS.has(template.layoutId));
 }

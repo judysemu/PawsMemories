@@ -14,6 +14,8 @@ const CATEGORY_LABELS: Record<FamousPortraitCategory, string> = {
   "sports-legends": "Sports Legends",
   "myth-holiday": "Myth & Holiday",
   "arts-adventure": "Arts & Adventure",
+  halloween: "Halloween",
+  landmarks: "Famous Landmarks",
 };
 
 const PUBLIC_PORTRAITS = publicFamousPortraitCatalog();
