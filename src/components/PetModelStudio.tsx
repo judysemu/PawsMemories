@@ -1050,6 +1050,7 @@ export default function PetModelStudio() {
           )}
 
           <section>
+            <p className="mb-3 text-xs text-on-surface-variant">Choose the exact print size in Print Shop when you're ready to order a physical figurine.</p>
             <h2 className="text-xs font-black uppercase tracking-[0.16em] text-on-surface-variant">Recent model orders</h2>
             <div className="mt-2 space-y-2">
               {recentOrders.map((item) => (

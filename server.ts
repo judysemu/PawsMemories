@@ -42,7 +42,7 @@ import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
 import { AiVideoScriptSchema, compileEightSecondPrompt, VEO_MOTION_NEGATIVE_PROMPT } from "./server/ai-video/scripts";
-import { isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
+import { isPetGlbEnabled, isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
 import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
 import { planWagsBox, getPriorBoxHistory } from "./server/wags/planner";
@@ -4252,7 +4252,7 @@ async function startServer() {
       // enabled. Reject stale legacy clients before any Gemini image request;
       // the old route could otherwise fan one click into 4-6 Pro image calls
       // and only discover the migration after that provider spend.
-      {
+      if (isPetGlbEnabled() || isModelBuildV3Enabled()) {
         return res.status(410).json({
           error: "Legacy avatar creation has moved to the customer-gated Create flow.",
           code: "LEGACY_AVATAR_DISABLED",

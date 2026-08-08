@@ -19,7 +19,7 @@ function editable(template: AiVideoScriptTemplate): EditableScript {
   return { ...template, stageDirections: [...template.stageDirections], voiceText: "" };
 }
 
-/** Customer AI video generation: a guided script, never a manual timeline editor. */
+/** Customer guided video generation: a directed script, never a manual timeline editor. */
 export default function AnimationStudio({ creations, userProfile, onOpenCreditStore, onClose, onCreationsChanged }: AnimationStudioProps) {
   const images = useMemo(() => creations.filter((creation) => creation.image_url), [creations]);
   const [selectedId, setSelectedId] = useState<number | null>(images[0]?.id ?? null);
@@ -127,7 +127,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   );
 
   return (
-    <main data-creative-dashboard="true" className="h-[calc(100dvh-4rem)] w-full overflow-hidden bg-background p-2 text-on-background sm:p-3" aria-labelledby="ai-video-title">
+    <main data-creative-dashboard="true" className="h-[calc(100dvh-4rem)] w-full overflow-hidden lg:overflow-hidden bg-background p-2 text-on-background sm:p-3" aria-labelledby="ai-video-title">
       <header className="mx-auto mb-2 grid max-w-[1720px] shrink-0 gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-outline-variant/25 bg-surface/90 px-4 py-2 shadow-sm">
           <Film size={22} className="shrink-0 text-primary" />
@@ -159,7 +159,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
           <p className="text-xs">The job is registered, so it continues safely if you leave this page.</p>
         </section>
       ) : (
-        <div className="mx-auto grid h-[calc(100%-4.75rem)] min-h-0 max-w-[1720px] gap-2 lg:grid-cols-[280px_minmax(0,1fr)_300px] xl:grid-cols-[300px_minmax(0,1fr)_330px]">
+        <div className="mx-auto grid h-[calc(100%-4.75rem)] min-h-0 max-w-[1720px] gap-2 lg:overflow-hidden lg:grid-cols-[minmax(220px,.72fr)_minmax(0,1.35fr)_minmax(280px,.9fr)]">
           <section data-dashboard-region="left" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
             <div>
               <h2 className="text-sm font-black text-on-surface">Your uploads</h2>

@@ -1,3 +1,9 @@
+export function isPetGlbEnabled(): boolean {
+  const envVal = process.env.PET_GLB_ENABLED;
+  if (!envVal) return false;
+  return envVal.trim().toLowerCase() === "true" || envVal.trim() === "1";
+}
+
 export function isModelBuildV3Enabled(): boolean {
   const envVal = process.env.MODEL_BUILD_V3_ENABLED;
   if (!envVal) return false;

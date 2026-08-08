@@ -932,6 +932,7 @@ function PawprintsStudioInner({ mode, userProfile, onOpenCreditStore, onUserUpda
           customName: title.trim(),
           customMessage: message.trim(),
           renderedImage,
+          photoBase64: category === "historic_portraits" ? photos[0]?.dataUrl : undefined,
           photoBase64List: photos.map(p => p.dataUrl),
         }),
       });
@@ -997,8 +998,39 @@ function PawprintsStudioInner({ mode, userProfile, onOpenCreditStore, onUserUpda
     <div className="mx-auto w-full max-w-5xl px-4 pb-28 pt-8">
       <WizardSteps steps={wizardSteps} activeIndex={activeStepIndex} onSelect={goToStep} />
       {signInNotice}
+
+      {/* Step 1 — product type chooser. The two approved products are
+          "Historic Pawprint Pet Digital" (keepsake download) and
+          "Pawprint Pet Physical" (keepsake + printed copy). Intentionally
+          not labelled "Digital Only" / "Digital + Printed" — those labels
+          tested poorly and are retired. */}
+      <div className="mb-8 rounded-3xl border border-outline-variant/30 bg-surface-container-low p-5 sm:p-7">
+        <h1 className="text-2xl font-black text-on-surface sm:text-3xl">How will you celebrate your pet?</h1>
+        <p className="mt-2 text-sm text-on-surface-variant">Choose the product that fits — you can always upgrade to a printed keepsake later.</p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setIntent("digital")}
+            className={`group flex flex-col gap-2 rounded-2xl border-2 p-5 text-left transition ${intent === "digital" ? "border-primary bg-primary/5" : "border-outline-variant/40 hover:border-primary/50"}`}
+          >
+            <span className="text-2xl">🎨</span>
+            <span className="font-black text-on-surface">Historic Pawprint Pet Digital</span>
+            <span className="text-xs text-on-surface-variant">Instant download · Share or print at home · 75 PupCoins</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIntent("digital-printed")}
+            className={`group flex flex-col gap-2 rounded-2xl border-2 p-5 text-left transition ${intent === "digital-printed" ? "border-primary bg-primary/5" : "border-outline-variant/40 hover:border-primary/50"}`}
+          >
+            <span className="text-2xl">🖼️</span>
+            <span className="font-black text-on-surface">Pawprint Pet Physical</span>
+            <span className="text-xs text-on-surface-variant">Printed &amp; shipped to your door · Includes digital · from $19.99</span>
+          </button>
+        </div>
+      </div>
+
       <p className="text-xs font-black uppercase tracking-[.2em] text-primary">Historic Pawprints</p>
-      <h1 className="mt-2 text-3xl font-black text-on-surface">Choose a portrait title</h1>
+      <h2 className="mt-2 text-3xl font-black text-on-surface">Choose a portrait title</h2>
       <p className="mt-2 max-w-2xl text-on-surface-variant">Pick the role first — tap any portrait. On the next screen, add the pet photo that the portrait should preserve.</p>
 
       {/* PP-2: a searchable, thumbnail-backed grid replaces a flat twenty-item

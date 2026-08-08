@@ -36,10 +36,11 @@ test("spatial-generator provider exports only Layer8 operations", () => {
   
   const expected = [
     "observeReferences",
-    "generatePlan", 
+    "generatePlan",
     "verifyDraft",
     "checkLayer8Health",
-    "Layer8Error"
+    "Layer8Error",
+    "resolveLayer8Config",
   ];
   
   expected.forEach(e => {

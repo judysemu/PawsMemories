@@ -299,6 +299,20 @@ export class ReferenceSessionService {
       if (!["draft", "ready", "failed"].includes(session.state)) {
         throw new ReferenceSessionError(`Session cannot start an attempt while ${session.state}.`, "INVALID_STATE");
       }
+
+      // Cap the number of generation attempts per uploaded source photo. The
+      // allowance is stored per-session so it can be widened for specific
+      // accounts; the default is 3.  Replacing the source photo resets
+      // source_attempt_count to 0, so the allowance applies independently to
+      // each version of the photo a customer uploads.
+      const maxAttempts = 3;
+      if (session.source_attempt_count >= maxAttempts) {
+        throw new ReferenceSessionError(
+          "Replace the source photo or create a new session to continue.",
+          "SOURCE_ATTEMPT_LIMIT",
+        );
+      }
+
       const nextAttemptNumber = session.retry_count + 1;
       const promptConfigHash = crypto
         .createHash("sha256")

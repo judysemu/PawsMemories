@@ -117,6 +117,6 @@ const PHYSICAL_IDS = new Set<string>(HISTORIC_PHYSICAL_TEMPLATE_IDS);
 
 export function historicTemplatesForIntent(intent: "digital" | "digital-printed") {
   return intent === "digital"
-    ? ALL_DIGITAL_TEMPLATES
-    : ALL_DIGITAL_TEMPLATES.filter((template) => PHYSICAL_IDS.has(template.layoutId));
+    ? HISTORIC_DIGITAL_TEMPLATES
+    : HISTORIC_DIGITAL_TEMPLATES.filter((template) => PHYSICAL_IDS.has(template.layoutId));
 }
