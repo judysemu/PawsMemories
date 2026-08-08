@@ -55,6 +55,12 @@ mkdir -p "$STAGING_DIR/dist"
 cp -Rp dist/. "$STAGING_DIR/dist/"
 cp -p package.json package-lock.json "$STAGING_DIR/"
 
+# Rig validation profiles are read from process.cwd()/blender-worker/profiles/
+# at server startup. They are plain JSON — no build step required — but they
+# are not emitted by Vite, so they must be explicitly staged here.
+mkdir -p "$STAGING_DIR/blender-worker/profiles"
+cp -p blender-worker/profiles/*.json "$STAGING_DIR/blender-worker/profiles/"
+
 # Hostinger always runs npm install followed by npm run build. The production
 # bundle was already built under the pinned Node release, so the host must not
 # rebuild it with its older Node 24 minor. Keep the exact runtime dependency
