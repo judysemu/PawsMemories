@@ -874,6 +874,10 @@ function PawprintsStudioInner({ mode, userProfile, onOpenCreditStore, onUserUpda
     setShippingTouched((current) => (current[field] ? current : { ...current, [field]: true }));
 
   const chooseTemplate = (item: PawprintTemplate) => {
+    // Keep the selected catalogue category attached to the template. Famous
+    // portraits (including Halloween) use this value to select the Gemini
+    // generation path on the server instead of the manual composite path.
+    setCategory(item.category);
     setTemplate(item);
     setTitle(item.name);
     setMessage(item.sampleCopy[0] || "Made with love.");

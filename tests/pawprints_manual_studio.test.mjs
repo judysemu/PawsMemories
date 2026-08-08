@@ -30,6 +30,14 @@ test("Pawprints keeps user copy manual while Historic mode may generate portrait
   assert.doesNotMatch(pawprintsRoute, /generatedText/);
 });
 
+test("Pawprints preserves the selected category and canonically resolves cached Halloween requests", () => {
+  assert.match(studio, /const chooseTemplate = \(item: PawprintTemplate\) => \{[\s\S]*setCategory\(item\.category\);[\s\S]*setTemplate\(item\);/);
+  assert.match(pawprintsRoute, /const requestedCategory = String\(req\.body\?\.category \|\| ""\)\.trim\(\);/);
+  assert.match(pawprintsRoute, /getPawprintTemplatesSync\(requestedCategory \|\| undefined\)[\s\S]*\.filter\(\(item\) => item\.layoutId === layoutId\)/);
+  assert.match(pawprintsRoute, /const category = template\.category;/);
+  assert.match(pawprintsRoute, /"arts-adventure", "halloween", "landmarks"/);
+});
+
 test("Pawprints export fits the exact title and message inside every template text rectangle", () => {
   assert.match(studio, /function drawFittedTextBlock/);
   assert.match(studio, /height: plan\.text\.height \* PRINT_HEIGHT/);

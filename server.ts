@@ -3134,7 +3134,7 @@ async function startServer() {
         return res.json({ pawprintId: existing[0].id, url: existing[0].image_url, creationId: existing[0].creation_id, idempotent: true });
       }
 
-      const category = String(req.body?.category || "").trim();
+      const requestedCategory = String(req.body?.category || "").trim();
       const layoutId = String(req.body?.layoutId || req.body?.templateId || "").trim();
       const mode = String(req.body?.mode || "single_pet").trim();
       
@@ -3147,8 +3147,18 @@ async function startServer() {
       const fields = req.body?.fields && typeof req.body.fields === "object" ? req.body.fields as Record<string, string> : {};
       const customName = String(req.body?.customName || "").trim().slice(0, 80);
       const customMessage = String(req.body?.customMessage || "").trim().slice(0, 300);
-      const template = getPawprintTemplatesSync(category).find((t) => t.layoutId === layoutId);
-      if (!template) return res.status(400).json({ error: "Please choose a valid Pawprint template." });
+      // Resolve the canonical category from the selected server-owned template.
+      // This also repairs requests from an older cached client that omitted the
+      // category: unique famous-portrait IDs such as the Halloween layouts can
+      // still reach Gemini and be saved to the user's Fur Bin. Ambiguous
+      // standard layout IDs remain rejected instead of guessing a category.
+      const templateMatches = getPawprintTemplatesSync(requestedCategory || undefined)
+        .filter((item) => item.layoutId === layoutId);
+      if (templateMatches.length !== 1) {
+        return res.status(400).json({ error: "Please choose a valid Pawprint template." });
+      }
+      const template = templateMatches[0];
+      const category = template.category;
 
       const allowed = new Set(template.fieldSchema.map((field) => field.key));
       for (const key of Object.keys(fields)) {
@@ -6642,7 +6652,7 @@ async function startServer() {
       }
       const script = scriptResult.data;
       const compiledPrompt = compileEightSecondPrompt(script);
-      const providerModel = process.env.AI_VIDEO_MODEL || "veo-2.0-generate-001";
+      const providerModel = process.env.AI_VIDEO_MODEL || "veo-3.1-fast-generate-preview";
 
       const userPhone = req.user!.phone;
       const isAdmin = await isUserAdmin(userPhone);
@@ -6719,8 +6729,11 @@ async function startServer() {
           numberOfVideos: 1,
           enhancePrompt: true,
           negativePrompt: VEO_MOTION_NEGATIVE_PROMPT,
-          // Fur Reels animates a customer's pet, never a person.
-          personGeneration: "dont_allow",
+          // Veo 3.1 only accepts allow_adult for image-to-video. Fur Reels
+          // still directs the model to animate the customer's pet through the
+          // prompt; this value is the provider's required safety-policy enum,
+          // not an instruction to introduce a person.
+          personGeneration: "allow_adult",
         },
       });
 
