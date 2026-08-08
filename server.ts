@@ -3190,7 +3190,13 @@ async function startServer() {
       }
 
       let sourceBuffer: Buffer;
-      if (category === "historic_portraits") {
+      // Historic portraits, halloween, landmark, famous-portrait categories all go
+      // through the AI generation path — they share the imagePromptTemplate field.
+      const isAiPortraitCategory =
+        category === "historic_portraits" ||
+        ["historic-women", "leaders", "sports-legends", "myth-holiday",
+         "arts-adventure", "halloween", "landmarks"].includes(category);
+      if (isAiPortraitCategory) {
         const identityImages: string[] = Array.isArray(req.body?.photoBase64List) && req.body.photoBase64List.length > 0
           ? req.body.photoBase64List
           : [String(req.body?.photoBase64 || "")].filter(img => img !== "");
@@ -6636,7 +6642,7 @@ async function startServer() {
       }
       const script = scriptResult.data;
       const compiledPrompt = compileEightSecondPrompt(script);
-      const providerModel = process.env.AI_VIDEO_MODEL || "veo-3.1-fast-generate-preview";
+      const providerModel = process.env.AI_VIDEO_MODEL || "veo-2.0-generate-001";
 
       const userPhone = req.user!.phone;
       const isAdmin = await isUserAdmin(userPhone);

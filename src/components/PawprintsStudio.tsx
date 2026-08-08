@@ -538,8 +538,9 @@ const ROLE_GROUPS: Array<{ id: string; label: string; ids: string[] }> = [
   { id: "occupations", label: "Occupations", ids: ["the-composer", "the-chef", "the-rock-star", "the-moon-explorer"] },
   { id: "sports", label: "Sports", ids: ["championship-boxer", "the-gymnast", "purrs-23", "gridiron-12", "tennis-champion"] },
   { id: "seasonal", label: "Seasonal & Legends", ids: ["santa", "snow-guardian", "forest-legend"] },
-  { id: "halloween", label: "Halloween", ids: ["frankenstein-monster", "friendly-ghost", "mummy-wrap", "wicked-witch", "pumpkin-king", "vampire-count", "zombie-pet", "spooky-bat", "matching-skeletons", "matching-vampires", "matching-witches", "matching-ghosts", "matching-zombies", "matching-pumpkins", "matching-mummies", "matching-werewolves", "matching-devils", "matching-aliens", "double-witches", "double-vampires", "double-ghosts", "double-pumpkins", "double-skeletons", "double-zombies", "double-bats", "double-spiders"] },
-  { id: "landmarks", label: "Landmarks", ids: ["eiffel-tower", "colosseum", "statue-of-liberty", "taj-mahal", "machu-picchu", "great-wall", "sydney-opera-house", "mount-fuji", "pyramids", "stonehenge"] },
+  // halloween IDs match FAMOUS_PORTRAIT_CATALOG entries in historicalPetCatalog.ts
+  { id: "halloween", label: "Halloween", ids: ["ghost-pet", "zombie-pet", "ghoul-pet", "pumpkin-pet", "costume-pet", "vampire-pet", "witch-pet", "mummy-pet", "duo-ghosts", "duo-zombies", "duo-ghouls", "duo-pumpkins", "duo-costumes", "duo-vampires", "duo-witches", "duo-mummies", "duo-skeletons", "duo-monsters"] },
+  { id: "landmarks", label: "Landmarks", ids: ["eiffel-tower", "great-wall", "taj-mahal", "colosseum", "statue-of-liberty", "machu-picchu", "pyramids", "mount-fuji", "stonehenge", "sydney-opera"] },
 ];
 
 /** Shown before "See all" is expanded — a scannable 7±2 rather than twenty. */

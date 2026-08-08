@@ -21,7 +21,8 @@ import {
   claimAchievementReward,
   claimDailyStreakReward,
 } from "./server/rewards";
-import { HISTORIC_DIGITAL_TEMPLATES } from "./shared/historicPawprintTemplates";
+import { ALL_DIGITAL_TEMPLATES } from "./shared/historicPawprintTemplates";
+import { FAMOUS_PORTRAIT_CATEGORIES } from "./shared/historicalPetCatalog";
 
 /** Internal row key for the seeded admin account (not a phone number). */
 const ADMIN_KEY = process.env.ADMIN_KEY || process.env.ADMIN_PHONE || "";
@@ -3789,12 +3790,14 @@ const generatedTemplates: PawprintTemplate[] = PAWPRINT_CATEGORIES.flatMap((cate
 
 const curatedKeys = new Set(CURATED_PAWPRINT_TEMPLATES.map((template) => `${template.category}:${template.layoutId}`));
 const PAWPRINT_TEMPLATES: PawprintTemplate[] = [
-  ...HISTORIC_DIGITAL_TEMPLATES,
+  ...ALL_DIGITAL_TEMPLATES,
   ...CURATED_PAWPRINT_TEMPLATES.map((template) => ({ ...CC0_CARD_SOURCE, ...template })),
   ...generatedTemplates.filter((template) => !curatedKeys.has(`${template.category}:${template.layoutId}`)),
 ];
 
-export function getPawprintCategories(): string[] { return [...PAWPRINT_CATEGORIES, "historic_portraits"]; }
+export function getPawprintCategories(): string[] {
+  return [...PAWPRINT_CATEGORIES, "historic_portraits", ...FAMOUS_PORTRAIT_CATEGORIES];
+}
 
 export function getPawprintTemplatesSync(category?: string): PawprintTemplate[] {
   if (category) return PAWPRINT_TEMPLATES.filter(t => t.category === category);
