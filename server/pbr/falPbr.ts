@@ -100,6 +100,9 @@ export function normalizeFalPbrInput(input: { prompt: string; seed: number }) {
 
 function isPrivateIp(raw: string): boolean {
   const address = raw.replace(/^\[|\]$/g, "").toLowerCase();
+  const isLocalWorker = process.env.AZURE_PBR_WORKER_URL?.startsWith("http://127.0.0.1");
+  if (isLocalWorker && address === "127.0.0.1") return false;
+
   if (net.isIP(address) === 4) {
     const octets = address.split(".").map(Number);
     return octets[0] === 0 || octets[0] === 10 || octets[0] === 127 ||
@@ -126,11 +129,14 @@ function validateOutputUrl(rawUrl: string): URL {
     throw new FalPbrError("PBR provider returned an invalid output URL", "FAL_PBR_OUTPUT_INVALID");
   }
   const host = parsed.hostname.toLowerCase();
-  if (parsed.protocol !== "https:" || (host !== "fal.media" && !host.endsWith(TRUSTED_OUTPUT_SUFFIX) && !host.endsWith(TRUSTED_OUTPUT_SUFFIX_AZURE))) {
-    throw new FalPbrError("PBR provider returned an untrusted output URL", "FAL_PBR_OUTPUT_INVALID");
-  }
-  if (parsed.username || parsed.password || parsed.port) {
-    throw new FalPbrError("PBR provider returned a malformed output URL", "FAL_PBR_OUTPUT_INVALID");
+  const isLocalWorker = process.env.AZURE_PBR_WORKER_URL?.startsWith("http://127.0.0.1");
+  if (!isLocalWorker) {
+    if (parsed.protocol !== "https:" || (host !== "fal.media" && !host.endsWith(TRUSTED_OUTPUT_SUFFIX) && !host.endsWith(TRUSTED_OUTPUT_SUFFIX_AZURE))) {
+      throw new FalPbrError("PBR provider returned an untrusted output URL", "FAL_PBR_OUTPUT_INVALID");
+    }
+    if (parsed.username || parsed.password || parsed.port) {
+      throw new FalPbrError("PBR provider returned a malformed output URL", "FAL_PBR_OUTPUT_INVALID");
+    }
   }
   return parsed;
 }

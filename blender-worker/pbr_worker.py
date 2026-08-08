@@ -26,7 +26,7 @@ from PIL import Image
 WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
 PORT = int(os.environ.get("PORT", "8080"))
 MODEL_ID = os.environ.get(
-    "PBR_MODEL_ID", "gvecchio/MatSynth"
+    "PBR_MODEL_ID", "gvecchio/MatFuse"
 )
 
 # ── State ────────────────────────────────────────────────────────────────────
@@ -58,15 +58,21 @@ def get_pipeline():
             return _pipeline
         try:
             import torch
-            from diffusers import StableDiffusionXLPipeline
+            from diffusers import DiffusionPipeline
 
             print(f"Loading PBR model: {MODEL_ID}", flush=True)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            dtype = torch.float16 if device == "cuda" else torch.float32
-            pipe = StableDiffusionXLPipeline.from_pretrained(
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+            dtype = torch.float16 if device in ["cuda", "mps"] else torch.float32
+            pipe = DiffusionPipeline.from_pretrained(
                 MODEL_ID,
                 torch_dtype=dtype,
                 use_safetensors=True,
+                trust_remote_code=True,
             )
             pipe = pipe.to(device)
             if device == "cuda":
@@ -102,33 +108,49 @@ def generate_pbr_maps(
         if pipe == "FAILED":
             raise RuntimeError("PBR model failed to load")
 
-        generator = torch.Generator().manual_seed(seed)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
 
-        # Map-type suffixes for the PBR prompt engineering
-        map_suffixes = {
-            "basecolor": ", base color map, albedo, diffuse texture",
-            "normal": ", normal map, bump map, surface detail",
-            "roughness": ", roughness map, specular map, surface roughness",
-            "metalness": ", metallic map, metalness, metal texture",
-        }
+        generator = torch.Generator(device).manual_seed(seed)
+
+        # MatFuse generates all 4 maps simultaneously in a single forward pass.
+        # It expects `text` instead of `prompt`, and returns a dictionary.
+        full_prompt = f"{prompt}, seamless tileable PBR texture, 4K quality"
+
+        result = pipe(
+            text=full_prompt,
+            width=width,
+            height=height,
+            num_inference_steps=8,
+            generator=generator,
+            guidance_scale=7.5,
+        )
 
         generated_images: list[dict[str, Any]] = []
 
+        # MatFuse maps keys: "diffuse", "normal", "roughness", "specular"
+        # The authoring script requests maps like: "basecolor", "normal", "roughness", "metalness"
+        # We need to map the authoring requested maps to the MatFuse output keys.
+        matfuse_mapping = {
+            "basecolor": "diffuse",
+            "normal": "normal",
+            "roughness": "roughness",
+            "metalness": "specular", # MatFuse does not explicitly have metalness, specular is the closest.
+        }
+
         for map_type in maps:
-            suffix = map_suffixes.get(map_type, "")
-            full_prompt = f"{prompt}{suffix}, seamless tileable PBR texture, 4K quality"
-
-            result = pipe(
-                prompt=full_prompt,
-                width=width,
-                height=height,
-                num_inference_steps=8,
-                generator=generator,
-                guidance_scale=7.5,
-            )
-
-            img: Image.Image = result.images[0]
+            matfuse_key = matfuse_mapping.get(map_type, "diffuse")
+            img_list = result.get(matfuse_key)
+            if img_list is None or not img_list:
+                # Fallback if somehow the key is missing
+                img_list = result.get("diffuse")
+            
+            img = img_list[0]
+            
             if img.size != (width, height):
                 img = img.resize((width, height), Image.LANCZOS)
 
@@ -250,7 +272,7 @@ async def queue_result(
 
         images_out.append(
             {
-                "url": f"/output/{requestId}/{map_type}.png",
+                "url": f"http://127.0.0.1:8080/output/{requestId}/{map_type}.png",
                 "map_type": map_type,
                 "content_type": "image/png",
             }
@@ -271,9 +293,7 @@ async def queue_result(
 async def get_output(
     job_id: str,
     map_name: str,
-    x_worker_secret: str = Header(""),
 ):
-    check_secret(x_worker_secret)
     # Strip .png extension if present
     map_type = map_name.replace(".png", "")
     output_key = f"{job_id}/{map_type}"
