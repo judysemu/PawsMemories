@@ -10,7 +10,7 @@ import { z } from "zod";
 import compression from "compression";
 import path from "path";
 // Vite is imported dynamically below — only in dev mode
-import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import Stripe from "stripe";
 import fs from "fs";
@@ -41,7 +41,7 @@ import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
-import { AiVideoScriptSchema, compileEightSecondPrompt, VEO_MOTION_NEGATIVE_PROMPT } from "./server/ai-video/scripts";
+import { AiVideoScriptSchema, compileEightSecondPrompt } from "./server/ai-video/scripts";
 import { isPetGlbEnabled, isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
 import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
@@ -112,7 +112,6 @@ import { assertPrivateStorageConfig, deletePrivateObject, getPrivateSignedUrl, p
 import { runBuildPipeline } from "./agent/graph/orchestrator";
 import { analyzePetImage, type PetAnalysis } from "./ollama-agent";
 import { getBlenderClient } from "./agent/tools/blender_client";
-import { startTalkingVideo, pollTalkingVideo, fetchMp4AsDataUrl, isHeyGenHandle } from "./heygen";
 import { startImageTo3D, pollImageTo3D, isTripoHandle, startRig, pollTripoTask, isTripoInsufficientCredit, TripoError } from "./tripo";
 import { isInHouseOnly, rejectLegacyExternal3dRoute } from "./server/externalGenerativePolicy";
 import { checkBudget, needsRetargetFallback, type BakeStats } from "./server/rigBudget";
@@ -176,30 +175,58 @@ const pipelineRigLocks = new Set<number>();
 const pipelineRigRecovery = new PipelineRigRecoveryStore(getPool);
 const PIPELINE_RIG_HEARTBEAT_MS = 60 * 1000;
 
-/**
- * Poll a Veo video operation by its stored operation name.
- *
- * WHY THIS WRAPPER EXISTS
- * -----------------------
- * `ai.operations.getVideosOperation()` does NOT accept a plain `{ name }`
- * object. After fetching the raw payload it calls `operation._fromAPIResponse()`
- * on whatever you handed it — that method lives on the `GenerateVideosOperation`
- * prototype, so an object literal produces:
- *
- *     TypeError: operation._fromAPIResponse is not a function
- *
- * Both video pollers previously passed `{ name } as any`. The `as any` silenced
- * the type error that would have caught this at compile time, so every Veo job
- * died at poll time — see generation_jobs rows 16/19/20. Note the HTTP request
- * succeeds before the throw: the video really was generated and paid for, we
- * just crashed reading the result and then refunded, so the cost was eaten
- * silently on both ends.
- *
- * Passing a real instance keeps the SDK's own parsing (which normalises the
- * mldev vs Vertex response shapes) instead of us hand-rolling it.
- */
-function veoOperationHandle(operationName: string): GenerateVideosOperation {
-  return Object.assign(new GenerateVideosOperation(), { name: operationName });
+// ---------------------------------------------------------------------------
+// MuAPI helpers (video generation via https://api.muapi.ai)
+// ---------------------------------------------------------------------------
+
+const MUAPI_BASE = "https://api.muapi.ai";
+
+async function muApiUploadImage(base64Data: string, mimeType: string): Promise<string> {
+  const buffer = Buffer.from(base64Data, "base64");
+  const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: mimeType }), `image.${ext}`);
+  const res = await fetch(`${MUAPI_BASE}/api/v1/upload_file`, {
+    method: "POST",
+    headers: { "x-api-key": process.env.MUAPI_API_KEY || "" },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`MuAPI upload failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const url = data.url || data.file_url || data.output_url;
+  if (!url) throw new Error("MuAPI upload returned no URL");
+  return url;
+}
+
+async function muApiSubmitVideo(imageUrl: string, prompt: string, duration: number): Promise<string> {
+  const endpoint = process.env.MUAPI_VIDEO_MODEL || "kling-v3.0-pro-image-to-video";
+  const res = await fetch(`${MUAPI_BASE}/api/v1/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": process.env.MUAPI_API_KEY || "" },
+    body: JSON.stringify({ prompt, image_url: imageUrl, duration, generate_audio: true }),
+  });
+  if (!res.ok) throw new Error(`MuAPI submit failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const requestId = data.request_id || data.id;
+  if (!requestId) throw new Error("MuAPI returned no request_id");
+  return requestId;
+}
+
+async function muApiPollVideo(requestId: string): Promise<{ done: boolean; videoUrl?: string; error?: string }> {
+  const res = await fetch(`${MUAPI_BASE}/api/v1/predictions/${requestId}/result`, {
+    headers: { "x-api-key": process.env.MUAPI_API_KEY || "" },
+  });
+  if (!res.ok) throw new Error(`MuAPI poll failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const status = String(data.status || "").toLowerCase();
+  if (status === "completed" || status === "succeeded" || status === "success") {
+    const videoUrl = data.outputs?.[0] || data.url || data.output?.url;
+    return { done: true, videoUrl };
+  }
+  if (status === "failed" || status === "error") {
+    return { done: true, error: data.error || "MuAPI generation failed" };
+  }
+  return { done: false };
 }
 
 function logPipelineRecovery(prefix: string, claim: RecoveryClaim): void {
@@ -6642,17 +6669,19 @@ async function startServer() {
     try {
       const { creationId } = req.body || {};
       const aspectRatio = normalizeVideoAspectRatio(req.body?.aspectRatio);
+      const rawDuration = Number(req.body?.durationSeconds);
+      const durationSeconds = Number.isFinite(rawDuration) ? Math.min(15, Math.max(5, rawDuration)) : 5;
       if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
       const scriptResult = AiVideoScriptSchema.safeParse(req.body?.script);
       if (!scriptResult.success) {
         return res.status(400).json({
           success: false,
-          error: "Choose a complete 8-second script with setting, characters, motion, stage directions, lighting, filter, and camera direction.",
+          error: "Choose a complete script with setting, characters, motion, stage directions, lighting, filter, and camera direction.",
         });
       }
       const script = scriptResult.data;
-      const compiledPrompt = compileEightSecondPrompt(script);
-      const providerModel = process.env.AI_VIDEO_MODEL || "veo-3.1-fast-generate-preview";
+      const compiledPrompt = compileEightSecondPrompt(script, Math.random, durationSeconds);
+      const providerModel = process.env.MUAPI_VIDEO_MODEL || "kling-v3.0-pro-image-to-video";
 
       const userPhone = req.user!.phone;
       const isAdmin = await isUserAdmin(userPhone);
@@ -6684,61 +6713,18 @@ async function startServer() {
         if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${VIDEO_COST} PupCoins.` });
       }
 
-      // 4. Prepare image bytes (fetch from URL if needed, or parse base64)
-      let imageBytes = "";
-      let mimeType = "image/jpeg";
+      // 4. Resolve the image as a URL for MuAPI (upload if base64, pass directly if already a URL)
+      let imageUrl: string;
       if (creation.image_url.startsWith("data:image")) {
         const matches = creation.image_url.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-        if (matches) {
-          mimeType = matches[1];
-          imageBytes = matches[2];
-        }
+        if (!matches) throw new Error("Invalid image data format");
+        imageUrl = await muApiUploadImage(matches[2], matches[1]);
       } else {
-        // Fetch from object storage URL
-        const imgRes = await fetch(creation.image_url);
-        if (!imgRes.ok) {
-          throw new Error(`Could not fetch the source image (${imgRes.status}). Please try another image.`);
-        }
-        const fetchedMimeType = imgRes.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-        if (!fetchedMimeType?.startsWith("image/")) {
-          throw new Error("The selected creation is not a usable image. Please choose a PNG, JPEG, or WebP image.");
-        }
-        mimeType = fetchedMimeType;
-        const buffer = await imgRes.arrayBuffer();
-        imageBytes = Buffer.from(buffer).toString("base64");
+        imageUrl = creation.image_url;
       }
 
-      // 5. Start Veo operation
-      const op = await ai.models.generateVideos({
-        model: providerModel,
-        prompt: compiledPrompt,
-        image: { imageBytes, mimeType },
-        // Veo 3 generates native sound. Its public API does not accept the old
-        // generateAudio flag, so sound and the optional short voice line are
-        // directed through the structured prompt.
-        //
-        // VG-1: the config previously carried only aspectRatio/duration/count
-        // and omitted every motion-quality lever the API exposes. Veo has no
-        // dedicated camera-motion parameter — motion comes from the prompt and
-        // is constrained by the negative prompt — so an empty negativePrompt
-        // left nothing steering the model away from frozen, stiff output. This
-        // is the single highest-impact fix for "stiff and rigid" videos.
-        config: {
-          aspectRatio,
-          durationSeconds: 8,
-          numberOfVideos: 1,
-          enhancePrompt: true,
-          negativePrompt: VEO_MOTION_NEGATIVE_PROMPT,
-          // Veo 3.1 only accepts allow_adult for image-to-video. Fur Reels
-          // still directs the model to animate the customer's pet through the
-          // prompt; this value is the provider's required safety-policy enum,
-          // not an instruction to introduce a person.
-          personGeneration: "allow_adult",
-        },
-      });
-
-      const operationName = (op as any).name || (op as any).operation?.name;
-      if (!operationName) throw new Error("Failed to get operation name from Veo");
+      // 5. Submit to MuAPI video generation
+      const operationName = await muApiSubmitVideo(imageUrl, compiledPrompt, durationSeconds);
 
       // 6. Create job in DB
       const jobId = await createJob({
@@ -6755,14 +6741,14 @@ async function startServer() {
         `INSERT INTO ai_video_requests
           (job_id, template_id, script_json, compiled_prompt, duration_seconds,
            aspect_ratio, generate_audio, voice_text, voice_id, provider, provider_model)
-         VALUES (?, ?, ?, ?, 8, ?, TRUE, ?, NULL, 'veo', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, TRUE, NULL, NULL, 'muapi', ?)`,
         [
           jobId,
           script.templateId || null,
           JSON.stringify(script),
           compiledPrompt,
+          durationSeconds,
           aspectRatio,
-          null, // voice_text is no longer used for Veo videos
           providerModel,
         ],
       );
@@ -6777,106 +6763,10 @@ async function startServer() {
     }
   });
 
-  // HeyGen "talking pet" video generation. Mirrors /api/create-video but uses
-  // HeyGen's photo-avatar (talking photo) pipeline instead of Veo. Reuses the
-  // same generation_jobs table + credit/rate-limit logic; the HeyGen video_id
-  // is stored in operation_name with a "heygen:" prefix so the shared pollers
-  // can route it correctly.
-  app.post("/api/create-talking-video", requireAuth, async (req: AuthedRequest, res) => {
-    let creditReservationId: string | null = null;
-    try {
-      const { creationId, script, voiceId } = req.body;
-      if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
-      if (!script || !String(script).trim()) {
-        return res.status(400).json({ success: false, error: "script is required (what the pet should say)." });
-      }
-
-      const userPhone = req.user!.phone;
-      const isAdmin = await isUserAdmin(userPhone);
-
-      // Rate limit + balance check (Admin bypass) — same rules as Veo video.
-      if (!isAdmin) {
-        const dailyCount = await getDailyVideoCount(userPhone);
-        if (dailyCount >= MAX_DAILY_VIDEOS) {
-          return res.status(429).json({ success: false, error: `Daily video limit reached (${MAX_DAILY_VIDEOS}/day). Please try again tomorrow.` });
-        }
-        const balance = await getCreditBalance(userPhone);
-        if (balance < CREDIT_PRICES.LIP_SYNC_30_SECONDS) {
-          return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${CREDIT_PRICES.LIP_SYNC_30_SECONDS} PupCoins.` });
-        }
-      }
-
-      // Fetch creation to get the image.
-      const creations = await getCreations(userPhone);
-      const creation = creations.find((c: any) => c.id === creationId);
-      if (!creation || !creation.image_url) {
-        return res.status(404).json({ success: false, error: "Creation not found or has no image." });
-      }
-
-      // Deduct credits upfront (Admin bypass: skip deduction).
-      if (!isAdmin) {
-        creditReservationId = await reserveCredits(userPhone, CREDIT_PRICES.LIP_SYNC_30_SECONDS, "lip_sync");
-        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${CREDIT_PRICES.LIP_SYNC_30_SECONDS} PupCoins.` });
-      }
-
-      // Prepare image bytes (parse base64 data URL, or fetch from storage URL).
-      let imageBuffer: Buffer;
-      let mimeType = "image/jpeg";
-      if (creation.image_url.startsWith("data:image")) {
-        const matches = creation.image_url.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-        if (!matches) {
-          if (creditReservationId) {
-            await refundReservedCredits(creditReservationId);
-            creditReservationId = null;
-          }
-          return res.status(400).json({ success: false, error: "Invalid creation image data." });
-        }
-        mimeType = matches[1];
-        imageBuffer = Buffer.from(matches[2], "base64");
-      } else {
-        const imgRes = await fetch(creation.image_url);
-        imageBuffer = Buffer.from(await imgRes.arrayBuffer());
-        const ct = imgRes.headers.get("content-type");
-        if (ct && ct.startsWith("image/")) mimeType = ct;
-      }
-
-      // Start HeyGen generation. On failure, refund the reserved credits.
-      let handle: string;
-      try {
-        handle = await startTalkingVideo({
-          imageBuffer,
-          mimeType,
-          script: String(script),
-          voiceId: voiceId || undefined,
-        });
-      } catch (genErr: any) {
-        if (creditReservationId) {
-          await refundReservedCredits(creditReservationId);
-          creditReservationId = null;
-        }
-        console.error("HeyGen start error:", genErr);
-        return res.status(502).json({ success: false, error: genErr.message || "Failed to start talking video." });
-      }
-
-      // Create job in DB (kind 'video', handle stored with heygen: prefix).
-      const jobId = await createJob({
-        user_phone: userPhone,
-        creation_id: creationId,
-        kind: "video",
-        credits_reserved: creditReservationId ? CREDIT_PRICES.LIP_SYNC_30_SECONDS : 0,
-        credit_debit_correlation_id: creditReservationId,
-        operation_name: handle,
-      });
-      creditReservationId = null; // durable job now owns any refund decision
-
-      res.status(202).json({ success: true, jobId, status: "queued" });
-    } catch (err: any) {
-      if (creditReservationId) {
-        try { await refundReservedCredits(creditReservationId); } catch {}
-      }
-      console.error("Error creating talking video:", err);
-      res.status(500).json({ success: false, error: err.message || "Failed to start talking video generation." });
-    }
+  // /api/create-talking-video (HeyGen) removed — all video generation goes
+  // through /api/create-video (Veo). 410 so stale clients get a clear message.
+  app.post("/api/create-talking-video", (_req, res) => {
+    res.status(410).json({ success: false, error: "Use /api/create-video instead." });
   });
 
 
@@ -7497,38 +7387,6 @@ async function startServer() {
 
       // If running, poll the operation
       if (job.status === "running" || job.status === "queued") {
-        // --- HeyGen talking-video branch ---
-        if (job.operation_name && isHeyGenHandle(job.operation_name)) {
-          if (job.creation_id === null) {
-            return res.status(409).json({ success: false, status: job.status, error: "This video job has no creation target and cannot be finalized by the HTTP status route." });
-          }
-          try {
-            const result = await pollTalkingVideo(job.operation_name);
-            if (result.done) {
-              if (result.videoUrl) {
-                const dataUrl = await fetchMp4AsDataUrl(result.videoUrl);
-                const videoUrl = await uploadBase64Image(dataUrl);
-                if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
-                  const current = await getJob(jobId, req.user!.phone);
-                  return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
-                }
-                await setCreationVideoUrl(job.creation_id!, req.user!.phone, videoUrl);
-                await sendSms(req.user!.phone, `🐾 Paws & Memories: Your talking pet video is ready! View it at ${process.env.APP_URL || "your app"}.`);
-                return res.json({ success: true, status: "done", video_url: videoUrl });
-              } else {
-                await failGenerationJobAndRefundOnce(getPool(), jobId, result.error || "HeyGen generation failed");
-                return res.json({ success: true, status: "failed", error: result.error || "HeyGen generation failed" });
-              }
-            } else {
-              await updateJobStatus(jobId, "running");
-            }
-          } catch (pollErr: any) {
-            console.error("HeyGen poll error:", pollErr);
-            await failGenerationJobAndRefundOnce(getPool(), jobId, pollErr.message);
-            return res.json({ success: true, status: "failed", error: pollErr.message });
-          }
-          return res.json({ success: true, status: job.status, video_url: null, error: job.error });
-        }
         // --- Meshy 3D-model branch ---
         if (job.operation_name && isTripoHandle(job.operation_name)) {
           const providerGate = await claimPipelineProviderPoll(jobId);
@@ -7609,42 +7467,29 @@ async function startServer() {
           }
           return res.json({ success: true, status: job.status, model_url: null, error: job.error });
         }
-        // --- Veo (Gemini) branch ---
+        // --- MuAPI video branch ---
         if (job.operation_name) {
           try {
-            const op: any = await ai.operations.getVideosOperation({ operation: veoOperationHandle(job.operation_name) });
-            if (op.done) {
-              if (op.response?.generatedVideos?.[0]?.video) {
-                const videoData: any = op.response.generatedVideos[0].video;
-                let videoUrl: string;
-                if (videoData.uri) {
-                  const gcsRes = await fetch(videoData.uri, { headers: process.env.GEMINI_API_KEY ? { "x-goog-api-key": process.env.GEMINI_API_KEY } : undefined });
-                  if (!gcsRes.ok) throw new Error(`Video download failed (${gcsRes.status})`);
-                  const buf = Buffer.from(await gcsRes.arrayBuffer());
-                  videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
-                } else if (videoData.imageBytes) {
-                  videoUrl = await uploadBase64Image(`data:video/mp4;base64,${videoData.imageBytes}`);
-                } else {
-                  throw new Error("Veo returned no video URI or bytes");
-                }
-                
-                // Update DB
+            const result = await muApiPollVideo(job.operation_name);
+            if (result.done) {
+              if (result.videoUrl) {
+                const videoRes = await fetch(result.videoUrl);
+                if (!videoRes.ok) throw new Error(`Video download failed (${videoRes.status})`);
+                const buf = Buffer.from(await videoRes.arrayBuffer());
+                const videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
+
                 if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
                   const current = await getJob(jobId, req.user!.phone);
                   return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
                 }
                 await setCreationVideoUrl(job.creation_id!, req.user!.phone, videoUrl);
-                
                 await sendSms(req.user!.phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
-                
                 return res.json({ success: true, status: "done", video_url: videoUrl });
               } else {
-                // Failed or empty response
-                await failGenerationJobAndRefundOnce(getPool(), jobId, "No video generated");
-                return res.json({ success: true, status: "failed", error: "Generation returned no video" });
+                await failGenerationJobAndRefundOnce(getPool(), jobId, result.error || "No video generated");
+                return res.json({ success: true, status: "failed", error: result.error || "Generation returned no video" });
               }
             } else {
-              // Still running
               await updateJobStatus(jobId, "running");
             }
           } catch (pollErr: any) {
@@ -7729,87 +7574,6 @@ async function startServer() {
           continue;
         }
         if (!job.operation_name) continue;
-        // --- HeyGen talking-video branch ---
-        const heyGenOperation = animatorOperation?.providerOperationName || job.operation_name;
-        if (isHeyGenHandle(heyGenOperation)) {
-          if (animatorOperation) {
-            const {
-              claimVoiceoverFinalizer,
-              releaseVoiceoverFinalizer,
-              markVoiceoverDone,
-              failVoiceoverAndRefundOnce,
-              persistVoicedResult,
-            } = await import("./server/animator/voicedResults.ts");
-            const leaseOwner = await claimVoiceoverFinalizer(job.id, job.user_phone);
-            if (!leaseOwner) continue;
-            const cleanup: string[] = [];
-            try {
-              const result = await pollTalkingVideo(animatorOperation.providerOperationName);
-              if (!result.done) {
-                await releaseVoiceoverFinalizer(job.id, leaseOwner);
-                continue;
-              }
-              if (!result.videoUrl) {
-                await failVoiceoverAndRefundOnce(job.id, leaseOwner, result.error || "Voiceover provider returned no video");
-                continue;
-              }
-              const { getOwnedRecording, validateRecordingUpload } = await import("./server/animator/recordings.ts");
-              const { resolveWithinWorkspace, ANIMATOR_DATA_DIR } = await import("./server/animator/paths.ts");
-              const { muxAudioBed } = await import("./server/animator/audioMux.ts");
-              const recording = getOwnedRecording(animatorOperation.recordingId, job.user_phone);
-              if (!recording) throw new Error("Owner recording is missing or inaccessible");
-              const providerResponse = await fetch(result.videoUrl);
-              if (!providerResponse.ok) throw new Error(`Voiceover download failed (${providerResponse.status})`);
-              const declaredLength = Number(providerResponse.headers.get("content-length") || 0);
-              if (declaredLength > 25 * 1024 * 1024) throw new Error("Voiceover download exceeds size limit");
-              const providerBytes = Buffer.from(await providerResponse.arrayBuffer());
-              if (providerBytes.length > 25 * 1024 * 1024) throw new Error("Voiceover download exceeds size limit");
-              validateRecordingUpload(providerBytes, "video/mp4");
-              const providerPath = resolveWithinWorkspace(`tmp/voiceover-${job.id}-${randomUUID()}.mp4`, ANIMATOR_DATA_DIR);
-              const outputExtension = recording.mimeType === "video/mp4" ? "mp4" : "webm";
-              const outputPath = resolveWithinWorkspace(`tmp/voiced-${job.id}-${randomUUID()}.${outputExtension}`, ANIMATOR_DATA_DIR);
-              cleanup.push(providerPath, outputPath);
-              await fs.promises.mkdir(path.dirname(providerPath), { recursive: true });
-              await fs.promises.writeFile(providerPath, providerBytes, { flag: "wx" });
-              await muxAudioBed({ workspaceRoot: ANIMATOR_DATA_DIR, videoPath: `recordings/${recording.fileName}`, audioSources: [{ path: path.relative(ANIMATOR_DATA_DIR, providerPath), gain: 1 }], outputPath: path.relative(ANIMATOR_DATA_DIR, outputPath), maxDuration: 10 });
-              const voicedBytes = await fs.promises.readFile(outputPath);
-              const outputMime = outputExtension === "mp4" ? "video/mp4" : "video/webm";
-              const durableUrl = await uploadBase64Binary(voicedBytes.toString("base64"), outputMime, "animator-voiced-results");
-              if (!durableUrl) throw new Error("Durable voiced-result publication returned no URL");
-              persistVoicedResult({ jobId: job.id, ownerId: job.user_phone, recordingId: animatorOperation.recordingId, resultUrl: durableUrl, mimeType: outputMime, bytes: voicedBytes });
-              if (!await markVoiceoverDone(job.id, leaseOwner)) throw new Error("Voiceover finalizer lease was lost before completion");
-            } catch (err: any) {
-              const reason = `Voiceover finalization failed: ${String(err?.message || err).replace(/[\r\n\t]+/g, " ").slice(0, 420)}`;
-              console.error(`Background Animator voiceover error for job ${job.id}:`, err);
-              await failVoiceoverAndRefundOnce(job.id, leaseOwner, reason);
-            } finally {
-              for (const candidate of cleanup) await fs.promises.rm(candidate, { force: true }).catch(() => undefined);
-            }
-            continue;
-          }
-          try {
-            const result = await pollTalkingVideo(heyGenOperation);
-            if (result.done) {
-              if (result.videoUrl) {
-                // Standard create-video HeyGen flow
-                const dataUrl = await fetchMp4AsDataUrl(result.videoUrl);
-                const videoUrl = await uploadBase64Image(dataUrl);
-                if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
-                if (job.creation_id) {
-                  await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
-                }
-                await sendSms(job.user_phone, `🐾 Paws & Memories: Your talking pet video is ready! View it at ${process.env.APP_URL || "your app"}.`);
-              } else {
-                await failGenerationJobAndRefundOnce(getPool(), job.id, result.error || "HeyGen generation failed");
-              }
-            }
-          } catch (err: any) {
-            const reason = String(err?.message || err).slice(0, 480);
-            console.error(`Background HeyGen poller error for job ${job.id}:`, err);
-            await failGenerationJobAndRefundOnce(getPool(), job.id, `HeyGen poll failed: ${reason}`);
-          }
-          continue;
-        }
         // --- Meshy 3D-model branch ---
         if (isTripoHandle(job.operation_name)) {
           const providerGate = await claimPipelineProviderPoll(job.id);
@@ -7886,37 +7650,27 @@ async function startServer() {
           }
           continue;
         }
-        // --- Veo (Gemini) branch ---
+        // --- MuAPI video branch ---
         try {
-          const op: any = await ai.operations.getVideosOperation({ operation: veoOperationHandle(job.operation_name) });
-          if (op.done) {
-            if (op.response?.generatedVideos?.[0]?.video) {
-              const videoData: any = op.response.generatedVideos[0].video;
-              let videoUrl: string;
-              if (videoData.uri) {
-                const gcsRes = await fetch(videoData.uri, { headers: process.env.GEMINI_API_KEY ? { "x-goog-api-key": process.env.GEMINI_API_KEY } : undefined });
-                if (!gcsRes.ok) throw new Error(`Video download failed (${gcsRes.status})`);
-                const buf = Buffer.from(await gcsRes.arrayBuffer());
-                videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
-              } else if (videoData.imageBytes) {
-                videoUrl = await uploadBase64Image(`data:video/mp4;base64,${videoData.imageBytes}`);
-              } else {
-                throw new Error("Veo returned no video URI or bytes");
-              }
-              
+          const result = await muApiPollVideo(job.operation_name);
+          if (result.done) {
+            if (result.videoUrl) {
+              const videoRes = await fetch(result.videoUrl);
+              if (!videoRes.ok) throw new Error(`Video download failed (${videoRes.status})`);
+              const buf = Buffer.from(await videoRes.arrayBuffer());
+              const videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
               if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
               if (job.creation_id) {
                 await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
               }
-              
               await sendSms(job.user_phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
             } else {
-              await failGenerationJobAndRefundOnce(getPool(), job.id, "No video generated");
+              await failGenerationJobAndRefundOnce(getPool(), job.id, result.error || "No video generated");
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error(`Background poller error for job ${job.id}:`, err);
-          await failGenerationJobAndRefundOnce(getPool(), job.id, "Poller error");
+          await failGenerationJobAndRefundOnce(getPool(), job.id, err?.message || "Poller error");
         }
       }
     } catch (e) {

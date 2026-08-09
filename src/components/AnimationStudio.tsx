@@ -14,17 +14,41 @@ interface AnimationStudioProps {
 }
 
 type EditableScript = AiVideoScriptTemplate;
+type ScriptMode = "template" | "custom";
 
 function editable(template: AiVideoScriptTemplate): EditableScript {
   return { ...template, stageDirections: [...template.stageDirections] };
 }
 
+function buildCustomScript(title: string, description: string): EditableScript {
+  return {
+    ...DEFAULT_AI_VIDEO_SCRIPT,
+    id: "custom",
+    title: title.trim() || "Custom Scene",
+    genre: "cinematic pet portrait",
+    motions: description.trim() || DEFAULT_AI_VIDEO_SCRIPT.motions,
+    stageDirections: [
+      description.trim() || DEFAULT_AI_VIDEO_SCRIPT.stageDirections[0],
+      DEFAULT_AI_VIDEO_SCRIPT.stageDirections[1],
+      DEFAULT_AI_VIDEO_SCRIPT.stageDirections[2],
+      DEFAULT_AI_VIDEO_SCRIPT.stageDirections[3],
+    ],
+  };
+}
+
+const VEO_MIN_SECONDS = 5;
+const VEO_MAX_SECONDS = 15;
+
 /** Customer guided video generation: a directed script, never a manual timeline editor. */
 export default function AnimationStudio({ creations, userProfile, onOpenCreditStore, onClose, onCreationsChanged }: AnimationStudioProps) {
   const images = useMemo(() => creations.filter((creation) => creation.image_url), [creations]);
   const [selectedId, setSelectedId] = useState<number | null>(images[0]?.id ?? null);
+  const [scriptMode, setScriptMode] = useState<ScriptMode>("template");
   const [script, setScript] = useState<EditableScript>(() => editable(DEFAULT_AI_VIDEO_SCRIPT));
+  const [customTitle, setCustomTitle] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
   const [aspect, setAspect] = useState<"16:9" | "9:16">("9:16");
+  const [duration, setDuration] = useState(VEO_MAX_SECONDS);
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +57,10 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const cost = CREDIT_PRICES.ANIMATED_VIDEO;
   const canAfford = userProfile.isAdmin || (userProfile.credits ?? 0) >= cost;
   const selected = images.find((creation) => creation.id === selectedId) || null;
+
+  const activeScript = scriptMode === "custom"
+    ? buildCustomScript(customTitle, customDescription)
+    : script;
 
   const uploadAnotherPhoto = async (file: File | undefined) => {
     if (!file) return;
@@ -66,8 +94,6 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
     setScript((current) => ({ ...current, stageDirections: directions }));
   };
 
-
-
   const generate = async () => {
     if (!selected) { setError("Pick an image to animate first."); return; }
     if (!canAfford) { onOpenCreditStore(); return; }
@@ -75,7 +101,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
     setResultUrl(null);
     setStatus("generating");
     try {
-      const { jobId } = await createVideo(selected.id, script, true, aspect);
+      const { jobId } = await createVideo(selected.id, activeScript, aspect, duration);
       for (let attempt = 0; attempt < 150; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 4000));
         try {
@@ -115,12 +141,12 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
       <header className="mx-auto mb-2 grid max-w-[1720px] shrink-0 gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-outline-variant/25 bg-surface/90 px-4 py-2 shadow-sm">
           <Film size={22} className="shrink-0 text-primary" />
-          <div className="min-w-0"><h1 id="ai-video-title" className="truncate text-lg font-black text-on-surface">Fur Reels</h1><p className="truncate text-xs text-on-surface-variant">Direct an eight-second pet story with picture, motion, and sound.</p></div>
+          <div className="min-w-0"><h1 id="ai-video-title" className="truncate text-lg font-black text-on-surface">Fur Reels</h1><p className="truncate text-xs text-on-surface-variant">Direct a pet story with picture, motion, and natural sound.</p></div>
           <button type="button" onClick={onClose} className="ml-auto rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
         </div>
         <dl className="grid min-w-0 grid-cols-4 gap-2">
-          <div className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-primary/70">Length</dt><dd className="text-sm font-black text-primary">8 seconds</dd></div>
-          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Story</dt><dd className="truncate text-sm font-black">{script.title}</dd></div>
+          <div className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-primary/70">Length</dt><dd className="text-sm font-black text-primary">{duration}s</dd></div>
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Story</dt><dd className="truncate text-sm font-black">{activeScript.title}</dd></div>
           <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Frame</dt><dd className="text-sm font-black">{aspect}</dd></div>
           <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low px-3 py-2"><dt className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant">Price</dt><dd className="text-sm font-black">{cost} PupCoins</dd></div>
         </dl>
@@ -139,11 +165,12 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
       {status === "generating" ? (
         <section className="flex flex-col items-center justify-center gap-4 py-20 text-on-surface-variant">
           <RefreshCw className="animate-spin text-primary" size={32} />
-          <p className="font-bold">Generating the complete 8-second scene and sound…</p>
+          <p className="font-bold">Generating your {duration}-second scene and natural sound…</p>
           <p className="text-xs">The job is registered, so it continues safely if you leave this page.</p>
         </section>
       ) : (
         <div className="mx-auto grid h-[calc(100%-4.75rem)] min-h-0 max-w-[1720px] gap-2 lg:overflow-hidden lg:grid-cols-[minmax(220px,.72fr)_minmax(0,1.35fr)_minmax(280px,.9fr)]">
+          {/* Left — image picker */}
           <section data-dashboard-region="left" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
             <div>
               <h2 className="text-sm font-black text-on-surface">Your uploads</h2>
@@ -162,51 +189,105 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
             </div>
           </section>
 
+          {/* Center — script editor */}
           <section data-dashboard-region="center" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface-container-lowest p-4 shadow-sm [scrollbar-width:thin] sm:p-5">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
               <h2 className="text-sm font-black text-on-surface">What works best</h2>
-              {/* VG-6: this guidance previously said "Four simple two-second
-                  beats" and "Slow movement and one smooth camera move", which
-                  pushed people toward writing the minimal, stiff prompts the
-                  model then faithfully rendered. Safety guidance below is
-                  unchanged; the motion guidance now asks for continuity. */}
               <ul className="mt-2 space-y-1 text-xs leading-relaxed text-on-surface-variant"><li>• One main pet and one clear action</li><li>• Describe continuous, lifelike motion — what the pet does, how it moves, and how the environment reacts</li><li>• One smooth, motivated camera move (slow push-in, arc, or parallax) — avoid static shots</li><li>• Let motion flow between beats rather than freezing between them</li><li>• Consistent setting, lighting, and pet identity</li></ul>
               <p className="mt-2 text-xs font-bold text-primary">Avoid rapid cuts, crowds, costume changes, collisions, tiny props, and complex choreography.</p>
             </div>
-            <div>
-              <label htmlFor="ai-video-template" className="text-sm font-black text-on-surface">Choose an 8-second story</label>
-              <select id="ai-video-template" value={script.id} onChange={(event) => selectTemplate(event.target.value)} className="mt-2 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-3 text-sm text-on-surface">
-                {AI_VIDEO_SCRIPTS.map((template) => <option key={template.id} value={template.id}>{template.title} · {template.genre}</option>)}
-              </select>
-            </div>
 
-            <div className="grid gap-3">
-              {field("Setting", "setting")}
-              {field("Characters and identity", "characters")}
-              {field("Motions", "motions")}
-              <fieldset className="space-y-2">
-                {/* LIVE-4: VG-3 relaxed the schema from a fixed 4-tuple to 3-6
-                    beats and stripped the literal 0-2s/2-4s timestamps, but this
-                    copy still promised "four timed" directions. */}
-                <legend className="text-xs font-bold text-on-surface">Stage directions, in order</legend>
-                {script.stageDirections.map((direction, index) => (
-                  <input key={index} value={direction} onChange={(event) => updateStageDirection(index, event.target.value)} className="w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" aria-label={`Stage direction ${index + 1}`} />
-                ))}
-              </fieldset>
-              {field("Lighting", "lighting")}
-              {field("Color and filter", "filter")}
-              {field("Camera direction", "camera")}
+            {/* Script mode toggle */}
+            <div>
+              <div className="mb-3 flex overflow-hidden rounded-xl border border-outline-variant/40">
+                <button type="button" onClick={() => setScriptMode("template")} className={`flex-1 px-3 py-2 text-sm font-bold ${scriptMode === "template" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Choose a template</button>
+                <button type="button" onClick={() => setScriptMode("custom")} className={`flex-1 px-3 py-2 text-sm font-bold ${scriptMode === "custom" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Write your own</button>
+              </div>
+
+              {scriptMode === "template" ? (
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="ai-video-template" className="text-sm font-black text-on-surface">Story</label>
+                    <select id="ai-video-template" value={script.id} onChange={(event) => selectTemplate(event.target.value)} className="mt-2 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-3 text-sm text-on-surface">
+                      {AI_VIDEO_SCRIPTS.map((template) => <option key={template.id} value={template.id}>{template.title} · {template.genre}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid gap-3">
+                    {field("Setting", "setting")}
+                    {field("Characters and identity", "characters")}
+                    {field("Motions", "motions")}
+                    <fieldset className="space-y-2">
+                      <legend className="text-xs font-bold text-on-surface">Stage directions, in order</legend>
+                      {script.stageDirections.map((direction, index) => (
+                        <input key={index} value={direction} onChange={(event) => updateStageDirection(index, event.target.value)} className="w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" aria-label={`Stage direction ${index + 1}`} />
+                      ))}
+                    </fieldset>
+                    {field("Lighting", "lighting")}
+                    {field("Color and filter", "filter")}
+                    {field("Camera direction", "camera")}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <label className="block text-xs font-bold text-on-surface">
+                    Title
+                    <input
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      placeholder="e.g. Midnight Garden Chase"
+                      className="mt-1 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm font-normal text-on-surface"
+                    />
+                  </label>
+                  <label className="block text-xs font-bold text-on-surface">
+                    Script / scene description
+                    <textarea
+                      value={customDescription}
+                      onChange={(e) => setCustomDescription(e.target.value)}
+                      rows={6}
+                      placeholder="Describe what you want the pet to do, the setting, lighting, mood, and any camera moves. The more vivid and specific, the better the result."
+                      className="mt-1 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm font-normal text-on-surface"
+                    />
+                  </label>
+                  <p className="text-xs text-on-surface-variant">Your description drives the motion prompt directly. You can be as cinematic or as simple as you like.</p>
+                </div>
+              )}
             </div>
           </section>
 
+          {/* Right — settings + generate */}
           <aside data-dashboard-region="right" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
             <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-5">
-              <h2 className="text-sm font-black text-on-surface">3. Frame and generate</h2>
+              <h2 className="text-sm font-black text-on-surface">Frame and generate</h2>
+
+              {/* Aspect ratio */}
               <div className="mt-3 flex overflow-hidden rounded-xl border border-outline-variant/40">
                 <button type="button" onClick={() => setAspect("9:16")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "9:16" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Portrait</button>
                 <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
               </div>
-              <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Exactly 8 seconds · directed beats that flow together · native sound · identity protection</div>
+
+              {/* Duration slider */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="duration-slider" className="text-xs font-bold text-on-surface">Duration</label>
+                  <span className="text-xs font-black text-primary">{duration} seconds</span>
+                </div>
+                <input
+                  id="duration-slider"
+                  type="range"
+                  min={VEO_MIN_SECONDS}
+                  max={VEO_MAX_SECONDS}
+                  step={1}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="mt-2 w-full accent-primary"
+                />
+                <div className="flex justify-between text-[10px] text-on-surface-variant">
+                  <span>{VEO_MIN_SECONDS}s</span>
+                  <span>{VEO_MAX_SECONDS}s max</span>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Directed beats that flow together · native natural sound · identity protection</div>
               <p className="mt-3 text-xs leading-relaxed text-on-surface-variant">Your finished Fur Reels are saved to your account and appear here when you return.</p>
               {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
               <button type="button" onClick={() => void generate()} disabled={!selected} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-primary py-4 font-extrabold text-on-primary disabled:opacity-50">

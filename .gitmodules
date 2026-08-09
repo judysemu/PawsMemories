@@ -1,0 +1,3 @@
+[submodule "tools/gitreverse"]
+	path = tools/gitreverse
+	url = https://github.com/filiksyos/gitreverse.git

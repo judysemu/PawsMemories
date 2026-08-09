@@ -569,8 +569,8 @@ export async function updateCreationOrder(id: number, sortOrder: number): Promis
 export async function createVideo(
   creationId: number,
   script: AiVideoScriptTemplate | string,
-  generateAudio: boolean = true,
-  aspectRatio: "16:9" | "9:16" = "9:16"
+  aspectRatio: "16:9" | "9:16" = "9:16",
+  durationSeconds: number = 8,
 ): Promise<{ jobId: number }> {
   const normalizedScript = typeof script === "string"
     ? { ...DEFAULT_AI_VIDEO_SCRIPT, motions: script }
@@ -579,19 +579,9 @@ export async function createVideo(
   const res = await authedFetch("/api/create-video", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ creationId, script: { ...scriptFields, templateId }, generateAudio, aspectRatio }),
+    body: JSON.stringify({ creationId, script: { ...scriptFields, templateId }, aspectRatio, durationSeconds }),
   });
   if (!res.ok) throw new Error(await parseError(res, "Failed to start video generation."));
-  return await res.json();
-}
-
-export async function createTalkingVideo(creationId: number, script: string, voiceId?: string): Promise<{ jobId: number }> {
-  const res = await authedFetch("/api/create-talking-video", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ creationId, script, voiceId }),
-  });
-  if (!res.ok) throw new Error(await parseError(res, "Failed to start talking video generation."));
   return await res.json();
 }
 

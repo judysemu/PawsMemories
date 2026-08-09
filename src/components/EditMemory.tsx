@@ -432,7 +432,7 @@ export default function EditMemory({
                    setErrorMessage("");
                    const motionPreset = MOTION_PRESETS.find(p => p.value === selectedMotionPreset) ?? DEFAULT_MOTION_PRESET;
                    try {
-                     const { jobId } = await createVideo(generatedResult.id, motionPreset.prompt, true);
+                     const { jobId } = await createVideo(generatedResult.id, motionPreset.prompt);
 
                      videoPollingRef.current = setInterval(async () => {
                        try {

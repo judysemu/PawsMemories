@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Copy, Check, Download, Share2, Compass, ShieldAlert, Heart, Calendar, MessageSquare, ExternalLink, Sparkles, ShoppingBag, Video, Music } from "lucide-react";
+import { ArrowLeft, Copy, Check, Download, Share2, Compass, ShieldAlert, Heart, ExternalLink, Sparkles, ShoppingBag, Video } from "lucide-react";
 import { Creation } from "../types";
 import { authedFetch } from "../api";
 import OrderAlbumModal from "./OrderAlbumModal";
@@ -18,8 +18,6 @@ export default function ShareMemory({ creation, userCredits, onBack, isAdmin }: 
   const [copied, setCopied] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [showAnimateModal, setShowAnimateModal] = useState(false);
-  const [selectedMotion, setSelectedMotion] = useState<"subtle" | "dynamic">("subtle");
-  const [enableAudio, setEnableAudio] = useState(true);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<"16:9" | "9:16">("16:9");
   const [animatingJobId, setAnimatingJobId] = useState<number | null>(null);
   const [pollStatus, setPollStatus] = useState<string>("");
@@ -65,7 +63,7 @@ export default function ShareMemory({ creation, userCredits, onBack, isAdmin }: 
     }
     setShowAnimateModal(false);
     try {
-      const res = await createVideo(localCreation.id, selectedMotion, enableAudio, selectedAspectRatio);
+      const res = await createVideo(localCreation.id, "subtle cinematic motion", selectedAspectRatio);
       startPolling(res.jobId);
     } catch (err: any) {
       alert(err.message || "Failed to start animation.");
@@ -427,33 +425,6 @@ export default function ShareMemory({ creation, userCredits, onBack, isAdmin }: 
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-on-surface-variant mb-1.5 block uppercase tracking-wider">Motion Style</label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setSelectedMotion("subtle")}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border ${
-                      selectedMotion === "subtle"
-                        ? "bg-primary/10 border-primary text-primary"
-                        : "bg-surface-container border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high"
-                    }`}
-                  >
-                    Subtle & Calm
-                  </button>
-                  <button
-                    onClick={() => setSelectedMotion("dynamic")}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border ${
-                      selectedMotion === "dynamic"
-                        ? "bg-primary/10 border-primary text-primary"
-                        : "bg-surface-container border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high"
-                    }`}
-                  >
-                    Dynamic Action
-                  </button>
-                </div>
-              </div>
-
-
               {/* Aspect Ratio */}
               <div className="flex items-center justify-between bg-surface-container p-3 rounded-xl border border-outline-variant/30">
                 <div>
@@ -486,25 +457,7 @@ export default function ShareMemory({ creation, userCredits, onBack, isAdmin }: 
                 </div>
               </div>
 
-              <div className="flex items-center justify-between bg-surface-container p-3 rounded-xl border border-outline-variant/30">
-                <div className="flex items-center gap-2">
-                  <Music size={16} className={enableAudio ? "text-primary" : "text-on-surface-variant"} />
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold">Include Ambient Audio</span>
-                    <span className="text-[9px] text-on-surface-variant">AI generated soundscape</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setEnableAudio(!enableAudio)}
-                  className={`w-10 h-6 rounded-full transition-colors relative ${
-                    enableAudio ? "bg-primary" : "bg-outline-variant"
-                  }`}
-                >
-                  <span className={`absolute top-1 bottom-1 w-4 bg-white rounded-full transition-all ${
-                    enableAudio ? "right-1" : "left-1"
-                  }`} />
-                </button>
-              </div>
+              <p className="text-xs text-on-surface-variant">Natural ambient sound is generated automatically by Veo — no separate audio step needed.</p>
 
               <div className="pt-2 flex gap-3">
                 <button

@@ -89,18 +89,14 @@ export function stripBeatTimestamp(beat: string): string {
 export function compileEightSecondPrompt(
   script: AiVideoScript,
   random: () => number = Math.random,
+  durationSeconds: number = 8,
 ): string {
   const voice = "Audio: generate natural ambience, movement sounds, and restrained cinematic sound design; no spoken dialogue.";
 
   const beats = script.stageDirections.map(stripBeatTimestamp).filter(Boolean);
 
-  // VG-2: the old prompt was terse and label-shaped ("Primary motions: ..."),
-  // joined beats with a flat " | ", contained no cinematic motion verbs and no
-  // secondary-motion direction, and closed on a constraint line that biased
-  // the model toward stillness. Every line below asks for continuous, weighted
-  // movement instead.
   return [
-    `Create exactly one polished 8-second ${script.genre} pet video titled ${JSON.stringify(script.title)}.`,
+    `Create exactly one polished ${durationSeconds}-second ${script.genre} pet video titled ${JSON.stringify(script.title)}.`,
     "Preserve the source pet's identity, face, coat pattern, colors, anatomy, and proportions in every frame, while keeping the animal alive and in motion — do not freeze or hold the pose unless a beat explicitly says 'hold'. Do not add or remove animals.",
     `Setting: ${script.setting}.`,
     `Characters: ${script.characters}.`,
