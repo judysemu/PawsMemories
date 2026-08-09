@@ -6762,7 +6762,7 @@ async function startServer() {
           JSON.stringify(script),
           compiledPrompt,
           aspectRatio,
-          script.voiceText || null,
+          null, // voice_text is no longer used for Veo videos
           providerModel,
         ],
       );

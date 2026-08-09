@@ -21,7 +21,6 @@ export const AiVideoScriptSchema = z.object({
   lighting: z.string().trim().min(3).max(500),
   filter: z.string().trim().min(3).max(500),
   camera: z.string().trim().min(3).max(500),
-  voiceText: z.string().trim().max(160).optional().default(""),
 }).strict();
 
 export type AiVideoScript = z.infer<typeof AiVideoScriptSchema>;
@@ -91,9 +90,7 @@ export function compileEightSecondPrompt(
   script: AiVideoScript,
   random: () => number = Math.random,
 ): string {
-  const voice = script.voiceText
-    ? `Audio and voice: generate natural scene sound and have the main character speak this exact short line clearly once: ${JSON.stringify(script.voiceText)}.`
-    : "Audio: generate natural ambience, movement sounds, and restrained cinematic sound design; no spoken dialogue.";
+  const voice = "Audio: generate natural ambience, movement sounds, and restrained cinematic sound design; no spoken dialogue.";
 
   const beats = script.stageDirections.map(stripBeatTimestamp).filter(Boolean);
 
