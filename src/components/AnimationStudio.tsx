@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Download, Film, ImagePlus, Mic2, Play, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
+import { Download, Film, ImagePlus, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
 import { Creation, UserProfile } from "../types";
-import { addUserPhoto, createVideo, createVoicePreview, pollJob } from "../api";
+import { addUserPhoto, createVideo, pollJob } from "../api";
 import { AI_VIDEO_SCRIPTS, DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "../aiVideoScripts";
 import { CREDIT_PRICES } from "../pricing";
 
@@ -28,8 +28,6 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [voiceStatus, setVoiceStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [voiceAudio, setVoiceAudio] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState("");
 
   const cost = CREDIT_PRICES.ANIMATED_VIDEO;
@@ -60,8 +58,6 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const selectTemplate = (templateId: string) => {
     const template = AI_VIDEO_SCRIPTS.find((candidate) => candidate.id === templateId) || DEFAULT_AI_VIDEO_SCRIPT;
     setScript(editable(template));
-    setVoiceAudio(null);
-    setVoiceStatus("idle");
   };
 
   const updateStageDirection = (index: number, value: string) => {
@@ -70,19 +66,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
     setScript((current) => ({ ...current, stageDirections: directions }));
   };
 
-  const previewVoice = async () => {
-    if (!script.voiceText.trim()) return;
-    setVoiceStatus("loading");
-    setVoiceAudio(null);
-    try {
-      const preview = await createVoicePreview(script.voiceText.trim());
-      setVoiceAudio(`data:${preview.mimeType};base64,${preview.audioBase64}`);
-      setVoiceStatus("ready");
-    } catch (voiceError: any) {
-      setVoiceStatus("error");
-      setError(voiceError?.message || "The voice preview could not be generated.");
-    }
-  };
+
 
   const generate = async () => {
     if (!selected) { setError("Pick an image to animate first."); return; }
@@ -131,7 +115,7 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
       <header className="mx-auto mb-2 grid max-w-[1720px] shrink-0 gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
         <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-outline-variant/25 bg-surface/90 px-4 py-2 shadow-sm">
           <Film size={22} className="shrink-0 text-primary" />
-          <div className="min-w-0"><h1 id="ai-video-title" className="truncate text-lg font-black text-on-surface">Fur Reels</h1><p className="truncate text-xs text-on-surface-variant">Direct an eight-second pet story with picture, motion, sound, and voice.</p></div>
+          <div className="min-w-0"><h1 id="ai-video-title" className="truncate text-lg font-black text-on-surface">Fur Reels</h1><p className="truncate text-xs text-on-surface-variant">Direct an eight-second pet story with picture, motion, and sound.</p></div>
           <button type="button" onClick={onClose} className="ml-auto rounded-full p-2 text-on-surface-variant hover:text-primary" aria-label="Close"><X size={20} /></button>
         </div>
         <dl className="grid min-w-0 grid-cols-4 gap-2">
@@ -216,19 +200,8 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
           </section>
 
           <aside data-dashboard-region="right" className="min-h-0 space-y-5 overflow-y-auto rounded-2xl border border-outline-variant/25 bg-surface/90 p-3 shadow-sm [scrollbar-width:thin]">
-            <section className="rounded-3xl border border-primary/25 bg-primary/5 p-4 sm:p-5">
-              <div className="flex items-center gap-2"><Mic2 size={18} className="text-primary" /><h2 className="text-sm font-black text-on-surface">3. Add sound and a short voice line</h2></div>
-              <p className="mt-2 text-xs text-on-surface-variant">The finished video includes native scene sound. Add one optional spoken line; preview it here with the configured Pawsome3D voice service.</p>
-              <textarea value={script.voiceText} onChange={(event) => { setScript((current) => ({ ...current, voiceText: event.target.value.slice(0, 160) })); setVoiceAudio(null); setVoiceStatus("idle"); }} rows={3} placeholder="Optional: One short line your pet says…" className="mt-3 w-full rounded-xl border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface" />
-              <div className="mt-1 text-right text-[11px] text-on-surface-variant">{script.voiceText.length}/160</div>
-              <button type="button" onClick={() => void previewVoice()} disabled={!script.voiceText.trim() || voiceStatus === "loading"} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/35 px-3 py-2 text-sm font-bold text-primary disabled:opacity-40">
-                {voiceStatus === "loading" ? <RefreshCw className="animate-spin" size={15} /> : <Play size={15} />} Preview voice
-              </button>
-              {voiceAudio && <audio className="mt-3 w-full" src={voiceAudio} controls autoPlay />}
-            </section>
-
             <section className="rounded-3xl border border-outline-variant/30 bg-surface-container-low p-4 sm:p-5">
-              <h2 className="text-sm font-black text-on-surface">4. Frame and generate</h2>
+              <h2 className="text-sm font-black text-on-surface">3. Frame and generate</h2>
               <div className="mt-3 flex overflow-hidden rounded-xl border border-outline-variant/40">
                 <button type="button" onClick={() => setAspect("9:16")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "9:16" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Portrait</button>
                 <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
