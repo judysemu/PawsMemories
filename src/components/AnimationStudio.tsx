@@ -13,10 +13,10 @@ interface AnimationStudioProps {
   onCreationsChanged?: () => Promise<void> | void;
 }
 
-type EditableScript = AiVideoScriptTemplate & { voiceText: string };
+type EditableScript = AiVideoScriptTemplate;
 
 function editable(template: AiVideoScriptTemplate): EditableScript {
-  return { ...template, stageDirections: [...template.stageDirections], voiceText: "" };
+  return { ...template, stageDirections: [...template.stageDirections] };
 }
 
 /** Customer guided video generation: a directed script, never a manual timeline editor. */

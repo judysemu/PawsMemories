@@ -568,12 +568,12 @@ export async function updateCreationOrder(id: number, sortOrder: number): Promis
 
 export async function createVideo(
   creationId: number,
-  script: (AiVideoScriptTemplate & { voiceText?: string }) | string,
+  script: AiVideoScriptTemplate | string,
   generateAudio: boolean = true,
   aspectRatio: "16:9" | "9:16" = "9:16"
 ): Promise<{ jobId: number }> {
   const normalizedScript = typeof script === "string"
-    ? { ...DEFAULT_AI_VIDEO_SCRIPT, motions: script, voiceText: "" }
+    ? { ...DEFAULT_AI_VIDEO_SCRIPT, motions: script }
     : script;
   const { id: templateId, ...scriptFields } = normalizedScript;
   const res = await authedFetch("/api/create-video", {
