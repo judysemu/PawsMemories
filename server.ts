@@ -3398,7 +3398,8 @@ async function startServer() {
       const missingShopify: string[] = [];
       if (!isPawprintsShopifyEnabled()) missingShopify.push("PAWPRINTS_SHOPIFY_ENABLED");
       if (!process.env.SHOPIFY_STORE_DOMAIN) missingShopify.push("SHOPIFY_STORE_DOMAIN");
-      if (!process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN) missingShopify.push("SHOPIFY_ADMIN_API_ACCESS_TOKEN");
+      if (!process.env.SHOPIFY_CLIENT_ID) missingShopify.push("SHOPIFY_CLIENT_ID");
+      if (!process.env.SHOPIFY_CLIENT_SECRET) missingShopify.push("SHOPIFY_CLIENT_SECRET");
       if (!PRINT_PRODUCTS.length) missingShopify.push("pawprint print products (shared/pawprintCatalog2.ts)");
 
       const missingSlant: string[] = [];
