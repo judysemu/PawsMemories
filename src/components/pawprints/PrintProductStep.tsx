@@ -1,6 +1,7 @@
 import React from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ExternalLink } from "lucide-react";
 import type { PawprintPrintProduct } from "../../../shared/pawprintCatalog2";
+import { SHOPIFY_STOREFRONT_ALL_PRODUCTS_URL } from "../../../shared/pawprintCatalog2";
 import { CategoryOptionPicker, CustomizeChoice } from "./DigitalCategoryStep";
 
 export function PrintProductStep({
@@ -84,6 +85,15 @@ export function PrintProductStep({
       >
         Continue
       </button>
+
+      <a
+        href={SHOPIFY_STOREFRONT_ALL_PRODUCTS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-6 flex items-center gap-1.5 text-sm font-bold text-primary underline underline-offset-2"
+      >
+        Looking for something else? Shop our full pet collection <ExternalLink size={14} />
+      </a>
     </div>
   );
 }

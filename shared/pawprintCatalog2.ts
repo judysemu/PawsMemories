@@ -93,102 +93,31 @@ export const DIGITAL_CATEGORIES: PawprintCategoryDef[] = [
 ];
 
 /**
- * shopifyProductId / shopifyVariantId below are placeholders — run
- * listShopifyProducts() (server/shopify.ts) once the Admin API token is set
- * and replace REPLACE_WITH_SHOPIFY_PRODUCT_ID / REPLACE_WITH_SHOPIFY_VARIANT_ID
- * with the real IDs for each matching product in gibi's store. Entries stay
- * inert until PAWPRINTS_SHOPIFY_ENABLED="true" (see server.ts:3304), so having
- * placeholder IDs here does not expose a broken checkout in the meantime.
- * Each product's categories intentionally differ to reflect that a mug's
- * best-fit themes are not a canvas print's best-fit themes.
+ * Verified against gibi's real Shopify catalog via listShopifyProducts()
+ * (2026-08-13). Only products with a genuine photo-customization option are
+ * listed here — e.g. the "Dog Lovers Tapestry" was excluded because its only
+ * Shopify option is Size, with no way to insert the customer's own pet art.
+ *
+ * The Halloween blanket is a Printify product with 6 variants (3 sizes ×
+ * Artwork/Photo finish); v1 hardcodes the smallest "Photo" finish variant
+ * ($48.99, 52"×37") since createPawprintCheckout() only carries one variant
+ * ID per product — the customer can pick a different size on Shopify's own
+ * cart/product page after redirect. Revisit if a size picker gets added to
+ * the wizard itself.
  */
 export const PRINT_PRODUCTS: PawprintPrintProduct[] = [
   {
-    shopifyProductId: "REPLACE_WITH_SHOPIFY_PRODUCT_ID_CANVAS",
-    shopifyVariantId: "REPLACE_WITH_SHOPIFY_VARIANT_ID_CANVAS",
-    title: "Canvas / Framed Print",
-    description: "A ready-to-hang canvas or framed wall print of your pet's Pawprint.",
+    shopifyProductId: "10550364111029",
+    shopifyVariantId: "52958687428789",
+    title: "Halloween Dog Bone Woven Blanket",
+    description: "A cozy woven throw blanket with a Halloween bone/ghost/pumpkin pattern and your pet's photo woven in. Other sizes available on the Shopify cart page after checkout starts.",
     categories: [
       {
-        id: "memorial_keepsake",
-        label: "Memorial & Keepsake",
+        id: "halloween_keepsake",
+        label: "Halloween",
         options: [
-          { id: "loving_memory", label: "In Loving Memory", premadeScript: "A gentle, dignified memorial portrait of the pet(s) in the reference photos — soft warm light, a subtle heavenly or garden backdrop, peaceful and comforting mood, suitable for a keepsake wall print." },
-          { id: "rainbow_bridge", label: "Rainbow Bridge", premadeScript: "A tender scene of the pet(s) in the reference photos at the Rainbow Bridge — soft pastel sky, gentle light, comforting and hopeful mood." },
-          { id: "forever_loved", label: "Forever Loved", premadeScript: "A timeless, elegant portrait of the pet(s) in the reference photos — classic studio-style lighting, simple neutral backdrop, warm and dignified mood suited for a lasting keepsake." },
-        ],
-      },
-      {
-        id: "classic_portrait",
-        label: "Classic Portrait",
-        options: [
-          { id: "studio_portrait", label: "Studio Portrait", premadeScript: "A polished studio portrait of the pet(s) in the reference photos — clean neutral backdrop, soft directional lighting, confident and classic pose." },
-          { id: "outdoor_adventure", label: "Outdoor Adventure", premadeScript: "An adventurous outdoor scene featuring the pet(s) in the reference photos — natural trail, park, or beach setting, bright natural light, joyful energetic mood." },
-        ],
-      },
-    ],
-  },
-  {
-    shopifyProductId: "REPLACE_WITH_SHOPIFY_PRODUCT_ID_POSTER",
-    shopifyVariantId: "REPLACE_WITH_SHOPIFY_VARIANT_ID_POSTER",
-    title: "Poster (Unframed)",
-    description: "An affordable unframed art print, ready to display or frame yourself.",
-    categories: [
-      {
-        id: "playful_poster",
-        label: "Playful & Fun",
-        options: [
-          { id: "action_pose", label: "Action Pose", premadeScript: "A dynamic, high-energy action shot of the pet(s) in the reference photos — mid-run or mid-jump, bright bold colors, playful poster-style composition." },
-          { id: "pop_art", label: "Pop Art Style", premadeScript: "A bold pop-art style illustration of the pet(s) in the reference photos — vibrant saturated colors, graphic poster composition, fun and eye-catching." },
-          { id: "comic_hero", label: "Comic Hero", premadeScript: "A comic-book hero style poster of the pet(s) in the reference photos — bold outlines, dynamic action pose, vivid comic-panel color palette." },
-        ],
-      },
-      {
-        id: "seasonal_poster",
-        label: "Seasonal",
-        options: [
-          { id: "summer_poster", label: "Summer", premadeScript: "A bright summer poster scene for the pet(s) in the reference photos — sunshine, beach or backyard setting, playful carefree mood." },
-          { id: "winter_poster", label: "Winter", premadeScript: "A cozy winter poster scene for the pet(s) in the reference photos — soft snowfall, warm color accents, cheerful wintertime mood." },
-        ],
-      },
-    ],
-  },
-  {
-    shopifyProductId: "REPLACE_WITH_SHOPIFY_PRODUCT_ID_MUG",
-    shopifyVariantId: "REPLACE_WITH_SHOPIFY_VARIANT_ID_MUG",
-    title: "Mug",
-    description: "A daily-use ceramic mug printed with your pet's Pawprint design.",
-    categories: [
-      {
-        id: "everyday_fun",
-        label: "Everyday & Fun",
-        options: [
-          { id: "good_morning", label: "Good Morning", premadeScript: "A cheerful, cozy 'good morning' style scene for the pet(s) in the reference photos — warm kitchen or sunrise light, relaxed happy mood, simple and clean composition suited for a mug print." },
-          { id: "coffee_buddy", label: "Coffee Buddy", premadeScript: "A charming, simple illustration of the pet(s) in the reference photos in a relaxed coffee-time setting — warm cozy tones, clean mug-friendly composition." },
-          { id: "silly_face", label: "Silly & Goofy", premadeScript: "A lighthearted, goofy candid-style shot of the pet(s) in the reference photos — playful expression, bright cheerful colors, fun simple composition." },
-        ],
-      },
-    ],
-  },
-  {
-    shopifyProductId: "REPLACE_WITH_SHOPIFY_PRODUCT_ID_BLANKET",
-    shopifyVariantId: "REPLACE_WITH_SHOPIFY_VARIANT_ID_BLANKET",
-    title: "Blanket",
-    description: "A soft, cozy throw blanket featuring your pet's Pawprint design.",
-    categories: [
-      {
-        id: "cozy_comfort",
-        label: "Cozy & Comfort",
-        options: [
-          { id: "curled_up", label: "Curled Up & Cozy", premadeScript: "A soft, comforting scene of the pet(s) in the reference photos curled up and relaxed — warm blanket or cushion setting, gentle indoor light, peaceful cozy mood." },
-          { id: "sweet_dreams", label: "Sweet Dreams", premadeScript: "A dreamy, gentle sleeping scene of the pet(s) in the reference photos — soft moonlit or starlit tones, calm and tender mood, suited for a comforting keepsake." },
-        ],
-      },
-      {
-        id: "memorial_comfort",
-        label: "In Loving Memory",
-        options: [
-          { id: "always_with_us", label: "Always With Us", premadeScript: "A warm, comforting memorial scene of the pet(s) in the reference photos — soft golden light, gentle peaceful backdrop, tender and reassuring mood suited for a sympathy keepsake blanket." },
+          { id: "halloween_costume", label: "Halloween Costume", premadeScript: "A playful Halloween scene for the pet(s) in the reference photos — a friendly (not scary) costume or bandana, pumpkins and gentle autumn-night lighting, cozy spooky-season mood suited for a keepsake blanket photo." },
+          { id: "just_my_pet", label: "Just My Pet", premadeScript: "A simple, warm, true-to-life photo of the pet(s) in the reference photos — natural lighting, clear and centered, minimal styling so the pet itself is the focus of the printed blanket." },
         ],
       },
     ],
@@ -204,6 +133,11 @@ export const STORY_PROMPT_TEMPLATE =
   `[Opening scene] with [pet name] as the hero — [what's happening in the main scene].
 Supporting moments: [2-3 short beats, e.g. "sniffing the grass", "mid-zoomie", "napping in the sun"].
 Mood: [warm / playful / adventurous / nostalgic]. Leave room at the bottom for a short caption.`;
+
+/** Cross-sell link shown on the Print product step for gibi's other
+ *  (non-Pawprint, not photo-customizable) store items — bandanas, bowls,
+ *  feeding mats, hoodies, etc. */
+export const SHOPIFY_STOREFRONT_ALL_PRODUCTS_URL = "https://pawprints-by-pawsome3d.myshopify.com/collections/all";
 
 export function findDigitalOption(categoryId: string, optionId: string): PawprintCategoryOption | undefined {
   const category = DIGITAL_CATEGORIES.find((entry) => entry.id === categoryId);
