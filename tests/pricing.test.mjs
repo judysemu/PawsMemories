@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { avatarGenerationCost, bimModelCost, CREDIT_PACKS, CREDIT_PRICES, REUSE_DISCOUNT } from "../src/pricing.ts";
 
 test("authoritative credit prices match the published catalog", () => {
-  assert.equal(CREDIT_PRICES.PAWPRINT, 75);
+  assert.equal(CREDIT_PRICES.PAWPRINT_DIGITAL, 40);
+  assert.equal(CREDIT_PRICES.PAWPRINT_PRINT, 40);
+  assert.equal(CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON, 25);
+  assert.equal(CREDIT_PRICES.PAWPRINT_EMAIL, 10);
   assert.equal(CREDIT_PRICES.HD_IMAGE, 10);
   assert.equal(CREDIT_PRICES.ANIMATED_VIDEO, 100);
   assert.equal(CREDIT_PRICES.VOICE_CLONE, 100);
@@ -19,7 +22,7 @@ test("avatar pricing is fixed by product type", () => {
 
 test("pawprint reuse applies the published 20% discount", () => {
   assert.equal(REUSE_DISCOUNT, 0.2);
-  assert.equal(Math.round(CREDIT_PRICES.PAWPRINT * (1 - REUSE_DISCOUNT)), 60);
+  assert.equal(Math.round(CREDIT_PRICES.PAWPRINT_DIGITAL * (1 - REUSE_DISCOUNT)), 32);
 });
 
 test("IFC BIM pricing is materially higher than a visual shell", () => {

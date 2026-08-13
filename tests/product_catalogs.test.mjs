@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WARDROBE_CATALOG } from "../src/wardrobe/catalog.ts";
-import { getPawprintCategories, getPawprintTemplatesSync } from "../db.ts";
+import { DIGITAL_CATEGORIES } from "../shared/pawprintCatalog2.ts";
 
 test("wardrobe exposes exactly 15 uniquely selectable meter-scale CC0 items", () => {
   assert.equal(WARDROBE_CATALOG.length, 15);
@@ -16,16 +16,10 @@ test("wardrobe exposes exactly 15 uniquely selectable meter-scale CC0 items", ()
   }
 });
 
-test("Pawprints templates have either a free source or owned generated art", () => {
-  const categories = getPawprintCategories();
-  const templates = getPawprintTemplatesSync();
-  for (const category of categories) {
-    const matching = templates.filter((template) => template.category === category);
-    assert.ok(matching.length >= 4, `${category} should have at least four templates`);
-    assert.equal(new Set(matching.map((template) => template.layoutId)).size, matching.length);
-    assert.ok(matching.every((template) => ["CC0-1.0", "owned-generated"].includes(template.sourceLicense)));
-    assert.ok(matching.every((template) => template.sourceLicense === "owned-generated"
-      ? template.sourceUrl?.startsWith("/collections/")
-      : template.sourceUrl?.startsWith("https://")));
+test("Pawprints digital categories each have several uniquely identified themes", () => {
+  for (const category of DIGITAL_CATEGORIES) {
+    assert.ok(category.options.length >= 4, `${category.id} should have at least four options`);
+    assert.equal(new Set(category.options.map((option) => option.id)).size, category.options.length);
+    assert.ok(category.options.every((option) => option.premadeScript.trim().length > 20));
   }
 });

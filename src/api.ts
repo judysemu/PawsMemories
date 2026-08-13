@@ -484,50 +484,36 @@ export async function fetchModelPrintOrders(): Promise<ModelPrintOrder[]> {
   return (await res.json()).orders || [];
 }
 
-export interface PawprintPrintOrder {
+export interface PawprintShopifyOrder {
   id: number;
   creation_id: number;
-  product_code: string;
-  provider_order_id: string;
-  print_file_url: string;
-  quantity: number;
-  retail_price_cents: number | null;
-  checkout_url: string | null;
+  shopify_product_id: string;
+  shopify_variant_id: string;
+  checkout_url: string;
   status: string;
   created_at: string;
-  updated_at: string;
-  tracking: ShipmentTracking[];
 }
 
-export async function fetchPawprintPrintOrders(): Promise<PawprintPrintOrder[]> {
+export async function fetchPawprintPrintOrders(): Promise<PawprintShopifyOrder[]> {
   const res = await authedFetch("/api/pawprints/print-orders");
   if (!res.ok) throw new Error(await parseError(res, "Could not load Pawprint print orders."));
   return (await res.json()).orders || [];
 }
 
-export interface CreatePawprintPrintOrderInput {
+export interface CreatePawprintShopifyCheckoutInput {
   creationId: number;
-  productCode: string;
-  quantity: number;
-  recipient: {
-    name: string;
-    email: string;
-    address1: string;
-    city: string;
-    state_code?: string;
-    country_code: string;
-    zip: string;
-  };
+  shopifyProductId: string;
+  shopifyVariantId: string;
 }
 
-export async function createPawprintPrintOrder(input: CreatePawprintPrintOrderInput, idempotencyKey: string) {
-  const res = await authedFetch("/api/pawprints/printful-order", {
+export async function createPawprintShopifyCheckout(input: CreatePawprintShopifyCheckoutInput, idempotencyKey: string) {
+  const res = await authedFetch("/api/pawprints/shopify-checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "The print order could not be created.");
+  if (!res.ok) throw new Error(data.error || "The print checkout could not be created.");
   return data;
 }
 

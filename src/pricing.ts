@@ -1,7 +1,10 @@
 export const CREDIT_PRICES = {
-  PAWPRINT: 75,
-  PAWPRINT_OWNER_PET: 70,
-  PAWPRINT_MULTI_PET: 70,
+  // Pawprints v2: flat Digital/Print entry pricing (replaces the old
+  // subject-tier PAWPRINT/PAWPRINT_OWNER_PET/PAWPRINT_MULTI_PET pricing).
+  PAWPRINT_DIGITAL: 40,
+  PAWPRINT_PRINT: 40,
+  PAWPRINT_CUSTOMIZE_ADDON: 25,
+  PAWPRINT_EMAIL: 10,
   HD_IMAGE: 10,
   ULTRA_HD_IMAGE: 15,
   FIRST_REGENERATION: 0,
@@ -76,9 +79,10 @@ export interface ServicePrice {
 }
 
 export const SERVICE_PRICES: readonly ServicePrice[] = [
-  { label: "Pawprint (Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT },
-  { label: "Pawprint (Owner/Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT_OWNER_PET },
-  { label: "Pawprint (Multi-Pet Portrait)", credits: CREDIT_PRICES.PAWPRINT_MULTI_PET },
+  { label: "Pawprint (Digital)", credits: CREDIT_PRICES.PAWPRINT_DIGITAL },
+  { label: "Pawprint (Print)", credits: CREDIT_PRICES.PAWPRINT_PRINT },
+  { label: "Pawprint Customization", credits: CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON, detail: "Add-on for a custom prompt" },
+  { label: "Pawprint Email Delivery", credits: CREDIT_PRICES.PAWPRINT_EMAIL, detail: "Digital Pawprints only" },
   { label: "HD Image Generation", credits: CREDIT_PRICES.HD_IMAGE },
   { label: "Ultra HD Image Generation", credits: CREDIT_PRICES.ULTRA_HD_IMAGE },
   { label: "Image Regeneration", credits: CREDIT_PRICES.FIRST_REGENERATION, detail: "First retry" },

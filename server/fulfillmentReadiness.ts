@@ -1,7 +1,7 @@
 export interface FulfillmentReadinessInput {
   stripeConfigured: boolean;
   slantConfigured: boolean;
-  printfulConfigured: boolean;
+  shopifyConfigured: boolean;
   pawprintProductCount: number;
   storageConfigured: boolean;
   workerConfigured: boolean;
@@ -17,10 +17,9 @@ export function buildFulfillmentReadiness(input: FulfillmentReadinessInput) {
       ),
     },
     pawprintPrinting: {
-      provider: "printful" as const,
+      provider: "shopify" as const,
       available: Boolean(
-        input.printfulConfigured && input.stripeConfigured
-        && input.storageConfigured && input.pawprintProductCount > 0,
+        input.shopifyConfigured && input.storageConfigured && input.pawprintProductCount > 0,
       ),
       productCount: Math.max(0, Math.floor(input.pawprintProductCount)),
     },

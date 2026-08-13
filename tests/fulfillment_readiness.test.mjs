@@ -5,7 +5,7 @@ import { buildFulfillmentReadiness } from "../server/fulfillmentReadiness.ts";
 const ready = {
   stripeConfigured: true,
   slantConfigured: true,
-  printfulConfigured: true,
+  shopifyConfigured: true,
   pawprintProductCount: 2,
   storageConfigured: true,
   workerConfigured: true,
@@ -25,8 +25,8 @@ test("model printing fails closed for each missing dependency", () => {
   }
 });
 
-test("Pawprint printing fails closed without Stripe, storage, Printful, or products", () => {
-  for (const key of ["stripeConfigured", "printfulConfigured", "storageConfigured"]) {
+test("Pawprint printing fails closed without Shopify, storage, or products", () => {
+  for (const key of ["shopifyConfigured", "storageConfigured"]) {
     const result = buildFulfillmentReadiness({ ...ready, [key]: false });
     assert.equal(result.pawprintPrinting.available, false, key);
   }

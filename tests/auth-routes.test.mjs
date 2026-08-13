@@ -184,8 +184,8 @@ test("Public routes are reachable without a token", async () => {
     "GET /api/pawprints/templates should be handled by Node, not the Studio proxy"
   );
   const pawprintTemplates = await pawprintTemplatesRes.json();
-  assert.ok(Array.isArray(pawprintTemplates.categories));
-  assert.ok(Array.isArray(pawprintTemplates.templates));
+  assert.ok(Array.isArray(pawprintTemplates.digitalCategories));
+  assert.ok(Array.isArray(pawprintTemplates.printProducts));
 });
 
 test("Studio proxy is isolated to /api/studio", async () => {

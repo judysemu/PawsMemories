@@ -334,7 +334,7 @@ refundRouter.post("/refunds/review", async (req: AuthedRequest, res) => {
       });
       outputUrl = creation.image_url;
       costCredits = creation.preset_name === "pawprint"
-        ? CREDIT_PRICES.PAWPRINT
+        ? CREDIT_PRICES.PAWPRINT_DIGITAL
         : creation.media_type === "model"
           ? CREDIT_PRICES.STATIC_3D_PHOTO
           : CREDIT_PRICES.HD_IMAGE;

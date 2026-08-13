@@ -18,7 +18,7 @@ import sharp from "sharp";
 import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getPawprintCategories, getPawprintTemplatesSync, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -48,6 +48,7 @@ import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
 import { planWagsBox, getPriorBoxHistory } from "./server/wags/planner";
 import { deliverBox, getOwnedWardrobeItems } from "./server/wags/delivery";
 import { materializeBoxAssets } from "./server/wags/materializer";
+import { DIGITAL_CATEGORIES, PRINT_PRODUCTS, STORY_PROMPT_TEMPLATE, findDigitalOption, findPrintProduct, findPrintOption } from "./shared/pawprintCatalog2";
 import { RebakeRequestSchema, StylizeRequestSchema, viewsFromAvatarRow } from "./server/textureSchemas";
 import type { RebakeLikenessReport } from "./server/textureLikeness";
 import {
@@ -119,7 +120,7 @@ import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
 import { SKELETON_CONTRACTS } from "./skeletonContract";
 import { TERMS_VERSION } from "./src/legal";
-import { avatarGenerationCost, bimModelCost, CREDIT_PRICES, REUSE_DISCOUNT, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
+import { avatarGenerationCost, bimModelCost, CREDIT_PRICES, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
 import { executeBlenderTool } from "./agent/tools/blender_mcp";
 import {
   formatPipelineRecoveryDiagnostic,
@@ -139,7 +140,7 @@ import { isAtLeastAge } from "./server/accountValidation";
 import { PrintUploadValidationError, validatePrintUpload } from "./server/printUploadValidation";
 import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
-import { confirmPrintfulOrderIfDraft, createPrintfulOrder, getPrintfulOrder, verifyPrintfulConfiguration } from "./server/printful";
+import { isPawprintsShopifyEnabled, assertPawprintsShopifyEnabled, verifyShopifyConfiguration, createPawprintCheckout } from "./server/shopify";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
 import {
@@ -149,7 +150,6 @@ import {
   ignoreUnsupportedCheckoutSession,
   retiredAlbumCheckoutHandler,
 } from "./server/creditPurchases";
-import { pawprintDisplayCatalog, publicPawprintPrintProducts, requirePawprintPrintProduct } from "./server/pawprintProducts";
 import { buildFulfillmentReadiness } from "./server/fulfillmentReadiness";
 import { buildRandySystemInstruction } from "./server/randy/prompt";
 import { RANDY_REGISTRY_VERSION } from "./server/randy/registry";
@@ -721,58 +721,6 @@ async function startServer() {
   void recoverPaidSlantOrders();
   setInterval(() => void recoverPaidSlantOrders(), 5 * 60 * 1000);
 
-  async function recoverPaidPrintfulOrders() {
-    if (!process.env.PRINTFUL_API_KEY) return;
-    try {
-      await getPool().query(
-        `UPDATE pawprint_print_orders SET status = 'payment_received'
-         WHERE status = 'submitting' AND updated_at < (NOW() - INTERVAL 10 MINUTE)`,
-      );
-      const [retryRows] = await getPool().query(
-        `SELECT id, provider_order_id FROM pawprint_print_orders
-         WHERE status = 'payment_received' ORDER BY updated_at ASC LIMIT 10`,
-      ) as any;
-      for (const row of retryRows as Array<{ id: number; provider_order_id: string }>) {
-        const [claimed] = await getPool().query(
-          `UPDATE pawprint_print_orders SET status = 'submitting' WHERE id = ? AND status = 'payment_received'`,
-          [row.id],
-        ) as any;
-        if (!claimed?.affectedRows) continue;
-        try {
-          const confirmed = await confirmPrintfulOrderIfDraft(String(row.provider_order_id));
-          await getPool().query(
-            `UPDATE pawprint_print_orders SET status = ?, provider_payload_json = ? WHERE id = ?`,
-            [String(confirmed?.status || "pending").toLowerCase(), JSON.stringify(confirmed || {}), row.id],
-          );
-        } catch (error: any) {
-          console.error(`[Printful recovery] Order ${row.id} failed:`, error?.message || error);
-          await getPool().query(`UPDATE pawprint_print_orders SET status = 'payment_received' WHERE id = ?`, [row.id]);
-        }
-      }
-      const [activeRows] = await getPool().query(
-        `SELECT id, provider_order_id FROM pawprint_print_orders
-         WHERE status NOT IN ('awaiting_payment','payment_setup_failed','payment_received','submitting','fulfilled','failed','canceled','cancelled','draft')
-           AND updated_at < (NOW() - INTERVAL 4 MINUTE)
-         ORDER BY updated_at ASC LIMIT 20`,
-      ) as any;
-      for (const row of activeRows as Array<{ id: number; provider_order_id: string }>) {
-        try {
-          const current = await getPrintfulOrder(String(row.provider_order_id));
-          await getPool().query(
-            `UPDATE pawprint_print_orders SET status = ?, provider_payload_json = ? WHERE id = ?`,
-            [String(current?.status || "processing").toLowerCase(), JSON.stringify(current || {}), row.id],
-          );
-        } catch (error: any) {
-          console.warn(`[Printful status] Order ${row.id} refresh failed:`, error?.message || error);
-        }
-      }
-    } catch (error: any) {
-      console.warn("[Printful recovery] Sweep failed:", error?.message || error);
-    }
-  }
-  void recoverPaidPrintfulOrders();
-  setInterval(() => void recoverPaidPrintfulOrders(), 5 * 60 * 1000);
-
   // Raw-body authenticated v2 webhooks must be mounted before the global JSON
   // parser. Production factories are constructed only when their dark-launch
   // flags are explicitly enabled, so missing rollout secrets cannot break the
@@ -819,34 +767,6 @@ async function startServer() {
           console.log(`↩︎ Session ${session.id} already credited; webhook skipping.`);
         } else {
           console.log(`✅ Added ${result.credits} credits to ${metadata.userPhone} via Stripe purchase.`);
-        }
-      } else if (metadata.type === "pawprint_print_order" && metadata.printOrderId && metadata.userPhone) {
-        const printOrderId = Number(metadata.printOrderId);
-        const [claimed] = await getPool().query(
-          `UPDATE pawprint_print_orders SET status = 'submitting', updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND user_phone = ? AND status IN ('awaiting_payment', 'payment_received')`,
-          [printOrderId, metadata.userPhone],
-        ) as any;
-        if (!claimed?.affectedRows) {
-          console.log(`↩︎ Printful Pawprint order ${printOrderId} already submitted or in progress.`);
-          return;
-        }
-        const [rows] = await getPool().query(
-          `SELECT provider_order_id FROM pawprint_print_orders WHERE id = ? AND user_phone = ? LIMIT 1`,
-          [printOrderId, metadata.userPhone],
-        ) as any;
-        const providerOrderId = String(rows?.[0]?.provider_order_id || "");
-        if (!providerOrderId) throw new Error(`Pawprint print order ${printOrderId} has no Printful order ID.`);
-        try {
-          const confirmed = await confirmPrintfulOrderIfDraft(providerOrderId);
-          const status = String(confirmed?.status || "pending").toLowerCase();
-          await getPool().query(
-            `UPDATE pawprint_print_orders SET status = ?, provider_payload_json = ? WHERE id = ?`,
-            [status, JSON.stringify(confirmed || {}), printOrderId],
-          );
-        } catch (error) {
-          await getPool().query(`UPDATE pawprint_print_orders SET status = 'payment_received' WHERE id = ?`, [printOrderId]);
-          throw error;
         }
       } else if (metadata.type === "customize_order" && metadata.customizeOrderId && metadata.userPhone) {
         // Marketplace Product Customizer P1 — mirrors pawprint_print_order exactly.
@@ -3141,14 +3061,98 @@ async function startServer() {
   });
 
   app.get("/api/pawprints/templates", (_req, res) => {
-    const categories = getPawprintCategories();
-    const templates = getPawprintTemplatesSync();
-    res.json({ categories, templates });
+    res.json({
+      digitalCategories: DIGITAL_CATEGORIES,
+      printProducts: PRINT_PRODUCTS,
+      storyPromptTemplate: STORY_PROMPT_TEMPLATE,
+    });
+  });
+
+  // Shared identity-preservation + composition boilerplate appended to every
+  // Pawprint generation prompt, whether it came from a premade script or the
+  // customer's own custom text.
+  function buildPawprintPrompt(scriptOrCustomPrompt: string, photoCount: number): string {
+    return [
+      photoCount > 1
+        ? "The uploaded images are the identity references for the customer's subjects (owner/pet or multiple pets)."
+        : "The uploaded image is the identity reference for the customer's pet.",
+      "Preserve the exact species, faces, eye color, ear shape, muzzle, coat length, coat pattern, markings, proportions, and expressions of ALL subjects in the references.",
+      scriptOrCustomPrompt,
+      "Create one finished vertical 4:5 portrait with the subjects facing the viewer.",
+      "Do not include captions, names, logos, watermarks, signatures, random text, extra limbs, or floating paws. Keep the subjects naturally placed.",
+    ].join(" ");
+  }
+
+  // Stage 1 of the two-stage Pawprints pipeline: one cached AI "subject art"
+  // generation per (user, prompt, photo-set). Stage 2 (POST /generate) always
+  // composites from this cached result, so Live Preview and Save are
+  // guaranteed to match — see docs/superpowers/specs/2026-08-12-pawprints-flow-repair-design.md.
+  app.post("/api/pawprints/generate-subject", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
+    try {
+      const entryMode = String(req.body?.entryMode || "digital").trim();
+      if (entryMode !== "digital" && entryMode !== "print") {
+        return res.status(400).json({ error: "entryMode must be 'digital' or 'print'." });
+      }
+      const categoryId = String(req.body?.categoryId || "").trim();
+      const optionId = String(req.body?.optionId || "").trim();
+      const shopifyProductId = String(req.body?.shopifyProductId || "").trim();
+      const customPrompt = String(req.body?.customPrompt || "").trim().slice(0, 600);
+      const photoBase64List: string[] = Array.isArray(req.body?.photoBase64List) ? req.body.photoBase64List : [];
+
+      if (photoBase64List.length === 0 || !photoBase64List.every((img) => /^data:image\/(png|jpe?g|webp);base64,/i.test(img))) {
+        return res.status(400).json({ error: "Choose the pet photo(s) to use." });
+      }
+
+      let script: string;
+      if (customPrompt) {
+        script = customPrompt;
+      } else if (entryMode === "print") {
+        const option = findPrintOption(shopifyProductId, categoryId, optionId);
+        if (!option) return res.status(400).json({ error: "Please choose a valid theme for this print product." });
+        script = option.premadeScript;
+      } else {
+        const option = findDigitalOption(categoryId, optionId);
+        if (!option) return res.status(400).json({ error: "Please choose a valid theme." });
+        script = option.premadeScript;
+      }
+
+      const photoDigest = photoBase64List.map((img) => createHash("sha256").update(img).digest("hex")).join(":");
+      const cacheKey = createHash("sha256")
+        .update(JSON.stringify({ entryMode, categoryId, optionId, shopifyProductId, customPrompt, photoDigest }))
+        .digest("hex");
+
+      const cached = await getCachedSubjectArt(req.user!.phone, cacheKey);
+      if (cached) {
+        return res.json({ imageUrl: cached.imageUrl, cached: true });
+      }
+
+      const inlineParts = photoBase64List.map((img) => {
+        const identity = splitDataUrl(img);
+        return { inlineData: { data: identity.data, mimeType: identity.mimeType } };
+      });
+      const prompt = buildPawprintPrompt(script, photoBase64List.length);
+      const generated = await generateImageWithFallback(
+        [...inlineParts, { text: prompt }],
+        "pawprint-subject-art",
+        req.user!.phone,
+        undefined,
+        "4:5",
+      );
+      if (!generated) throw new Error("Pawprint subject-art generation returned no image.");
+      const imageUrl = await uploadBase64Image(generated, "pawprints");
+      await saveCachedSubjectArt({
+        userPhone: req.user!.phone, cacheKey, imageUrl, entryMode,
+        category: categoryId || null, optionId: optionId || null,
+      });
+      res.json({ imageUrl, cached: false });
+    } catch (err: any) {
+      console.error("[POST /api/pawprints/generate-subject] Error:", err?.message || err);
+      res.status(500).json({ error: "Could not generate the Pawprint art. Please try again." });
+    }
   });
 
   app.post("/api/pawprints/generate", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
-    let pawprintPrice: number = CREDIT_PRICES.PAWPRINT;
     try {
       const idempotencyKey = String(req.header("Idempotency-Key") || req.body?.idempotencyKey || "").trim().slice(0, 120);
       if (!idempotencyKey) return res.status(400).json({ error: "An idempotency key is required." });
@@ -3161,62 +3165,29 @@ async function startServer() {
         return res.json({ pawprintId: existing[0].id, url: existing[0].image_url, creationId: existing[0].creation_id, idempotent: true });
       }
 
-      const requestedCategory = String(req.body?.category || "").trim();
-      const layoutId = String(req.body?.layoutId || req.body?.templateId || "").trim();
-      const mode = String(req.body?.mode || "single_pet").trim();
-      
-      if (mode === "owner_pet") {
-        pawprintPrice = CREDIT_PRICES.PAWPRINT_OWNER_PET;
-      } else if (mode === "multi_pet") {
-        pawprintPrice = CREDIT_PRICES.PAWPRINT_MULTI_PET;
+      const entryMode = String(req.body?.entryMode || "digital").trim();
+      if (entryMode !== "digital" && entryMode !== "print") {
+        return res.status(400).json({ error: "entryMode must be 'digital' or 'print'." });
       }
-      
-      const fields = req.body?.fields && typeof req.body.fields === "object" ? req.body.fields as Record<string, string> : {};
+      const categoryId = String(req.body?.categoryId || "").trim();
+      const optionId = String(req.body?.optionId || "").trim();
+      const shopifyProductId = String(req.body?.shopifyProductId || "").trim();
+      const customized = Boolean(req.body?.customized);
       const customName = String(req.body?.customName || "").trim().slice(0, 80);
-      const customMessage = String(req.body?.customMessage || "").trim().slice(0, 300);
-      // Resolve the canonical category from the selected server-owned template.
-      // This also repairs requests from an older cached client that omitted the
-      // category: unique famous-portrait IDs such as the Halloween layouts can
-      // still reach Gemini and be saved to the user's Fur Bin. Ambiguous
-      // standard layout IDs remain rejected instead of guessing a category.
-      const templateMatches = getPawprintTemplatesSync(requestedCategory || undefined)
-        .filter((item) => item.layoutId === layoutId);
-      if (templateMatches.length !== 1) {
-        return res.status(400).json({ error: "Please choose a valid Pawprint template." });
-      }
-      const template = templateMatches[0];
-      const category = template.category;
 
-      const allowed = new Set(template.fieldSchema.map((field) => field.key));
-      for (const key of Object.keys(fields)) {
-        if (!allowed.has(key)) return res.status(400).json({ error: `Unknown field: ${key}` });
-      }
-      for (const field of template.fieldSchema) {
-        const value = String(fields[field.key] || "").trim();
-        if (field.type === "image") {
-          const media = value || String(req.body?.photoBase64 || "");
-          const mediaList = Array.isArray(req.body?.photoBase64List) ? req.body.photoBase64List : (media ? [media] : []);
-          if (mediaList.length > 0 && !mediaList.every(m => /^data:image\/(png|jpe?g|webp);base64,/i.test(m))) {
-            return res.status(400).json({ error: `${field.label} must be image files.` });
-          }
-        } else if (value.length > (field.maxLength || 120)) {
-          return res.status(400).json({ error: `${field.label} is too long.` });
-        }
-      }
+      let pawprintPrice = entryMode === "print" ? CREDIT_PRICES.PAWPRINT_PRINT : CREDIT_PRICES.PAWPRINT_DIGITAL;
+      if (customized) pawprintPrice += CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON;
 
-      // Subject reuse: if the user picks a prior generated image of the same
-      // subject, reuse it as the background (skip fresh image generation) at 20% off.
-      const reuseCreationId = Number(req.body?.reuseCreationId) || 0;
-      let reuseImageUrl = "";
-      if (reuseCreationId > 0) {
-        const mine = await getCreations(req.user!.phone); // scoped to this user
-        const src = mine.find((c: any) => c.id === reuseCreationId && c.image_url);
-        if (!src) return res.status(400).json({ error: "That image isn't available to reuse." });
-        reuseImageUrl = src.image_url as string;
+      // Stage 2 finalize: the client always submits the exact composite that
+      // Live Preview showed (renderPawprint() over the cached Stage 1 subject
+      // art), so what the customer approved is what gets saved — no server-side
+      // regeneration happens here.
+      const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
+      const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
+      if (!renderedMatch) {
+        return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
       }
-      pawprintPrice = reuseImageUrl
-        ? Math.round(pawprintPrice * (1 - REUSE_DISCOUNT))
-        : pawprintPrice;
+      const sourceBuffer = Buffer.from(renderedMatch[2], "base64");
 
       const isAdmin = await isUserAdmin(req.user!.phone);
       if (!isAdmin) {
@@ -3226,62 +3197,6 @@ async function startServer() {
         }
       }
 
-      let sourceBuffer: Buffer;
-      // Historic portraits, halloween, landmark, famous-portrait categories all go
-      // through the AI generation path — they share the imagePromptTemplate field.
-      const isAiPortraitCategory =
-        category === "historic_portraits" ||
-        ["historic-women", "leaders", "sports-legends", "myth-holiday",
-         "arts-adventure", "halloween", "landmarks"].includes(category);
-      if (isAiPortraitCategory) {
-        const identityImages: string[] = Array.isArray(req.body?.photoBase64List) && req.body.photoBase64List.length > 0
-          ? req.body.photoBase64List
-          : [String(req.body?.photoBase64 || "")].filter(img => img !== "");
-        if (identityImages.length === 0 || !identityImages.every(img => /^data:image\/(png|jpe?g|webp);base64,/i.test(img))) {
-          if (creditReservationId) {
-            await refundReservedCredits(creditReservationId);
-            creditReservationId = null;
-          }
-          return res.status(400).json({ error: "Choose the pet photo(s) to use in this historic portrait." });
-        }
-        const inlineParts = identityImages.map(img => {
-          const identity = splitDataUrl(img);
-          return { inlineData: { data: identity.data, mimeType: identity.mimeType } };
-        });
-        
-        const isDuo = template.layoutId.startsWith("duo-") || template.category === "landmarks";
-        const historicPrompt = [
-          isDuo ? "The uploaded images are the identity references for the customer's subjects (owner/pet or two pets)." : "The uploaded image is the identity reference for the customer's pet.",
-          "Preserve the exact species, faces, eye color, ear shape, muzzle, coat length, coat pattern, markings, proportions, and expressions of ALL subjects in the references.",
-          template.imagePromptTemplate,
-          "Create one finished vertical 4:5 portrait with the subjects facing the viewer.",
-          "Do not include captions, names, logos, watermarks, signatures, random text, extra limbs, or floating paws. Keep the subjects naturally placed.",
-        ].join(" ");
-        
-        const generated = await generateImageWithFallback(
-          [...inlineParts, { text: historicPrompt }],
-          "historic-pawprint-reference",
-          req.user!.phone,
-          undefined,
-          "4:5",
-        );
-        const generatedMatch = generated && /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(generated);
-        if (!generatedMatch) throw new Error("Historic portrait generation returned no image.");
-        sourceBuffer = Buffer.from(generatedMatch[2], "base64");
-      } else {
-        // Standard Pawprints remain a manual stationery editor. The browser
-        // composites the user's exact text and photo before submitting it.
-        const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
-        const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
-        if (!renderedMatch) {
-          if (creditReservationId) {
-            await refundReservedCredits(creditReservationId);
-            creditReservationId = null;
-          }
-          return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
-        }
-        sourceBuffer = Buffer.from(renderedMatch[2], "base64");
-      }
       if (sourceBuffer.length < 1_000 || sourceBuffer.length > 15 * 1024 * 1024) {
         throw new Error("Rendered Pawprint size is invalid.");
       }
@@ -3299,7 +3214,7 @@ async function startServer() {
         .resize(2400, 3000, { fit: "cover" })
         .webp({ quality: 92, effort: 4, smartSubsample: true })
         .toBuffer();
-      const title = customName || String(fields.petName || fields.name || "Pawprint").slice(0, 80);
+      const title = customName || "Pawprint";
       const finalDataUrl = `data:image/webp;base64,${finalBuffer.toString("base64")}`;
       const finalUrl = await uploadBase64Image(finalDataUrl, "pawprints");
       await recordStorageAddHot(req.user!.phone, finalBuffer.length);
@@ -3312,14 +3227,15 @@ async function startServer() {
         image_url: finalUrl,
         pet_name: title,
       });
+      const layoutId = shopifyProductId ? `${shopifyProductId}:${categoryId}:${optionId}` : `${categoryId}:${optionId}`;
       const [inserted] = await getPool().query(
         `INSERT INTO pawprint_assets
-           (user_phone, idempotency_key, template_id, category, layout_id, image_url, creation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [req.user!.phone, idempotencyKey, `${category}:${layoutId}`, category, layoutId, finalUrl, creationId]
+           (user_phone, idempotency_key, template_id, category, layout_id, entry_mode, image_url, creation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [req.user!.phone, idempotencyKey, layoutId, categoryId || "custom", layoutId, entryMode, finalUrl, creationId]
       ) as any;
       const user = await findUserByPhone(req.user!.phone);
-      res.status(201).json({ pawprintId: inserted.insertId, url: finalUrl, creationId, user: toPublicUser(user, TERMS_VERSION) });
+      res.status(201).json({ pawprintId: inserted.insertId, url: finalUrl, creationId, entryMode, user: toPublicUser(user, TERMS_VERSION) });
     } catch (err: any) {
       if (creditReservationId) {
         try { await refundReservedCredits(creditReservationId); } catch {}
@@ -3329,9 +3245,11 @@ async function startServer() {
     }
   });
 
-  // Send a saved Pawprint digitally. The recipient pays nothing; the email
-  // includes the authoritative Pawprint price so shared links remain clear.
+  // Send a saved Pawprint digitally. Digital-only — Print Pawprints are
+  // fulfilled through Shopify and are not re-sent by email. The recipient
+  // pays nothing; the sender is charged PAWPRINT_EMAIL.
   app.post("/api/pawprints/send", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
+    let creditReservationId: string | null = null;
     try {
       const creationId = Number(req.body?.creationId);
       const recipient = String(req.body?.email || "").trim().toLowerCase();
@@ -3339,6 +3257,24 @@ async function startServer() {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return res.status(400).json({ error: "Enter a valid recipient email." });
       const creation = (await getCreations(req.user!.phone)).find((item: any) => Number(item.id) === creationId && item.image_url);
       if (!creation) return res.status(404).json({ error: "That Pawprint is not in your FurBin." });
+
+      const [assetRows] = await getPool().query(
+        `SELECT entry_mode FROM pawprint_assets WHERE creation_id = ? AND user_phone = ? LIMIT 1`,
+        [creationId, req.user!.phone]
+      ) as any;
+      const entryMode = assetRows?.[0]?.entry_mode || "digital";
+      if (entryMode !== "digital") {
+        return res.status(403).json({ error: "Only Digital Pawprints can be emailed." });
+      }
+
+      const isAdmin = await isUserAdmin(req.user!.phone);
+      if (!isAdmin) {
+        creditReservationId = await reserveCredits(req.user!.phone, CREDIT_PRICES.PAWPRINT_EMAIL, "pawprint_email");
+        if (!creditReservationId) {
+          return res.status(402).json({ error: `You need ${CREDIT_PRICES.PAWPRINT_EMAIL} PupCoins to email a Pawprint.` });
+        }
+      }
+
       const esc = (value: string) => value.replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char] || char));
       const sender = await findUserByPhone(req.user!.phone);
       const senderName = esc(sender?.full_name || "A friend");
@@ -3346,45 +3282,36 @@ async function startServer() {
       const sent = await sendMail({
         to: recipient,
         subject: `${senderName} sent you a Pawsome3D Pawprint`,
-        html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.6"><h2>A Pawprint from ${senderName}</h2><p>Here is a keepsake made in Pawsome3D.</p><p><img src="${imageUrl}" alt="Pawprint" style="max-width:100%;border-radius:12px" /></p><p><a href="${imageUrl}">Open the Pawprint</a></p><p style="color:#666;font-size:13px">Pawprint creation price: ${CREDIT_PRICES.PAWPRINT} PupCoins.</p></div>`,
+        html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.6"><h2>A Pawprint from ${senderName}</h2><p>Here is a keepsake made in Pawsome3D.</p><p><img src="${imageUrl}" alt="Pawprint" style="max-width:100%;border-radius:12px" /></p><p><a href="${imageUrl}">Open the Pawprint</a></p><p style="color:#666;font-size:13px">Email delivery price: ${CREDIT_PRICES.PAWPRINT_EMAIL} PupCoins.</p></div>`,
         replyTo: sender?.email || undefined,
       });
-      if (!sent) return res.status(503).json({ error: "Email delivery is not configured yet. Add RESEND_API_KEY and MAIL_FROM." });
-      res.json({ success: true, pricePupCoins: CREDIT_PRICES.PAWPRINT });
+      if (!sent) {
+        if (creditReservationId) { await refundReservedCredits(creditReservationId); creditReservationId = null; }
+        return res.status(503).json({ error: "Email delivery is not configured yet. Add RESEND_API_KEY and MAIL_FROM." });
+      }
+      res.json({ success: true, pricePupCoins: CREDIT_PRICES.PAWPRINT_EMAIL });
     } catch (error: any) {
+      if (creditReservationId) {
+        try { await refundReservedCredits(creditReservationId); } catch {}
+      }
       console.error("[POST /api/pawprints/send] Error:", error?.message || error);
       res.status(500).json({ error: "Could not send the Pawprint." });
     }
   });
 
   app.get("/api/pawprints/print-products", (_req, res) => {
-    const products = publicPawprintPrintProducts();
-    const storageConfigured = Boolean(
-      process.env.MEDIA_BUCKET_NAME && process.env.MEDIA_BUCKET_URL
-      && process.env.MEDIA_BUCKET_KEY && process.env.MEDIA_BUCKET_SECRET,
-    );
-    const available = Boolean(products.length > 0 && process.env.PRINTFUL_API_KEY && stripe && storageConfigured);
-
-    // Blockers name the missing dependency, never its value. This is what turns
-    // "printing is unavailable" from a dead end into something an operator can
-    // act on — the previous version returned an empty array with no reason, so
-    // a deployment missing only its variant IDs looked identical to one with no
-    // Printful account at all.
+    const enabled = isPawprintsShopifyEnabled();
+    const available = Boolean(enabled && PRINT_PRODUCTS.length > 0);
     const blockers: string[] = [];
-    if (!process.env.PRINTFUL_API_KEY) blockers.push("printful_api_key");
-    if (!products.length) blockers.push("pawprint_print_products");
-    if (!stripe) blockers.push("stripe");
-    if (!storageConfigured) blockers.push("media_storage");
+    if (!enabled) blockers.push("shopify_not_configured");
+    if (!PRINT_PRODUCTS.length) blockers.push("pawprint_print_products");
 
     res.json({
-      provider: "printful",
-      configured: products.length > 0,
+      provider: "shopify",
+      configured: PRINT_PRODUCTS.length > 0,
       available,
-      // Always a non-empty list so the studio can render real formats instead of
-      // silently collapsing the whole physical-print section.
-      products: pawprintDisplayCatalog(),
+      products: PRINT_PRODUCTS,
       blockers,
-      orderMode: "payment",
     });
   });
 
@@ -3397,12 +3324,11 @@ async function startServer() {
       && process.env.MEDIA_BUCKET_KEY && process.env.MEDIA_BUCKET_SECRET,
     );
     const workerConfigured = Boolean(process.env.BLENDER_WORKER_URL && process.env.WORKER_SHARED_SECRET);
-    const pawprintProducts = publicPawprintPrintProducts();
     const readiness = buildFulfillmentReadiness({
       stripeConfigured: Boolean(stripe),
       slantConfigured: slant3dConfigured(),
-      printfulConfigured: Boolean(process.env.PRINTFUL_API_KEY),
-      pawprintProductCount: pawprintProducts.length,
+      shopifyConfigured: isPawprintsShopifyEnabled(),
+      pawprintProductCount: PRINT_PRODUCTS.length,
       storageConfigured,
       workerConfigured,
     });
@@ -3417,9 +3343,8 @@ async function startServer() {
     if (!workerConfigured) modelBlockers.push("blender_worker");
 
     const pawprintBlockers: string[] = [];
-    if (!process.env.PRINTFUL_API_KEY) pawprintBlockers.push("printful_api_key");
-    if (!pawprintProducts.length) pawprintBlockers.push("pawprint_print_products");
-    if (!stripe) pawprintBlockers.push("stripe");
+    if (!isPawprintsShopifyEnabled()) pawprintBlockers.push("shopify_not_configured");
+    if (!PRINT_PRODUCTS.length) pawprintBlockers.push("pawprint_print_products");
     if (!storageConfigured) pawprintBlockers.push("media_storage");
 
     res.json({
@@ -3438,14 +3363,13 @@ async function startServer() {
         && process.env.MEDIA_BUCKET_KEY && process.env.MEDIA_BUCKET_SECRET,
       );
       const stripeReady = Boolean(stripe && stripeWebhookSecret);
-      const products = publicPawprintPrintProducts();
       const workerUrl = String(process.env.BLENDER_WORKER_URL || "").replace(/\/render$/, "").replace(/\/$/, "");
 
       const slantCheck = slant3dConfigured()
         ? verifySlant3dConfiguration()
         : Promise.reject(new Error("not configured"));
-      const printfulCheck = process.env.PRINTFUL_API_KEY
-        ? verifyPrintfulConfiguration()
+      const shopifyCheck = isPawprintsShopifyEnabled()
+        ? verifyShopifyConfiguration()
         : Promise.reject(new Error("not configured"));
       const workerCheck = workerUrl && process.env.WORKER_SHARED_SECRET
         ? fetch(`${workerUrl}/health`, { signal: AbortSignal.timeout(15_000) }).then(async (response) => {
@@ -3455,9 +3379,9 @@ async function startServer() {
           })
         : Promise.reject(new Error("not configured"));
 
-      const [slant, printful, worker] = await Promise.allSettled([slantCheck, printfulCheck, workerCheck]);
+      const [slant, shopify, worker] = await Promise.allSettled([slantCheck, shopifyCheck, workerCheck]);
       const slantResult = slant.status === "fulfilled" ? slant.value : null;
-      const printfulResult = printful.status === "fulfilled" ? printful.value : null;
+      const shopifyResult = shopify.status === "fulfilled" ? shopify.value : null;
       const workerResult = worker.status === "fulfilled" ? worker.value : null;
 
       // Surface *why* a vendor check failed. A rejected check previously
@@ -3471,9 +3395,11 @@ async function startServer() {
 
       // Missing env vars are reported by name because this route is admin-only
       // and already behind isUserAdmin. Values are never echoed.
-      const missingPrintful: string[] = [];
-      if (!process.env.PRINTFUL_API_KEY) missingPrintful.push("PRINTFUL_API_KEY");
-      if (!products.length) missingPrintful.push("PAWPRINT_PRINT_PRODUCTS_JSON (or PRINTFUL_PAWPRINT_VARIANT_ID)");
+      const missingShopify: string[] = [];
+      if (!isPawprintsShopifyEnabled()) missingShopify.push("PAWPRINTS_SHOPIFY_ENABLED");
+      if (!process.env.SHOPIFY_STORE_DOMAIN) missingShopify.push("SHOPIFY_STORE_DOMAIN");
+      if (!process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN) missingShopify.push("SHOPIFY_ADMIN_API_ACCESS_TOKEN");
+      if (!PRINT_PRODUCTS.length) missingShopify.push("pawprint print products (shared/pawprintCatalog2.ts)");
 
       const missingSlant: string[] = [];
       if (!process.env.SLANT3D_API_KEY) missingSlant.push("SLANT3D_API_KEY");
@@ -3499,12 +3425,12 @@ async function startServer() {
           error: reasonFor(slant),
           ...(slantResult || {}),
         },
-        printful: {
-          ready: Boolean(printfulResult?.authenticated && printfulResult.ordersReadable && products.length > 0),
-          productCount: products.length,
-          missingEnv: missingPrintful,
-          error: reasonFor(printful),
-          ...(printfulResult || {}),
+        shopify: {
+          ready: Boolean(shopifyResult?.authenticated && PRINT_PRODUCTS.length > 0),
+          productCount: PRINT_PRODUCTS.length,
+          missingEnv: missingShopify,
+          error: reasonFor(shopify),
+          ...(shopifyResult || {}),
         },
         blenderWorker: {
           ready: Boolean(workerResult?.reachable && workerResult.bridgeConnected),
@@ -3525,17 +3451,7 @@ async function startServer() {
 
   app.get("/api/pawprints/print-orders", requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const [rows] = await getPool().query(
-        `SELECT id, creation_id, provider, product_code, provider_order_id, print_file_url,
-                quantity, price_cents, provider_cost_cents, retail_price_cents, checkout_url,
-                provider_payload_json, status, created_at, updated_at
-         FROM pawprint_print_orders WHERE user_phone = ? ORDER BY created_at DESC LIMIT 100`,
-        [req.user!.phone],
-      ) as any;
-      const orders = rows.map((row: any) => {
-        const { provider_payload_json, ...safe } = row;
-        return { ...safe, tracking: extractShipmentTracking(provider_payload_json) };
-      });
+      const orders = await listPawprintShopifyOrders(req.user!.phone);
       res.json({ success: true, orders });
     } catch (error: any) {
       console.error("[GET /api/pawprints/print-orders] Error:", error?.message || error);
@@ -3543,129 +3459,43 @@ async function startServer() {
     }
   });
 
-  app.post("/api/pawprints/printful-order", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
-    let preparedOrderId: number | null = null;
+  app.post("/api/pawprints/shopify-checkout", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
     try {
-      if (!stripe) return res.status(503).json({ error: "Stripe checkout is not configured for physical orders." });
+      assertPawprintsShopifyEnabled();
       const schema = z.object({
         creationId: z.number().int().positive(),
-        productCode: z.string().min(1).max(48),
-        quantity: z.number().int().min(1).max(10).default(1),
-        recipient: z.object({
-          name: z.string().trim().min(2).max(120),
-          email: z.string().trim().email().max(200),
-          address1: z.string().trim().min(3).max(200),
-          city: z.string().trim().min(2).max(80),
-          state_code: z.string().trim().max(10).optional(),
-          country_code: z.string().trim().length(2).transform((value) => value.toUpperCase()),
-          zip: z.string().trim().min(2).max(20),
-        }),
+        shopifyProductId: z.string().min(1).max(64),
+        shopifyVariantId: z.string().min(1).max(64),
       });
       const input = schema.parse(req.body);
       const idempotencyKey = String(req.header("Idempotency-Key") || "").trim().slice(0, 128);
       if (!idempotencyKey) return res.status(400).json({ error: "An idempotency key is required." });
-      const product = requirePawprintPrintProduct(input.productCode);
-      const creationId = input.creationId;
-      const creation = (await getCreations(req.user!.phone)).find((item: any) => Number(item.id) === creationId && item.image_url);
+
+      const existing = await findPawprintShopifyOrderByIdempotencyKey(req.user!.phone, idempotencyKey);
+      if (existing) return res.json({ success: true, idempotent: true, checkoutUrl: existing.checkout_url });
+
+      const creation = (await getCreations(req.user!.phone)).find((item: any) => Number(item.id) === input.creationId && item.image_url);
       if (!creation) return res.status(404).json({ error: "That Pawprint is not in your FurBin." });
 
-      const [existingRows] = await getPool().query(
-        `SELECT id, provider_order_id, status, product_code, quantity, price_cents, print_file_url,
-                retail_price_cents, checkout_url
-         FROM pawprint_print_orders WHERE user_phone = ? AND idempotency_key = ? LIMIT 1`,
-        [req.user!.phone, idempotencyKey],
-      ) as any;
-      if (existingRows?.[0]) return res.json({ success: true, idempotent: true, order: existingRows[0], checkoutUrl: existingRows[0].checkout_url });
-
-      // Preserve the saved FurBin image and produce a separate 300-DPI PNG
-      // derivative sized for the selected physical product.
-      const sourceResponse = await fetch(String(creation.image_url), { signal: AbortSignal.timeout(30_000) });
-      if (!sourceResponse.ok) throw new Error("The saved Pawprint print file could not be opened.");
-      const sourceBuffer = Buffer.from(await sourceResponse.arrayBuffer());
-      if (sourceBuffer.byteLength > 30 * 1024 * 1024) throw new Error("The saved Pawprint print file is too large.");
-      const printBuffer = await sharp(sourceBuffer)
-        .resize({ width: Math.round(product.widthIn * 300), height: Math.round(product.heightIn * 300), fit: "contain", background: "#ffffff" })
-        .png({ compressionLevel: 9 })
-        .toBuffer();
-      const printFileUrl = await uploadBase64Binary(printBuffer.toString("base64"), "image/png", "pawprints-print");
-      const externalId = `pawprint-${createHash("sha256").update(`${req.user!.phone}:${idempotencyKey}`).digest("hex").slice(0, 32)}`;
-      const order = await createPrintfulOrder({
-        recipient: {
-          name: input.recipient.name,
-          email: input.recipient.email,
-          address1: input.recipient.address1,
-          city: input.recipient.city,
-          state_code: input.recipient.state_code || undefined,
-          country_code: String(input.recipient.country_code || "US").toUpperCase(),
-          zip: input.recipient.zip,
-        },
-        imageUrl: printFileUrl,
-        variantId: product.variantId,
-        templateId: product.templateId,
-        quantity: input.quantity,
-        externalId,
+      const { checkoutUrl } = await createPawprintCheckout({
+        title: String(creation.pet_name || "Pawprint"),
+        imageUrl: String(creation.image_url),
+        shopifyVariantId: input.shopifyVariantId,
       });
-      const currentOrder = order.costs?.total ? order : await getPrintfulOrder(order.id);
-      const providerCurrency = String(currentOrder?.costs?.currency || "USD").toUpperCase();
-      if (providerCurrency !== "USD") {
-        throw new Error(`Printful returned ${providerCurrency} pricing, but checkout is configured for USD.`);
-      }
-      const providerCost = Number(currentOrder?.costs?.total || 0);
-      if (!Number.isFinite(providerCost) || providerCost <= 0) {
-        throw new Error("Printful is still calculating this order. Try again after the print file finishes processing.");
-      }
-      const providerCostCents = Math.ceil(providerCost * 100);
-      const markupPercent = Math.max(0, Number(process.env.FULFILLMENT_MARKUP_PERCENT || 80));
-      const minimumMarginCents = Math.max(0, Number(process.env.FULFILLMENT_MIN_MARGIN_CENTS || 500));
-      const desiredRetailTotal = Math.max(
-        Number(product.priceCents || 0) * input.quantity,
-        providerCostCents + minimumMarginCents,
-        Math.ceil(providerCostCents * (1 + markupPercent / 100)),
-      );
-      const retailUnitPriceCents = Math.ceil(desiredRetailTotal / input.quantity);
-      const retailPriceCents = retailUnitPriceCents * input.quantity;
-      const [inserted] = await getPool().query(
-        `INSERT INTO pawprint_print_orders
-          (user_phone, creation_id, provider, product_code, provider_order_id, print_file_url,
-           recipient_json, quantity, price_cents, provider_cost_cents, retail_price_cents,
-           provider_payload_json, status, idempotency_key)
-         VALUES (?, ?, 'printful', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_payment', ?)
-         ON DUPLICATE KEY UPDATE provider_order_id = VALUES(provider_order_id), status = VALUES(status), updated_at = CURRENT_TIMESTAMP`,
-        [req.user!.phone, creationId, product.code, order.id, printFileUrl, JSON.stringify(input.recipient),
-          input.quantity, product.priceCents || null, providerCostCents, retailPriceCents,
-          JSON.stringify(currentOrder || order), idempotencyKey],
-      ) as any;
-      preparedOrderId = Number(inserted.insertId);
-      const appUrl = process.env.APP_URL || "http://localhost:3000";
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [{
-          price_data: {
-            currency: "usd",
-            product_data: { name: product.label, description: `${product.description} · printed and shipped by Printful`, images: [printFileUrl] },
-            unit_amount: retailUnitPriceCents,
-          },
-          quantity: input.quantity,
-        }],
-        customer_email: input.recipient.email,
-        mode: "payment",
-        metadata: { type: "pawprint_print_order", printOrderId: String(preparedOrderId), userPhone: req.user!.phone, printfulOrderId: order.id },
-        success_url: `${appUrl}/pawprints?print_success=true&order_id=${preparedOrderId}`,
-        cancel_url: `${appUrl}/pawprints?print_cancelled=true&order_id=${preparedOrderId}`,
+      await insertPawprintShopifyOrder({
+        userPhone: req.user!.phone,
+        creationId: input.creationId,
+        shopifyProductId: input.shopifyProductId,
+        shopifyVariantId: input.shopifyVariantId,
+        checkoutUrl,
+        idempotencyKey,
       });
-      await getPool().query(
-        `UPDATE pawprint_print_orders SET checkout_url = ?, stripe_session_id = ? WHERE id = ?`,
-        [session.url, session.id, preparedOrderId],
-      );
-      res.status(201).json({ success: true, checkoutUrl: session.url, retailPriceCents, order: { ...order, productCode: product.code, printFileUrl } });
+      res.status(201).json({ success: true, checkoutUrl });
     } catch (error: any) {
-      if (preparedOrderId) {
-        try { await getPool().query(`UPDATE pawprint_print_orders SET status = 'payment_setup_failed' WHERE id = ?`, [preparedOrderId]); } catch {}
-      }
-      if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0]?.message || "Check the shipping information." });
-      const message = error?.message || "Could not create the Printful order.";
-      if (/not configured/i.test(message)) return res.status(503).json({ error: message });
-      console.error("[POST /api/pawprints/printful-order] Error:", message);
+      if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0]?.message || "Check the print selection." });
+      const message = error?.message || "Could not create the print checkout.";
+      if (/not configured|not enabled/i.test(message)) return res.status(503).json({ error: message });
+      console.error("[POST /api/pawprints/shopify-checkout] Error:", message);
       res.status(502).json({ error: message });
     }
   });
