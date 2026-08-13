@@ -28,11 +28,23 @@ export interface PawprintCategoryDef {
   options: PawprintCategoryOption[];
 }
 
+export interface PawprintPrintVariant {
+  shopifyVariantId: string;
+  /** e.g. "52\" × 37\"" — shown as-is in the size picker. */
+  label: string;
+  priceCents: number;
+}
+
 export interface PawprintPrintProduct {
   /** Populate with the real Shopify product/variant IDs once the store's
    *  Admin API credentials are configured (see server/shopify.ts). */
   shopifyProductId: string;
-  shopifyVariantId: string;
+  /** Every size/finish variant a customer can order for this product.
+   *  Ordered cheapest-first — the wizard defaults to variants[0] and lets
+   *  the customer pick a different one before checkout. Only include
+   *  variants where the customer's own photo is actually what gets
+   *  printed (e.g. a "Photo" finish) — never a fixed-artwork variant. */
+  variants: PawprintPrintVariant[];
   title: string;
   description: string;
   /** Each physical product offers its own theme menu — a mug's audience
@@ -99,18 +111,20 @@ export const DIGITAL_CATEGORIES: PawprintCategoryDef[] = [
  * Shopify option is Size, with no way to insert the customer's own pet art.
  *
  * The Halloween blanket is a Printify product with 6 variants (3 sizes ×
- * Artwork/Photo finish); v1 hardcodes the smallest "Photo" finish variant
- * ($48.99, 52"×37") since createPawprintCheckout() only carries one variant
- * ID per product — the customer can pick a different size on Shopify's own
- * cart/product page after redirect. Revisit if a size picker gets added to
- * the wizard itself.
+ * Artwork/Photo finish) — only the 3 "Photo" finish variants are listed
+ * below (Artwork ships a fixed stock design, not the customer's pet).
+ * The wizard's size picker lets the customer choose among these.
  */
 export const PRINT_PRODUCTS: PawprintPrintProduct[] = [
   {
     shopifyProductId: "10550364111029",
-    shopifyVariantId: "52958687428789",
+    variants: [
+      { shopifyVariantId: "52958687428789", label: "52\" × 37\"", priceCents: 4899 },
+      { shopifyVariantId: "52959505350837", label: "60\" × 50\"", priceCents: 7899 },
+      { shopifyVariantId: "52959505416373", label: "80\" × 60\"", priceCents: 11399 },
+    ],
     title: "Halloween Dog Bone Woven Blanket",
-    description: "A cozy woven throw blanket with a Halloween bone/ghost/pumpkin pattern and your pet's photo woven in. Other sizes available on the Shopify cart page after checkout starts.",
+    description: "A cozy woven throw blanket with a Halloween bone/ghost/pumpkin pattern and your pet's photo woven in.",
     categories: [
       {
         id: "halloween_keepsake",
@@ -152,4 +166,9 @@ export function findPrintOption(shopifyProductId: string, categoryId: string, op
   const product = findPrintProduct(shopifyProductId);
   const category = product?.categories.find((entry) => entry.id === categoryId);
   return category?.options.find((option) => option.id === optionId);
+}
+
+export function findPrintVariant(shopifyProductId: string, shopifyVariantId: string): PawprintPrintVariant | undefined {
+  const product = findPrintProduct(shopifyProductId);
+  return product?.variants.find((variant) => variant.shopifyVariantId === shopifyVariantId);
 }

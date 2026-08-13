@@ -44,6 +44,11 @@ export function FinishStep({
   const [sending, setSending] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [printCheckoutError, setPrintCheckoutError] = useState("");
+  const [selectedVariantId, setSelectedVariantId] = useState("");
+
+  useEffect(() => {
+    setSelectedVariantId(shopifyProduct?.variants[0]?.shopifyVariantId || "");
+  }, [shopifyProduct]);
   const [signInNoticeDismissed, setSignInNoticeDismissed] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
   const variationsSectionRef = useRef<HTMLElement | null>(null);
@@ -207,12 +212,12 @@ export function FinishStep({
   };
 
   const orderPrint = async () => {
-    if (!savedCreationId || !shopifyProduct) return;
+    if (!savedCreationId || !shopifyProduct || !selectedVariantId) return;
     setPrintBusy(true);
     setPrintCheckoutError("");
     try {
       const data = await createPawprintShopifyCheckout(
-        { creationId: savedCreationId, shopifyProductId: shopifyProduct.shopifyProductId, shopifyVariantId: shopifyProduct.shopifyVariantId },
+        { creationId: savedCreationId, shopifyProductId: shopifyProduct.shopifyProductId, shopifyVariantId: selectedVariantId },
         crypto.randomUUID(),
       );
       if (data.checkoutUrl) window.location.assign(String(data.checkoutUrl));
@@ -346,11 +351,29 @@ export function FinishStep({
                 <div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
                   <div className="flex items-center gap-2"><Printer size={17} className="text-primary" /><h2 className="text-sm font-black">Order your print</h2></div>
                   <p className="mt-2 text-xs text-on-surface-variant">{shopifyProduct.title} — you'll finish checkout, including shipping, on our store.</p>
+                  {shopifyProduct.variants.length > 1 && (
+                    <div className="mt-3">
+                      <label className="text-xs font-bold text-on-surface-variant">Size</label>
+                      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {shopifyProduct.variants.map((variant) => (
+                          <button
+                            key={variant.shopifyVariantId}
+                            type="button"
+                            onClick={() => setSelectedVariantId(variant.shopifyVariantId)}
+                            className={`rounded-xl border-2 px-2 py-2 text-center text-xs font-bold transition ${selectedVariantId === variant.shopifyVariantId ? "border-primary bg-primary/10 text-primary" : "border-outline-variant/40 text-on-surface-variant hover:border-primary/50"}`}
+                          >
+                            <span className="block">{variant.label}</span>
+                            <span className="block text-[11px] font-semibold opacity-80">${(variant.priceCents / 100).toFixed(2)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {printCheckoutError && <p className="mt-2 rounded-xl bg-error/10 p-2 text-xs font-bold text-error">{printCheckoutError}</p>}
                   <button
                     type="button"
                     onClick={() => void orderPrint()}
-                    disabled={printBusy}
+                    disabled={printBusy || !selectedVariantId}
                     className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-black text-on-primary disabled:opacity-40"
                   >
                     {printBusy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}

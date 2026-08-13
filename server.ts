@@ -48,7 +48,7 @@ import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
 import { planWagsBox, getPriorBoxHistory } from "./server/wags/planner";
 import { deliverBox, getOwnedWardrobeItems } from "./server/wags/delivery";
 import { materializeBoxAssets } from "./server/wags/materializer";
-import { DIGITAL_CATEGORIES, PRINT_PRODUCTS, STORY_PROMPT_TEMPLATE, findDigitalOption, findPrintProduct, findPrintOption } from "./shared/pawprintCatalog2";
+import { DIGITAL_CATEGORIES, PRINT_PRODUCTS, STORY_PROMPT_TEMPLATE, findDigitalOption, findPrintProduct, findPrintOption, findPrintVariant } from "./shared/pawprintCatalog2";
 import { RebakeRequestSchema, StylizeRequestSchema, viewsFromAvatarRow } from "./server/textureSchemas";
 import type { RebakeLikenessReport } from "./server/textureLikeness";
 import {
@@ -3469,6 +3469,9 @@ async function startServer() {
         shopifyVariantId: z.string().min(1).max(64),
       });
       const input = schema.parse(req.body);
+      if (!findPrintVariant(input.shopifyProductId, input.shopifyVariantId)) {
+        return res.status(400).json({ error: "That size is not available for this Pawprint product." });
+      }
       const idempotencyKey = String(req.header("Idempotency-Key") || "").trim().slice(0, 128);
       if (!idempotencyKey) return res.status(400).json({ error: "An idempotency key is required." });
 

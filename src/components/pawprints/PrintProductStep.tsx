@@ -47,17 +47,26 @@ export function PrintProductStep({
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-3">
-          {products.map((product) => (
-            <button
-              key={product.shopifyProductId}
-              type="button"
-              onClick={() => onChooseProduct(product.shopifyProductId)}
-              className={`rounded-2xl border-2 p-4 text-left transition ${shopifyProductId === product.shopifyProductId ? "border-primary bg-primary/5" : "border-outline-variant/40 hover:border-primary/50"}`}
-            >
-              <span className="block font-black text-on-surface">{product.title}</span>
-              <span className="mt-1 block text-xs text-on-surface-variant">{product.description}</span>
-            </button>
-          ))}
+          {products.map((product) => {
+            const prices = product.variants.map((variant) => variant.priceCents);
+            const minPrice = Math.min(...prices);
+            const maxPrice = Math.max(...prices);
+            const priceLabel = minPrice === maxPrice
+              ? `$${(minPrice / 100).toFixed(2)}`
+              : `$${(minPrice / 100).toFixed(2)} – $${(maxPrice / 100).toFixed(2)}`;
+            return (
+              <button
+                key={product.shopifyProductId}
+                type="button"
+                onClick={() => onChooseProduct(product.shopifyProductId)}
+                className={`rounded-2xl border-2 p-4 text-left transition ${shopifyProductId === product.shopifyProductId ? "border-primary bg-primary/5" : "border-outline-variant/40 hover:border-primary/50"}`}
+              >
+                <span className="block font-black text-on-surface">{product.title}</span>
+                <span className="mt-1 block text-xs text-on-surface-variant">{product.description}</span>
+                <span className="mt-2 block text-xs font-black text-primary">{priceLabel}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
