@@ -36,18 +36,18 @@ test("Fur Reels presents direction, uploads, voice, and persistence in one dashb
   assert.match(studio, /lg:grid-cols-\[minmax\(220px,.72fr\)_minmax\(0,1.35fr\)_minmax\(280px,.9fr\)\]/);
 });
 
-test("Fur Reels uses the supported Veo 3.1 image-to-video contract", () => {
-  const server = fs.readFileSync("server.ts", "utf8");
-  const envExample = fs.readFileSync(".env.example", "utf8");
-  const routeStart = server.indexOf('app.post("/api/create-video"');
-  const routeEnd = server.indexOf('app.post("/api/create-talking-video"', routeStart);
-  const route = server.slice(routeStart, routeEnd);
+test("Fur Reels offers exactly two fixed duration options, not a free slider", () => {
+  const studio = fs.readFileSync("src/components/AnimationStudio.tsx", "utf8");
+  assert.match(studio, />8 seconds</);
+  assert.match(studio, />15 seconds</);
+  assert.match(studio, /setDuration\(8\)/);
+  assert.match(studio, /setDuration\(15\)/);
+  assert.doesNotMatch(studio, /type="range"/);
+  assert.doesNotMatch(studio, /duration-slider/);
+  assert.doesNotMatch(studio, /VEO_MIN_SECONDS|VEO_MAX_SECONDS/);
+});
 
-  assert.ok(routeStart >= 0 && routeEnd > routeStart);
-  assert.match(route, /veo-3\.1-fast-generate-preview/);
-  assert.doesNotMatch(route, /veo-2\.0-generate-001/);
-  assert.match(route, /ai\.models\.generateVideos/);
-  assert.match(route, /durationSeconds: 8/);
-  assert.match(route, /personGeneration: "allow_adult"/);
-  assert.match(envExample, /AI_VIDEO_MODEL="veo-3\.1-fast-generate-preview"/);
+test("the app no longer depends on the retired MuAPI video gateway", () => {
+  const envExample = fs.readFileSync(".env.example", "utf8");
+  assert.doesNotMatch(envExample, /MUAPI_API_KEY|MUAPI_VIDEO_MODEL/);
 });

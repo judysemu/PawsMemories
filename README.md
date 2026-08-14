@@ -197,7 +197,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Fur Bin API and build-time UI flags; enabled for generated GLB delivery |
 | `PET_GLB_BODY_RIG_ENABLED` | Emergency rollback switch for the paid Pet GLB body-rig stage; defaults on and is independent of legacy `PETSIM_RIG_*` caps |
 | `MODEL_FEEDBACK_EMAIL` / `RESEND_API_KEY` / `MAIL_FROM` | Destination and sender configuration for Toss-it GLB feedback |
-| `AI_VIDEO_MODEL` | Eight-second AI video provider model; default `veo-3.1-fast-generate-preview` |
+| `FAL_KEY` | fal.ai API key; shared by Fur Reels video generation (8s Veo 3.1 Fast, 15s Kling 3.0 Pro) and offline PBR material authoring |
 | `STATIONERY_V2_ENABLED` | Enable only with the Stationery render worker, database, shipping-recipient UI, Printful/Slant3D credentials, variant map, and webhook secrets configured. The v2 path creates and submits provider orders, then reconciles signed callbacks. |
 | `STATIONERY_RENDER_WORKER_URL` / `STATIONERY_RENDER_WORKER_SECRET` | HTTPS render-worker endpoint and HMAC secret for dispatch and trusted completion callbacks |
 | `PRINTFUL_API_KEY` / `PRINTFUL_STORE_ID` / `PRINTFUL_STATIONERY_VARIANT_MAP` | Printful API credentials and JSON mapping from Stationery SKUs to numeric Printful variants |

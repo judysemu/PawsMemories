@@ -8,7 +8,8 @@ test("authoritative credit prices match the published catalog", () => {
   assert.equal(CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON, 25);
   assert.equal(CREDIT_PRICES.PAWPRINT_EMAIL, 10);
   assert.equal(CREDIT_PRICES.HD_IMAGE, 10);
-  assert.equal(CREDIT_PRICES.ANIMATED_VIDEO, 100);
+  assert.equal(CREDIT_PRICES.ANIMATED_VIDEO_8S, 30);
+  assert.equal(CREDIT_PRICES.ANIMATED_VIDEO_15S, 50);
   assert.equal(CREDIT_PRICES.VOICE_CLONE, 100);
   assert.equal(CREDIT_PRICES.STORAGE_GB_MONTH, 4);
 });

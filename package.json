@@ -29,7 +29,8 @@
     "animator:doctor": "node scripts/animator-doctor.mjs",
     "seed:wags": "node scripts/seed-wags-catalog.mjs",
     "stationery:worker": "tsx stationery-worker/index.ts",
-    "wardrobe:pbr": "tsx scripts/generate-wardrobe-pbr.ts"
+    "wardrobe:pbr": "tsx scripts/generate-wardrobe-pbr.ts",
+    "drain:muapi-video": "tsx scripts/drain-muapi-video-jobs.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1063.0",

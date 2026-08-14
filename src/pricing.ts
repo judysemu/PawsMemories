@@ -26,8 +26,10 @@ export const CREDIT_PRICES = {
   AI_VOICE_30_SECONDS: 25,
   VOICE_CLONE: 100,
   LIP_SYNC_30_SECONDS: 25,
-  ANIMATED_VIDEO: 100,
-  ADDITIONAL_ANIMATION_10_SECONDS: 30,
+  // fal.ai video pricing: 8s uses Veo 3.1 Fast (~$1.20/clip generation cost),
+  // 15s uses Kling 3.0 Pro (~$2.52/clip generation cost).
+  ANIMATED_VIDEO_8S: 30,
+  ANIMATED_VIDEO_15S: 50,
   EXPORT_FBX_USDZ: 10,
   COMMERCIAL_LICENSE: 35,
   STORAGE_GB_MONTH: 4,
@@ -56,6 +58,11 @@ export function petGlbTotalCost(selection: PetGlbSelections): number {
   return PET_GLB_STAGE_PRICES.BASE
     + (selection.texture ? PET_GLB_STAGE_PRICES.TEXTURE : 0)
     + (selection.rig ? PET_GLB_STAGE_PRICES.RIG : 0);
+}
+
+/** Fur Reels video cost by duration tier — 8s (Veo) or 15s (Kling). */
+export function animatedVideoCost(durationSeconds: 8 | 15): number {
+  return durationSeconds === 15 ? CREDIT_PRICES.ANIMATED_VIDEO_15S : CREDIT_PRICES.ANIMATED_VIDEO_8S;
 }
 
 /** Discount applied when a user reuses a previously generated image of the same
@@ -104,8 +111,8 @@ export const SERVICE_PRICES: readonly ServicePrice[] = [
   { label: "AI Voice Generation", credits: CREDIT_PRICES.AI_VOICE_30_SECONDS, detail: "Up to 30 seconds" },
   { label: "Voice Clone", credits: CREDIT_PRICES.VOICE_CLONE, detail: "One-time" },
   { label: "Lip Sync", credits: CREDIT_PRICES.LIP_SYNC_30_SECONDS, detail: "Up to 30 seconds" },
-  { label: "Animated Video", credits: CREDIT_PRICES.ANIMATED_VIDEO, detail: "5 to 10 seconds" },
-  { label: "Additional Animation", credits: CREDIT_PRICES.ADDITIONAL_ANIMATION_10_SECONDS, detail: "Each additional 10 seconds" },
+  { label: "Fur Reels — 8 Second Clip", credits: CREDIT_PRICES.ANIMATED_VIDEO_8S, detail: "Veo, with sound" },
+  { label: "Fur Reels — 15 Second Clip", credits: CREDIT_PRICES.ANIMATED_VIDEO_15S, detail: "Kling, with sound" },
   { label: "Export FBX or USDZ", credits: CREDIT_PRICES.EXPORT_FBX_USDZ },
   { label: "Commercial License Upgrade", credits: CREDIT_PRICES.COMMERCIAL_LICENSE },
   { label: "Additional Storage", credits: CREDIT_PRICES.STORAGE_GB_MONTH, detail: "1 GB per month" },

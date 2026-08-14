@@ -442,7 +442,7 @@ export default function EditMemory({
                               videoPollingRef.current = null;
                               const updated = {...generatedResult, video_url: jobRes.video_url || null, media_type: 'video' as const};
                               setGeneratedResult(updated);
-                              onDeductCredits(CREDIT_PRICES.ANIMATED_VIDEO);
+                              onDeductCredits(CREDIT_PRICES.ANIMATED_VIDEO_8S);
                               setAnimatingVideo(false);
                               if (onCreationUpdated) {
                                  onCreationUpdated(updated);
@@ -467,7 +467,7 @@ export default function EditMemory({
                 className="w-full py-4 bg-secondary text-white rounded-xl font-bold text-sm shadow-md hover:bg-secondary/95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
               >
                 {animatingVideo ? <RefreshCw className="animate-spin" size={16}/> : <Video size={16}/>}
-                <span>{animatingVideo ? "Animating with Veo..." : `Animate: ${MOTION_PRESETS.find(p=>p.value===selectedMotionPreset)?.emoji ?? ""} ${MOTION_PRESETS.find(p=>p.value===selectedMotionPreset)?.label ?? ""} · ${CREDIT_PRICES.ANIMATED_VIDEO} cr`}</span>
+                <span>{animatingVideo ? "Animating with Veo..." : `Animate: ${MOTION_PRESETS.find(p=>p.value===selectedMotionPreset)?.emoji ?? ""} ${MOTION_PRESETS.find(p=>p.value===selectedMotionPreset)?.label ?? ""} · ${CREDIT_PRICES.ANIMATED_VIDEO_8S} cr`}</span>
               </button>
             </div>
           )}

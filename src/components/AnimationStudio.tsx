@@ -3,7 +3,7 @@ import { Download, Film, ImagePlus, RefreshCw, Sparkles, Wand2, X } from "lucide
 import { Creation, UserProfile } from "../types";
 import { addUserPhoto, createVideo, pollJob } from "../api";
 import { AI_VIDEO_SCRIPTS, DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "../aiVideoScripts";
-import { CREDIT_PRICES } from "../pricing";
+import { animatedVideoCost } from "../pricing";
 
 interface AnimationStudioProps {
   creations: Creation[];
@@ -36,9 +36,6 @@ function buildCustomScript(title: string, description: string): EditableScript {
   };
 }
 
-const VEO_MIN_SECONDS = 5;
-const VEO_MAX_SECONDS = 15;
-
 /** Customer guided video generation: a directed script, never a manual timeline editor. */
 export default function AnimationStudio({ creations, userProfile, onOpenCreditStore, onClose, onCreationsChanged }: AnimationStudioProps) {
   const images = useMemo(() => creations.filter((creation) => creation.image_url), [creations]);
@@ -48,13 +45,13 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
   const [aspect, setAspect] = useState<"16:9" | "9:16">("9:16");
-  const [duration, setDuration] = useState(VEO_MAX_SECONDS);
+  const [duration, setDuration] = useState<8 | 15>(8);
   const [status, setStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState("");
 
-  const cost = CREDIT_PRICES.ANIMATED_VIDEO;
+  const cost = animatedVideoCost(duration);
   const canAfford = userProfile.isAdmin || (userProfile.credits ?? 0) >= cost;
   const selected = images.find((creation) => creation.id === selectedId) || null;
 
@@ -265,26 +262,14 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
                 <button type="button" onClick={() => setAspect("16:9")} className={`flex-1 px-3 py-2 text-sm font-bold ${aspect === "16:9" ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>Landscape</button>
               </div>
 
-              {/* Duration slider */}
+              {/* Duration */}
               <div className="mt-4">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="duration-slider" className="text-xs font-bold text-on-surface">Duration</label>
-                  <span className="text-xs font-black text-primary">{duration} seconds</span>
+                <label className="text-xs font-bold text-on-surface">Duration</label>
+                <div className="mt-2 flex overflow-hidden rounded-xl border border-outline-variant/40">
+                  <button type="button" onClick={() => setDuration(8)} className={`flex-1 px-3 py-2 text-sm font-bold ${duration === 8 ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>8 seconds</button>
+                  <button type="button" onClick={() => setDuration(15)} className={`flex-1 px-3 py-2 text-sm font-bold ${duration === 15 ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>15 seconds</button>
                 </div>
-                <input
-                  id="duration-slider"
-                  type="range"
-                  min={VEO_MIN_SECONDS}
-                  max={VEO_MAX_SECONDS}
-                  step={1}
-                  value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value))}
-                  className="mt-2 w-full accent-primary"
-                />
-                <div className="flex justify-between text-[10px] text-on-surface-variant">
-                  <span>{VEO_MIN_SECONDS}s</span>
-                  <span>{VEO_MAX_SECONDS}s max</span>
-                </div>
+                <p className="mt-1 text-[10px] text-on-surface-variant">{animatedVideoCost(duration)} PupCoins</p>
               </div>
 
               <div className="mt-4 rounded-xl bg-surface px-3 py-3 text-xs text-on-surface-variant"><Sparkles className="mr-1 inline text-primary" size={13} /> Directed beats that flow together · native natural sound · identity protection</div>

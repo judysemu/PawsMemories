@@ -18,7 +18,7 @@ import sharp from "sharp";
 import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationVideoUrl, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -42,6 +42,8 @@ import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
 import { AiVideoScriptSchema, compileEightSecondPrompt } from "./server/ai-video/scripts";
+import { submitFalVideo, type FurReelDuration } from "./server/ai-video/falVideo";
+import { getAiVideoProvider, pollAndFinishFalVideoJob } from "./server/ai-video/finish";
 import { isPetGlbEnabled, isModelBuildV3Enabled } from "./server/model-builds/featureFlag";
 import { isInhouseSpatialGeneratorEnabled } from "./server/spatial-generator/featureFlag";
 import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
@@ -120,7 +122,7 @@ import { normalizeVideoAspectRatio } from "./server/videoAspectRatio";
 import { registerSnapgenRoutes } from "./server/snapgen";
 import { SKELETON_CONTRACTS } from "./skeletonContract";
 import { TERMS_VERSION } from "./src/legal";
-import { avatarGenerationCost, bimModelCost, CREDIT_PRICES, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
+import { animatedVideoCost, avatarGenerationCost, bimModelCost, CREDIT_PRICES, createModelCost, riggingAddonCost, type BimBuildMode, type RiggingSelection } from "./src/pricing";
 import { executeBlenderTool } from "./agent/tools/blender_mcp";
 import {
   formatPipelineRecoveryDiagnostic,
@@ -174,60 +176,6 @@ import { objectBuildProfile, humanRigHints } from "./server/subjectProfiles";
 const pipelineRigLocks = new Set<number>();
 const pipelineRigRecovery = new PipelineRigRecoveryStore(getPool);
 const PIPELINE_RIG_HEARTBEAT_MS = 60 * 1000;
-
-// ---------------------------------------------------------------------------
-// MuAPI helpers (video generation via https://api.muapi.ai)
-// ---------------------------------------------------------------------------
-
-const MUAPI_BASE = "https://api.muapi.ai";
-
-async function muApiUploadImage(base64Data: string, mimeType: string): Promise<string> {
-  const buffer = Buffer.from(base64Data, "base64");
-  const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-  const form = new FormData();
-  form.append("file", new Blob([buffer], { type: mimeType }), `image.${ext}`);
-  const res = await fetch(`${MUAPI_BASE}/api/v1/upload_file`, {
-    method: "POST",
-    headers: { "x-api-key": process.env.MUAPI_API_KEY || "" },
-    body: form,
-  });
-  if (!res.ok) throw new Error(`MuAPI upload failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  const url = data.url || data.file_url || data.output_url;
-  if (!url) throw new Error("MuAPI upload returned no URL");
-  return url;
-}
-
-async function muApiSubmitVideo(imageUrl: string, prompt: string, duration: number): Promise<string> {
-  const endpoint = process.env.MUAPI_VIDEO_MODEL || "kling-v3.0-pro-image-to-video";
-  const res = await fetch(`${MUAPI_BASE}/api/v1/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": process.env.MUAPI_API_KEY || "" },
-    body: JSON.stringify({ prompt, image_url: imageUrl, duration, generate_audio: true }),
-  });
-  if (!res.ok) throw new Error(`MuAPI submit failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  const requestId = data.request_id || data.id;
-  if (!requestId) throw new Error("MuAPI returned no request_id");
-  return requestId;
-}
-
-async function muApiPollVideo(requestId: string): Promise<{ done: boolean; videoUrl?: string; error?: string }> {
-  const res = await fetch(`${MUAPI_BASE}/api/v1/predictions/${requestId}/result`, {
-    headers: { "x-api-key": process.env.MUAPI_API_KEY || "" },
-  });
-  if (!res.ok) throw new Error(`MuAPI poll failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  const status = String(data.status || "").toLowerCase();
-  if (status === "completed" || status === "succeeded" || status === "success") {
-    const videoUrl = data.outputs?.[0] || data.url || data.output?.url;
-    return { done: true, videoUrl };
-  }
-  if (status === "failed" || status === "error") {
-    return { done: true, error: data.error || "MuAPI generation failed" };
-  }
-  return { done: false };
-}
 
 function logPipelineRecovery(prefix: string, claim: RecoveryClaim): void {
   if (claim.context) {
@@ -6494,8 +6442,7 @@ async function startServer() {
     }
   });
 
-  // Phase 3 & 4: Veo Video Generation Endpoints
-  const VIDEO_COST = CREDIT_PRICES.ANIMATED_VIDEO;
+  // fal.ai Video Generation Endpoints — 8s Veo 3.1 Fast or 15s Kling 3.0 Pro
   const MAX_DAILY_VIDEOS = 5;
 
   app.post("/api/create-video", requireAuth, async (req: AuthedRequest, res) => {
@@ -6503,8 +6450,8 @@ async function startServer() {
     try {
       const { creationId } = req.body || {};
       const aspectRatio = normalizeVideoAspectRatio(req.body?.aspectRatio);
-      const rawDuration = Number(req.body?.durationSeconds);
-      const durationSeconds = Number.isFinite(rawDuration) ? Math.min(15, Math.max(5, rawDuration)) : 5;
+      const durationSeconds: FurReelDuration = req.body?.durationSeconds === 15 ? 15 : 8;
+      const videoCost = animatedVideoCost(durationSeconds);
       if (!creationId) return res.status(400).json({ success: false, error: "creationId is required" });
       const scriptResult = AiVideoScriptSchema.safeParse(req.body?.script);
       if (!scriptResult.success) {
@@ -6515,22 +6462,21 @@ async function startServer() {
       }
       const script = scriptResult.data;
       const compiledPrompt = compileEightSecondPrompt(script, Math.random, durationSeconds);
-      const providerModel = process.env.MUAPI_VIDEO_MODEL || "kling-v3.0-pro-image-to-video";
 
       const userPhone = req.user!.phone;
       const isAdmin = await isUserAdmin(userPhone);
-      
+
       // Phase 4: Rate limit check (Admin bypass)
       if (!isAdmin) {
         const dailyCount = await getDailyVideoCount(userPhone);
         if (dailyCount >= MAX_DAILY_VIDEOS) {
           return res.status(429).json({ success: false, error: `Daily video limit reached (${MAX_DAILY_VIDEOS}/day). Please try again tomorrow.` });
         }
-        
+
         // 1. Check balance
         const balance = await getCreditBalance(userPhone);
-        if (balance < VIDEO_COST) {
-          return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${VIDEO_COST} PupCoins.` });
+        if (balance < videoCost) {
+          return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${videoCost} PupCoins.` });
         }
       }
 
@@ -6543,29 +6489,29 @@ async function startServer() {
 
       // 3. Deduct credits upfront (Admin bypass: skip deduction)
       if (!isAdmin) {
-        creditReservationId = await reserveCredits(userPhone, VIDEO_COST, "animated_video");
-        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${VIDEO_COST} PupCoins.` });
+        creditReservationId = await reserveCredits(userPhone, videoCost, "animated_video");
+        if (!creditReservationId) return res.status(402).json({ success: false, error: `Insufficient PupCoins. You need ${videoCost} PupCoins.` });
       }
 
-      // 4. Resolve the image as a URL for MuAPI (upload if base64, pass directly if already a URL)
-      let imageUrl: string;
-      if (creation.image_url.startsWith("data:image")) {
-        const matches = creation.image_url.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-        if (!matches) throw new Error("Invalid image data format");
-        imageUrl = await muApiUploadImage(matches[2], matches[1]);
-      } else {
-        imageUrl = creation.image_url;
-      }
+      // 4. Resolve the image as a URL for fal.ai (upload if base64, pass directly if already a URL)
+      const imageUrl = creation.image_url.startsWith("data:image")
+        ? await uploadBase64Image(creation.image_url)
+        : creation.image_url;
 
-      // 5. Submit to MuAPI video generation
-      const operationName = await muApiSubmitVideo(imageUrl, compiledPrompt, durationSeconds);
+      // 5. Submit to fal.ai video generation (Veo for 8s, Kling for 15s)
+      const { requestId: operationName, endpoint: providerModel } = await submitFalVideo({
+        imageUrl,
+        prompt: compiledPrompt,
+        durationSeconds,
+        aspectRatio,
+      });
 
       // 6. Create job in DB
       const jobId = await createJob({
         user_phone: userPhone,
         creation_id: creationId,
         kind: "video",
-        credits_reserved: creditReservationId ? VIDEO_COST : 0,
+        credits_reserved: creditReservationId ? videoCost : 0,
         credit_debit_correlation_id: creditReservationId,
         operation_name: operationName,
       });
@@ -6575,7 +6521,7 @@ async function startServer() {
         `INSERT INTO ai_video_requests
           (job_id, template_id, script_json, compiled_prompt, duration_seconds,
            aspect_ratio, generate_audio, voice_text, voice_id, provider, provider_model)
-         VALUES (?, ?, ?, ?, ?, ?, TRUE, NULL, NULL, 'muapi', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, TRUE, NULL, NULL, 'fal-ai', ?)`,
         [
           jobId,
           script.templateId || null,
@@ -7301,35 +7247,25 @@ async function startServer() {
           }
           return res.json({ success: true, status: job.status, model_url: null, error: job.error });
         }
-        // --- MuAPI video branch ---
-        if (job.operation_name) {
-          try {
-            const result = await muApiPollVideo(job.operation_name);
-            if (result.done) {
-              if (result.videoUrl) {
-                const videoRes = await fetch(result.videoUrl);
-                if (!videoRes.ok) throw new Error(`Video download failed (${videoRes.status})`);
-                const buf = Buffer.from(await videoRes.arrayBuffer());
-                const videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
-
-                if (!await markGenerationJobDoneOnce(getPool(), jobId)) {
-                  const current = await getJob(jobId, req.user!.phone);
-                  return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
-                }
-                await setCreationVideoUrl(job.creation_id!, req.user!.phone, videoUrl);
-                await sendSms(req.user!.phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
-                return res.json({ success: true, status: "done", video_url: videoUrl });
-              } else {
-                await failGenerationJobAndRefundOnce(getPool(), jobId, result.error || "No video generated");
-                return res.json({ success: true, status: "failed", error: result.error || "Generation returned no video" });
-              }
-            } else {
-              await updateJobStatus(jobId, "running");
+        // --- fal.ai video branch ---
+        if (job.kind === "video" && job.operation_name) {
+          const videoProvider = await getAiVideoProvider(jobId);
+          if (videoProvider?.provider === "fal-ai") {
+            const outcome = await pollAndFinishFalVideoJob(
+              { id: jobId, operation_name: job.operation_name, creation_id: job.creation_id, user_phone: req.user!.phone },
+              videoProvider.provider_model,
+            );
+            if (outcome.status === "already_finalized") {
+              const current = await getJob(jobId, req.user!.phone);
+              return res.json({ success: true, status: current?.status || "failed", error: current?.error || "Job already finalized." });
             }
-          } catch (pollErr: any) {
-            console.error("Video poll error:", pollErr);
-            await failGenerationJobAndRefundOnce(getPool(), jobId, pollErr.message);
-            return res.json({ success: true, status: "failed", error: pollErr.message });
+            if (outcome.status === "done") {
+              return res.json({ success: true, status: "done", video_url: outcome.videoUrl });
+            }
+            if (outcome.status === "failed") {
+              return res.json({ success: true, status: "failed", error: outcome.error });
+            }
+            // "running" falls through to the generic status response below.
           }
         }
       }
@@ -7484,27 +7420,16 @@ async function startServer() {
           }
           continue;
         }
-        // --- MuAPI video branch ---
-        try {
-          const result = await muApiPollVideo(job.operation_name);
-          if (result.done) {
-            if (result.videoUrl) {
-              const videoRes = await fetch(result.videoUrl);
-              if (!videoRes.ok) throw new Error(`Video download failed (${videoRes.status})`);
-              const buf = Buffer.from(await videoRes.arrayBuffer());
-              const videoUrl = await uploadBase64Image(`data:video/mp4;base64,${buf.toString("base64")}`);
-              if (!await markGenerationJobDoneOnce(getPool(), job.id)) continue;
-              if (job.creation_id) {
-                await setCreationVideoUrl(job.creation_id, job.user_phone, videoUrl);
-              }
-              await sendSms(job.user_phone, `🐾 Paws & Memories: Your pet video animation is ready! View it at ${process.env.APP_URL || "your app"}.`);
-            } else {
-              await failGenerationJobAndRefundOnce(getPool(), job.id, result.error || "No video generated");
-            }
+        // --- fal.ai video branch ---
+        if (job.kind === "video") {
+          const videoProvider = await getAiVideoProvider(job.id);
+          if (videoProvider?.provider === "fal-ai") {
+            await pollAndFinishFalVideoJob(
+              { id: job.id, operation_name: job.operation_name, creation_id: job.creation_id, user_phone: job.user_phone },
+              videoProvider.provider_model,
+            );
           }
-        } catch (err: any) {
-          console.error(`Background poller error for job ${job.id}:`, err);
-          await failGenerationJobAndRefundOnce(getPool(), job.id, err?.message || "Poller error");
+          continue;
         }
       }
     } catch (e) {
