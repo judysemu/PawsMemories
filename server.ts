@@ -17,8 +17,9 @@ import fs from "fs";
 import sharp from "sharp";
 import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
+import { installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -142,7 +143,7 @@ import { isAtLeastAge } from "./server/accountValidation";
 import { PrintUploadValidationError, validatePrintUpload } from "./server/printUploadValidation";
 import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
-import { isPawprintsShopifyEnabled, assertPawprintsShopifyEnabled, verifyShopifyConfiguration, createPawprintCheckout } from "./server/shopify";
+import { isPawprintsShopifyEnabled, assertPawprintsShopifyEnabled, verifyShopifyConfiguration, createPawprintCheckout, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
 import {
@@ -478,6 +479,7 @@ export function formatReadinessResponse(database: { configured: boolean; healthy
 }
 
 async function startServer() {
+  installRuntimeLogger();
   const app = express();
   // API responses are application data, never search-result pages.
   app.use("/api", (_req, res, next) => {
@@ -878,6 +880,64 @@ async function startServer() {
     }
 
     res.json({ received: true });
+  });
+
+  // Shopify order-status webhook (orders/paid, orders/cancelled) — registered
+  // once in Shopify Admin → Settings → Notifications → Webhooks, pointed at
+  // this route. Closes the gap in pawprint_shopify_orders: status used to
+  // stay 'redirected' forever once a customer left for Shopify's checkout.
+  // Same raw-body-before-JSON-parser pattern as the Stripe webhook above.
+  app.post("/api/webhooks/shopify-orders", express.raw({ type: "application/json" }), async (req, res) => {
+    const hmacHeader = req.headers["x-shopify-hmac-sha256"] as string | undefined;
+    const topic = String(req.headers["x-shopify-topic"] || "");
+    if (!verifyShopifyWebhookSignature(req.body as Buffer, hmacHeader)) {
+      console.warn("[POST /api/webhooks/shopify-orders] Invalid or missing HMAC signature.");
+      return res.status(401).json({ received: false });
+    }
+    let order: any;
+    try {
+      order = JSON.parse((req.body as Buffer).toString("utf8"));
+    } catch {
+      return res.status(400).json({ received: false, error: "Malformed payload." });
+    }
+    try {
+      const reference = extractPawprintOrderReference(order?.note);
+      if (!reference) {
+        // Not every Shopify order is a Pawprint order (the store also sells
+        // non-personalized merch) — silently ignore, this is expected.
+        return res.json({ received: true, matched: false });
+      }
+      const row = await findPawprintShopifyOrderByReference(reference);
+      if (!row) {
+        console.warn(`[POST /api/webhooks/shopify-orders] No pawprint_shopify_orders row for reference ${reference}.`);
+        return res.json({ received: true, matched: false });
+      }
+      const status = topic === "orders/cancelled" ? "cancelled" : "paid";
+      await updatePawprintShopifyOrderStatus({ id: Number(row.id), status, shopifyOrderId: String(order?.id || "") });
+      res.json({ received: true, matched: true });
+    } catch (error: any) {
+      console.error("[POST /api/webhooks/shopify-orders] Error:", error?.message || error);
+      res.status(500).json({ received: false });
+    }
+  });
+
+  // Machine-to-machine diagnostic read for the "Pawsome3D Runtime Log Watch"
+  // scheduled routine (see docs/AUTOMATIONS.md) — the routine's cloud
+  // environment has no Hostinger file-browsing access, so the app exposes
+  // its own log file over plain HTTPS instead. A static shared secret, not
+  // a user JWT, since this is called by a scheduled agent with no user
+  // session. Scoped to exactly one read-only, non-mutating purpose.
+  app.get("/api/admin/runtime-log", (req, res) => {
+    const key = process.env.RUNTIME_LOG_API_KEY;
+    if (!key || req.header("X-Runtime-Log-Key") !== key) {
+      return res.status(404).json({ error: "Not found." });
+    }
+    const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD." });
+    }
+    const content = readRuntimeLog(date);
+    res.json({ date, content: content ?? "" });
   });
 
   // Content Security Policy — strict but permits what the app needs
@@ -3433,6 +3493,7 @@ async function startServer() {
         title: String(creation.pet_name || "Pawprint"),
         imageUrl: String(creation.image_url),
         shopifyVariantId: input.shopifyVariantId,
+        orderReference: idempotencyKey,
       });
       await insertPawprintShopifyOrder({
         userPhone: req.user!.phone,

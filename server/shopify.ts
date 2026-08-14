@@ -1,11 +1,39 @@
 /** Small Shopify adapter for Pawprints physical fulfillment.
  * v1 scope: create/upsert one Shopify Product per finished Pawprint design
  * via the Admin API, then hand back a cart-permalink checkout URL. Shopify's
- * own checkout collects payment and shipping — there is no local order
- * webhook or reconciliation sweep yet (see PAWPRINTS_SHOPIFY_ENABLED and
- * docs/superpowers/specs/2026-08-12-pawprints-flow-repair-design.md's sibling
- * plan doc for the full design and its explicit v1/follow-up split).
+ * own checkout collects payment and shipping. Order status is reconciled by
+ * the orders/paid and orders/cancelled webhooks registered in Shopify Admin
+ * (Settings → Notifications → Webhooks) against POST /api/webhooks/shopify-orders
+ * — see docs/superpowers/specs/2026-08-12-pawprints-flow-repair-design.md's
+ * sibling plan doc for the full design and its explicit v1/follow-up split.
  */
+
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+/** Verifies Shopify's X-Shopify-Hmac-Sha256 header against the raw request
+ *  body, mirroring the Stripe webhook verification pattern in server.ts.
+ *  `rawBody` must be the exact bytes Shopify sent (mount this route with
+ *  express.raw({ type: "application/json" }) BEFORE the global JSON parser). */
+export function verifyShopifyWebhookSignature(rawBody: Buffer, hmacHeader: string | undefined): boolean {
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET || "";
+  if (!secret || !hmacHeader) return false;
+  const computed = createHmac("sha256", secret).update(rawBody).digest("base64");
+  const expected = Buffer.from(hmacHeader, "base64");
+  const actual = Buffer.from(computed, "base64");
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
+}
+
+const PAWPRINT_ORDER_REFERENCE_PATTERN = /pawprint_order:([a-f0-9-]{36})/i;
+
+/** Extracts the idempotency key we stamped into the order's note at checkout
+ *  time (see createPawprintCheckout), so an incoming webhook payload can be
+ *  matched back to its pawprint_shopify_orders row without a customer/order
+ *  ID we don't otherwise have a way to correlate. */
+export function extractPawprintOrderReference(shopifyOrderNote: string | null | undefined): string | null {
+  const match = PAWPRINT_ORDER_REFERENCE_PATTERN.exec(String(shopifyOrderNote || ""));
+  return match ? match[1] : null;
+}
 
 export const PAWPRINTS_SHOPIFY_FEATURE_FLAG = "PAWPRINTS_SHOPIFY_ENABLED";
 
@@ -49,7 +77,7 @@ async function fetchAccessToken(domain: string): Promise<{ token: string; expire
 
 async function configuration() {
   const domain = (process.env.SHOPIFY_STORE_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const apiVersion = process.env.SHOPIFY_API_VERSION || "2025-01";
+  const apiVersion = process.env.SHOPIFY_API_VERSION || "2026-07";
   if (!domain) throw new Error("Shopify is not configured: set SHOPIFY_STORE_DOMAIN.");
   if (!cachedToken || cachedToken.expiresAt - TOKEN_REFRESH_BUFFER_MS <= Date.now()) {
     cachedToken = await fetchAccessToken(domain);
@@ -100,6 +128,10 @@ export interface CreatePawprintCheckoutInput {
   title: string;
   imageUrl: string;
   shopifyVariantId: string;
+  /** The pawprint_shopify_orders row's idempotency key. Stamped into the
+   *  Shopify order's note so the orders/paid webhook can correlate the
+   *  completed order back to this row — see extractPawprintOrderReference. */
+  orderReference: string;
 }
 
 export interface PawprintCheckoutResult {
@@ -114,6 +146,6 @@ export async function createPawprintCheckout(input: CreatePawprintCheckoutInput)
   const { domain } = await configuration();
   const variantId = Number(input.shopifyVariantId);
   if (!variantId) throw new Error("A valid Shopify variant is required.");
-  const note = encodeURIComponent(`Pawprint design: ${input.imageUrl}`);
+  const note = encodeURIComponent(`Pawprint design: ${input.imageUrl} | pawprint_order:${input.orderReference}`);
   return { checkoutUrl: `https://${domain}/cart/${variantId}:1?note=${note}` };
 }

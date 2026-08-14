@@ -1170,8 +1170,11 @@ export async function initDb(): Promise<void> {
     `);
 
     // Pawprints v2 Print fulfillment: one Shopify product/checkout per
-    // physical order. v1 has no order webhook, so status stays 'redirected'
-    // until a future reconciliation pass is built.
+    // physical order. status is reconciled by the orders/paid and
+    // orders/cancelled webhooks in server.ts (POST /api/webhooks/shopify-orders),
+    // matched via the idempotency_key stamped into the order's note at
+    // checkout time (see server/shopify.ts's createPawprintCheckout /
+    // extractPawprintOrderReference).
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS pawprint_shopify_orders (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -1188,6 +1191,24 @@ export async function initDb(): Promise<void> {
         FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Order-webhook reconciliation columns — added defensively, same pattern
+    // as pawprint_assets.entry_mode above.
+    try {
+      const [pawprintOrderColumns] = await getPool().query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pawprint_shopify_orders'`,
+      ) as any;
+      const pawprintOrderColumnNames = new Set(pawprintOrderColumns.map((row: any) => String(row.COLUMN_NAME)));
+      if (!pawprintOrderColumnNames.has("shopify_order_id")) {
+        await getPool().query(`ALTER TABLE pawprint_shopify_orders ADD COLUMN shopify_order_id VARCHAR(64) NULL AFTER status`);
+      }
+      if (!pawprintOrderColumnNames.has("paid_at")) {
+        await getPool().query(`ALTER TABLE pawprint_shopify_orders ADD COLUMN paid_at TIMESTAMP NULL AFTER shopify_order_id`);
+      }
+    } catch (migrationError) {
+      console.warn("⚠️ Could not migrate pawprint_shopify_orders webhook columns:", migrationError);
+    }
 
     // Model spatial metadata for authoritative scale & coordinate info (Phase 1 BIM).
     await getPool().query(`
@@ -3822,9 +3843,34 @@ export async function findPawprintShopifyOrderByIdempotencyKey(userPhone: string
   return rows?.[0] || null;
 }
 
+/** Webhook-side lookup: the incoming order/webhook payload carries only the
+ *  reference stamped into the order note (see extractPawprintOrderReference),
+ *  not a user_phone — idempotency_key is a client-generated UUID, unique
+ *  enough on its own for this match. */
+export async function findPawprintShopifyOrderByReference(idempotencyKey: string) {
+  const [rows] = await getPool().query(
+    `SELECT id, user_phone, status FROM pawprint_shopify_orders WHERE idempotency_key = ? LIMIT 1`,
+    [idempotencyKey],
+  ) as any;
+  return rows?.[0] || null;
+}
+
+/** Applies an orders/paid or orders/cancelled webhook to its row. Idempotent —
+ *  safe to call again for a retried webhook delivery. */
+export async function updatePawprintShopifyOrderStatus(input: {
+  id: number; status: "paid" | "cancelled"; shopifyOrderId: string;
+}): Promise<void> {
+  await getPool().query(
+    `UPDATE pawprint_shopify_orders
+     SET status = ?, shopify_order_id = ?, paid_at = IF(? = 'paid', COALESCE(paid_at, CURRENT_TIMESTAMP), paid_at)
+     WHERE id = ?`,
+    [input.status, input.shopifyOrderId, input.status, input.id],
+  );
+}
+
 export async function listPawprintShopifyOrders(userPhone: string) {
   const [rows] = await getPool().query(
-    `SELECT id, creation_id, shopify_product_id, shopify_variant_id, checkout_url, status, created_at
+    `SELECT id, creation_id, shopify_product_id, shopify_variant_id, checkout_url, status, paid_at, created_at
      FROM pawprint_shopify_orders WHERE user_phone = ? ORDER BY created_at DESC`,
     [userPhone],
   ) as any;
