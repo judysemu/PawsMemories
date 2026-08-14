@@ -33,13 +33,19 @@
  * raw selectors, but a real checkout redesign may still require updates here.
  */
 
+import "dotenv/config";
 import { chromium } from "playwright";
 import mysql from "mysql2/promise";
 import { randomUUID } from "node:crypto";
 
 const APP_BASE_URL = process.env.APP_BASE_URL || "https://pawsome3d.com";
 const TEST_USER_EMAIL = process.env.VERIFY_TEST_EMAIL || "pawprint-checkout-verify@pawsome3d.com";
-const TEST_USER_PASSWORD = process.env.VERIFY_TEST_PASSWORD || `Verify-${randomUUID().slice(0, 8)}!`;
+// Stable across runs on purpose — a fresh random default here would strand
+// the account created on the first run (its real password would be lost the
+// moment the process exits, so a later run's fresh random guess could never
+// log back in). This is a throwaway fixture account with no purchasing
+// power beyond what this script itself drives, so a fixed default is fine.
+const TEST_USER_PASSWORD = process.env.VERIFY_TEST_PASSWORD || "Verify-Pawprint-Checkout-2026!";
 // The Halloween Dog Bone Woven Blanket — the one live, genuinely
 // photo-customizable PRINT_PRODUCTS entry as of this script's writing
 // (shared/pawprintCatalog2.ts). Override via env if the catalog changes.
@@ -225,7 +231,11 @@ async function main() {
 
     if (mode === "stop-before-payment") {
       console.log("[4/5] Loading the real checkout page (screenshot only, no submission)...");
-      await page.goto(checkoutPayload.checkoutUrl, { waitUntil: "networkidle", timeout: 30_000 });
+      // "networkidle" never resolves on Shopify storefronts — analytics
+      // beacons and chat widgets keep the network busy indefinitely.
+      // domcontentloaded + a short settle delay is what actually works here.
+      await page.goto(checkoutPayload.checkoutUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.waitForTimeout(2_000);
       const screenshotPath = new URL(`stop-before-payment-${Date.now()}.png`, OUTPUT_DIR);
       await page.screenshot({ path: screenshotPath.pathname, fullPage: true });
       await browser.close();
@@ -240,7 +250,8 @@ async function main() {
     const { code, priceRuleId } = await createSingleUseDiscountCode(admin);
     try {
       const discountedUrl = `${checkoutPayload.checkoutUrl}&discount=${encodeURIComponent(code)}`;
-      await page.goto(discountedUrl, { waitUntil: "networkidle", timeout: 30_000 });
+      await page.goto(discountedUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.waitForTimeout(2_000);
 
       // Contact + shipping — required even on a $0 order. Uses role/label
       // locators so minor theme markup changes don't break this.
