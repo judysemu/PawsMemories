@@ -62,7 +62,7 @@ const request = createRigWorkerRequest({
   profileId: args.profile,
   classification: args.classification,
   requestFacial: args.facial,
-  source: { signedUrl: sourceUrl, sha256: sourceSha, sizeBytes: sourceBytes.length },
+  source: { locator: sourceUrl, sha256: sourceSha, sizeBytes: sourceBytes.length },
   accessories: [],
 });
 
