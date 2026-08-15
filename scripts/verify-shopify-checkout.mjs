@@ -127,6 +127,38 @@ async function createSingleUseDiscountCode(admin) {
   return { code, priceRuleId };
 }
 
+// A percentage discount on the line item only zeroes the product price —
+// shipping is a separate charge Shopify tracks under a different discount
+// target_type. Without this, checkout never reaches an actual $0 total, so
+// it falls through to a real payment step instead of completing for free.
+async function createFreeShippingDiscountCode(admin) {
+  const code = `PAWPRINT-SHIP-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const endsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const priceRule = await admin.call("/price_rules.json", {
+    method: "POST",
+    body: JSON.stringify({
+      price_rule: {
+        title: `Pawprint checkout verification — free shipping (${code})`,
+        target_type: "shipping_line",
+        target_selection: "all",
+        allocation_method: "each",
+        value_type: "percentage",
+        value: "-100.0",
+        customer_selection: "all",
+        usage_limit: 1,
+        starts_at: new Date().toISOString(),
+        ends_at: endsAt,
+      },
+    }),
+  });
+  const priceRuleId = priceRule.price_rule.id;
+  await admin.call(`/price_rules/${priceRuleId}/discount_codes.json`, {
+    method: "POST",
+    body: JSON.stringify({ discount_code: { code } }),
+  });
+  return { code, priceRuleId };
+}
+
 async function deleteDiscountCode(admin, priceRuleId) {
   await admin.call(`/price_rules/${priceRuleId}.json`, { method: "DELETE" }).catch((err) =>
     console.warn(`[cleanup] Could not delete price rule ${priceRuleId}: ${err.message}`));
@@ -195,7 +227,13 @@ async function createFixtureCreation(db, userPhone) {
 }
 
 async function main() {
-  const db = await mysql.createConnection({
+  // A pool, not a single connection — the browser-automation phase (steps
+  // 3-4) can easily sit idle for 30-90s with zero DB activity, long enough
+  // for MySQL's server-side wait_timeout to close a bare connection out
+  // from under the later webhook-status polling. Matches db.ts's own
+  // mysql.createPool() pattern, which sidesteps this by handing out a
+  // fresh connection per query instead of reusing one that may have gone stale.
+  const db = mysql.createPool({
     host: process.env.DB_HOST || "localhost",
     port: Number(process.env.DB_PORT || 3306),
     user: requireEnv("DB_USER"),
@@ -245,12 +283,27 @@ async function main() {
     }
 
     // --complete: drive a real, zero-cost order through to completion.
-    console.log("[4/5] Creating a single-use 100%-off discount code and completing checkout...");
+    // Two codes are required — one zeroes the product, one zeroes shipping —
+    // since Shopify tracks those as separate discount target types. Without
+    // both, the order total never reaches true $0 and checkout falls
+    // through to a real payment step instead of completing for free.
+    console.log("[4/5] Creating single-use 100%-off discount codes (product + shipping) and completing checkout...");
     const admin = await shopifyAdmin();
     const { code, priceRuleId } = await createSingleUseDiscountCode(admin);
+    const { code: shipCode, priceRuleId: shipPriceRuleId } = await createFreeShippingDiscountCode(admin);
+    let finalStatus = null;
+    // Cleanup (both discount codes, and cancelling any order that did get
+    // created) must run whether checkout succeeds or fails — a failed
+    // automation run still spends the discount codes and may still place
+    // an order, so this can't live only on the happy path.
     try {
-      const discountedUrl = `${checkoutPayload.checkoutUrl}&discount=${encodeURIComponent(code)}`;
-      await page.goto(discountedUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    try {
+      // Both codes go through the visible discount field, one after the
+      // other — not the ?discount= URL param. That param's application path
+      // behaved differently under testing (a second code applied afterward
+      // would show briefly, then silently revert). Applying both the same
+      // way, through the same UI flow, is what actually held.
+      await page.goto(checkoutPayload.checkoutUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await page.waitForTimeout(2_000);
 
       // Contact + shipping — required even on a $0 order. Uses role/label
@@ -266,23 +319,72 @@ async function main() {
       await fillIfPresent(/^city$/i, "Denver");
       await fillIfPresent(/^zip|postal code/i, "80202");
       await fillIfPresent(/phone/i, "3035550100");
+      await page.waitForTimeout(1_500); // let the shipping method settle before touching discounts
 
-      const continueOrPay = page.getByRole("button", { name: /pay now|complete order|continue to|continue/i }).first();
-      await continueOrPay.click({ timeout: 15_000 }).catch(() => {});
-      // A $0 total may require one more "Pay now"-style click after shipping.
-      const payNow = page.getByRole("button", { name: /pay now|complete order/i }).first();
-      if (await payNow.count()) await payNow.click({ timeout: 15_000 }).catch(() => {});
+      const applyDiscountCode = async (discountCode) => {
+        const discountField = page.getByPlaceholder(/discount code/i).first();
+        await discountField.click();
+        await discountField.fill(discountCode);
+        await discountField.press("Enter");
+        await page.waitForTimeout(3_000);
+        const stillPresent = await discountField.inputValue().catch(() => "");
+        if (stillPresent) {
+          await page.getByRole("button", { name: /apply/i }).first().click({ timeout: 10_000 }).catch(() => {});
+          await page.waitForTimeout(3_000);
+        }
+      };
+      await applyDiscountCode(code);
+      await applyDiscountCode(shipCode);
 
-      await page.waitForURL(/thank[_-]?you|orders\//i, { timeout: 30_000 }).catch(() => {});
+      const appliedChipCount = await page.getByText(/^PAWPRINT-(VERIFY|SHIP)-/).count();
+      if (appliedChipCount < 2) {
+        throw new Error(
+          `Only ${appliedChipCount}/2 discount codes show as applied after entering both. ` +
+          `Classic Shopify discount codes often don't combine by default — this store's ` +
+          `combination settings may need "Combines with other discount codes" enabled for ` +
+          `both, or this needs the GraphQL discount API instead of REST price_rules.`,
+        );
+      }
+      // Check the actual Total line, not a "shipping" text match — the page
+      // has multiple unrelated elements containing the word "shipping"
+      // (e.g. the "Shipping method" section header) that a loose text
+      // search can latch onto instead of the real price line.
+      const bodyTextAfterDiscounts = await page.locator("body").innerText().catch(() => "");
+      const totalMatchAfterDiscounts = /Total[\s\S]{0,40}?\$([\d,.]+)/i.exec(bodyTextAfterDiscounts);
+      const totalIsZero = totalMatchAfterDiscounts && parseFloat(totalMatchAfterDiscounts[1].replace(/,/g, "")) === 0;
+      if (!totalIsZero) {
+        throw new Error(
+          `Order total isn't $0 after applying both discount codes — ` +
+          (totalMatchAfterDiscounts ? `page shows "${totalMatchAfterDiscounts[0]}". ` : "total line not found. ") +
+          `Not proceeding to payment with a non-zero total.`,
+        );
+      }
+
+      // One click only — a second click here previously interrupted
+      // Shopify's in-flight validation of the just-applied shipping
+      // discount, causing it to drop and the order to re-price with
+      // shipping charged again.
+      const payButton = page.getByRole("button", { name: /pay now|complete order/i }).first();
+      await payButton.click({ timeout: 15_000 });
+
+      const reachedConfirmation = await page.waitForURL(/thank[_-]?you|orders\//i, { timeout: 45_000 }).then(() => true).catch(() => false);
       const screenshotPath = new URL(`complete-${Date.now()}.png`, OUTPUT_DIR);
       await page.screenshot({ path: screenshotPath.pathname, fullPage: true });
       console.log(`       Order confirmation screenshot: ${screenshotPath.pathname}`);
+      if (!reachedConfirmation) {
+        const bodyText = await page.locator("body").innerText().catch(() => "");
+        const totalMatch = /Total[\s\S]{0,40}?\$[\d,.]+/i.exec(bodyText);
+        throw new Error(
+          `Checkout never reached the order-confirmation page — see the screenshot above for the actual state. ` +
+          (totalMatch ? `Page still shows: "${totalMatch[0]}" (not $0 — a discount didn't fully apply). ` : "") +
+          `Cleanup will still run.`,
+        );
+      }
     } finally {
       await browser.close();
     }
 
     console.log("[5/5] Waiting for the orders/paid webhook to update pawprint_shopify_orders.status...");
-    let finalStatus = null;
     for (let attempt = 0; attempt < 12; attempt++) {
       const [[row]] = await db.query(
         `SELECT status FROM pawprint_shopify_orders WHERE user_phone = ? AND idempotency_key = ? LIMIT 1`,
@@ -293,10 +395,12 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
     console.log(`       pawprint_shopify_orders.status = ${finalStatus}`);
-
-    console.log("Cleaning up: deleting the discount code and cancelling the test order...");
-    await deleteDiscountCode(admin, priceRuleId);
-    await findAndCancelTestOrder(admin, `pawprint_order:${idempotencyKey}`);
+    } finally {
+      console.log("Cleaning up: deleting both discount codes and cancelling the test order if one exists...");
+      await deleteDiscountCode(admin, priceRuleId);
+      await deleteDiscountCode(admin, shipPriceRuleId);
+      await findAndCancelTestOrder(admin, `pawprint_order:${idempotencyKey}`);
+    }
 
     if (finalStatus !== "paid") {
       throw new Error(
