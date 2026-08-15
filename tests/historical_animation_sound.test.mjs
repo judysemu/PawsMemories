@@ -223,7 +223,7 @@ test("voiced result records are owner-scoped and contain durable verification ev
   fs.rmSync(workspace, { recursive: true, force: true });
 });
 
-test("playback, capture, finalizer, and UI sources preserve lifecycle and terminal-state boundaries", () => {
+test("playback, capture, Fur Reels finalizer, and UI sources preserve lifecycle and terminal-state boundaries", () => {
   const soundSource = fs.readFileSync(path.join(ROOT, "src/animator/scenes/sound/SoundSystem.tsx"), "utf8");
   assert.match(soundSource, /stopAndDisconnect/);
   assert.match(soundSource, /generation\.current/);
@@ -237,10 +237,10 @@ test("playback, capture, finalizer, and UI sources preserve lifecycle and termin
   assert.match(routeSource, /recordingId: recording\.recordingId/);
   assert.doesNotMatch(routeSource, /res\.json\(\{\s*filename/);
   const serverSource = fs.readFileSync(path.join(ROOT, "server.ts"), "utf8");
-  assert.ok(serverSource.indexOf("persistVoicedResult({") < serverSource.indexOf("markVoiceoverDone(job.id"));
-  assert.match(serverSource, /claimVoiceoverFinalizer/);
-  const finalizerSource = fs.readFileSync(path.join(ROOT, "server/animator/voicedResults.ts"), "utf8");
-  assert.match(finalizerSource, /status IN \('queued','running'\).*recovery_lease_owner IS NULL/s);
+  assert.match(serverSource, /pollAndFinishFalVideoJob/);
+  assert.doesNotMatch(serverSource, /pollTalkingVideo|startTalkingVideo/);
+  const finalizerSource = fs.readFileSync(path.join(ROOT, "server/ai-video/finish.ts"), "utf8");
+  assert.ok(finalizerSource.indexOf("uploadBinaryFromUrl(result.videoUrl.toString()") < finalizerSource.indexOf("markGenerationJobDoneOnce(getPool(), job.id"));
   assert.match(finalizerSource, /failGenerationJobAndRefundOnce/);
   const refundSource = fs.readFileSync(path.join(ROOT, "server/generationRefunds.ts"), "utf8");
   assert.match(refundSource, /generation_refunded_at/);
