@@ -18,10 +18,14 @@ Every routine gets one entry here when it's created or changed.
     `shared/pawprintCatalog2.ts`, drafts entries for genuinely
     photo-customizable new products, commits straight to `main` flagged
     "needs review."
-  - **Job B** — screens every catalogued product's live SEO metadata (title
-    tag, meta description, image alt text, handle) and writes plain-English
-    recommendations with concrete suggested fixes. Read-only against
-    Shopify — it never writes a metafield itself.
+  - **Job B** — screens every catalogued (`PRINT_PRODUCTS`) product's live
+    SEO metadata (title tag, meta description, image alt text, handle) and
+    writes plain-English recommendations with concrete suggested fixes.
+  - **Job C** — same four checks, applied store-wide: every other active
+    product plus every collection, capped at the 25 most significant issues
+    per run, plus duplicate-title detection across everything Job B and C
+    screened combined. Reuses Job A's product list — no extra fetch.
+  - Both SEO jobs are read-only against Shopify — neither writes a metafield.
   - Silent if nothing to report ("no news, no noise").
 - **Human-in-the-loop stage:** Hostinger is manual-deploy-only (not wired to
   auto-deploy from GitHub), so a Job A commit landing on `main` never reaches
@@ -71,6 +75,28 @@ Every routine gets one entry here when it's created or changed.
   call was silently ignored — there's no way to grant a routine
   plugin-backed tools. The app now serves its own log data over HTTPS
   instead, which sidesteps the distinction entirely.
+
+## Pawsome3D App SEO Screen
+
+- **Trigger ID:** `trig_01DtQzq8Y2mPEqXmiBGKBtmT`
+- **Schedule:** `0 14 * * 1` UTC, weekly (Mondays)
+- **Environment:** reuses the same one as Runtime Log Watch
+  (`env_01VfgjpAPQSZqWX1wTwNvKih`, Custom network access incl.
+  `pawsome3d.com`) — created by pointing a new routine at an existing
+  environment_id, no repeat UI setup needed.
+- **Connectors:** Gmail
+- **Spec:** `docs/superpowers/specs/2026-08-14-seo-automation-spec.md`
+- **What it does:** cross-checks `src/seo.ts`, `server/seoMeta.ts`, and
+  `public/sitemap.xml` — three hand-maintained sources of the same
+  per-route SEO metadata that can (and, confirmed by inspection when this
+  was speced, already had) drift apart — flags missing/stale/mismatched
+  entries, title/description length issues, and does a live `curl`
+  spot-check against the deployed site to catch "the code is right but the
+  build is stale" separately from a code-level bug. Drafts a `fix/*` branch
+  only for the mechanical case (a missing sitemap URL); everything else
+  (wording, length, stale routes) is reported, not auto-fixed.
+- **Human-in-the-loop stage:** same as Runtime Log Watch — fixes land on a
+  branch, never `main`; merging is a human decision.
 
 ## Deploy
 
