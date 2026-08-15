@@ -46,17 +46,17 @@ export const PAGE_META: Record<string, PageMeta> = {
       "High-quality 3D pet models for businesses, groomers, veterinarians, and pet brands. Commercial-use GLB files ready for websites, 3D renderers, and AR.",
   },
   "/glb-pet-models-guide": {
-    title: "GLB Pet Model Guide: What is a GLB File & How to Use It | Pawsome3D",
+    title: "GLB Pet Model Guide: What Is a GLB File? | Pawsome3D",
     description:
       "Learn what a GLB pet model is, how pet GLB files work, and how to view or use 3D animal models in Blender, Unity, and web apps.",
   },
   "/denver": {
-    title: "3D Pet Models Denver | Local Pet Business & 3D Models | Pawsome3D",
+    title: "3D Pet Models in Denver | Pawsome3D",
     description:
-      "Affordable 3D pet models in Denver. Serving Denver pet owners, local veterinary clinics, groomers, and pet industry professionals with instant GLB file delivery.",
+      "Affordable 3D pet models in Denver. Serving Denver pet owners, local veterinary clinics, groomers, and pet industry professionals with fast GLB delivery.",
   },
   "/philadelphia": {
-    title: "3D Pet Models Philadelphia | Local Pet Industry Solutions | Pawsome3D",
+    title: "3D Pet Models in Philadelphia | Pawsome3D",
     description:
       "Affordable 3D pet models in Philadelphia. Serving Philly pet owners, local pet brands, groomers, and creative studios with versatile GLB pet models.",
   },
@@ -90,10 +90,10 @@ export const PAGE_META: Record<string, PageMeta> = {
     description:
       "Upload photos, personalize the model, check printability, and order your physical pet keepsake.",
   },
-  "/marketplace": {
-    title: "Pet 3D Model Marketplace | Pawsome3D",
+  "/print-shop": {
+    title: "Print Shop: Custom Pet Keepsakes | Pawsome3D",
     description:
-      "Browse customizable pet models, accessories, memorial pieces, and seasonal keepsakes.",
+      "Order physical pet keepsakes — printed 3D figurines and Pawprints art — with your own photos. Add a shipping address and check out securely.",
   },
   "/pawprints": {
     title: "Personalized Pawprints Pet Art | Pawsome3D",
