@@ -121,6 +121,7 @@ const PUBLIC_SCREENS = new Set<Screen>([
   Screen.SIGN_UP,
   Screen.CREATE,
   Screen.PAWPRINTS,
+  Screen.STORE,
   Screen.PRINT_SHOP,
   Screen.LANDING_MODELS,
   Screen.LANDING_DOGS,
@@ -515,6 +516,15 @@ export default function App() {
     }
   };
 
+  const handlePawprintComplete = (pawprintId: number) => {
+    window.history.pushState(
+      { screen: Screen.STORE, pawprintId },
+      "",
+      `/store?pawprint=${pawprintId}`,
+    );
+    setCurrentScreen(Screen.STORE);
+  };
+
   const handleCreationSaved = (newCreation: Creation) => {
     setCreations((prev) => {
       const exists = prev.some((c) => c.id === newCreation.id);
@@ -902,7 +912,7 @@ export default function App() {
 
         {currentScreen === Screen.PAWPRINTS && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
-            <PawprintsScreen userProfile={userProfile} creations={creations} onOpenCreditStore={() => setShowCreditStore(true)} onUserUpdate={applyUser} onCreationSaved={refreshCreations} />
+            <PawprintsScreen userProfile={userProfile} creations={creations} onOpenCreditStore={() => setShowCreditStore(true)} onUserUpdate={applyUser} onCreationSaved={refreshCreations} onPawprintComplete={handlePawprintComplete} />
           </Suspense>
         )}
 
@@ -911,13 +921,15 @@ export default function App() {
             so the page works as a landing surface as well as an ordering one. */}
         {currentScreen === Screen.PRINT_SHOP && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center py-24 text-on-surface-variant"><RefreshCw className="animate-spin" size={22} /></div>}>
-            <PrintShopScreen userProfile={userProfile} onOpenPawprints={() => setCurrentScreen(Screen.PAWPRINTS)} />
+            <PrintShopScreen userProfile={userProfile} />
           </Suspense>
         )}
 
+        {currentScreen === Screen.STORE && <Store />}
+
         {/* When not authenticated and screen is not public, render sign-up. */}
         {!isAuthed && ![
-          Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_CATS, Screen.LANDING_PROFESSIONALS, Screen.LANDING_GLB_GUIDE, Screen.LANDING_DENVER, Screen.LANDING_PHILADELPHIA, Screen.GUIDES_HUB, Screen.PRODUCT_VIEW, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING
+          Screen.DASHBOARD, Screen.CREATE, Screen.CREATE_REFERENCE, Screen.CREATE_CUSTOMIZE, Screen.CREATE_VALIDATE, Screen.CREATE_CHECKOUT, Screen.CREATE_BUILD_PROGRESS, Screen.CREATE_BUILD_REVIEW, Screen.CREATE_RIG_PROGRESS, Screen.CREATE_RIG_REVIEW, Screen.PAWPRINTS, Screen.STORE, Screen.PRINT_SHOP, Screen.LANDING_MODELS, Screen.LANDING_DOGS, Screen.LANDING_CATS, Screen.LANDING_PROFESSIONALS, Screen.LANDING_GLB_GUIDE, Screen.LANDING_DENVER, Screen.LANDING_PHILADELPHIA, Screen.GUIDES_HUB, Screen.PRODUCT_VIEW, Screen.LANDING_MEMORIALS, Screen.HOW_IT_WORKS, Screen.PRICING
         ].includes(currentScreen) ? (
           <SignUp onAuthenticated={handleAuthenticated} resumeProfile={incompleteUser} />
         ) : (
@@ -1003,12 +1015,6 @@ export default function App() {
                   onGoToCreate={() => setCurrentScreen(Screen.CREATE)}
                 />
               )}
-
-            {currentScreen === Screen.STORE && (
-              <Store
-                onNavigate={setCurrentScreen}
-              />
-            )}
 
             {currentScreen === Screen.VOICE_TEST && (
               <VoiceFlowTest userProfile={userProfile} onUserUpdate={applyUser} />

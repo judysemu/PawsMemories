@@ -12,26 +12,19 @@ Every routine gets one entry here when it's created or changed.
 - **Schedule:** `0 12 * * *` UTC (≈6am America/Denver on MDT; drifts to ≈5am
   once MST starts in November — left as-is by design, not a bug)
 - **Repo/branch:** `judysemu/PawsMemories` @ `main`
-- **Connectors:** `shopmcp-pawprints` (Shopify), Gmail
+- **Runtime credential:** `SHOPIFY_CATALOG_SYNC_SECRET`
 - **What it does:**
-  - **Job A** — diffs the live Shopify catalog against `PRINT_PRODUCTS` in
-    `shared/pawprintCatalog2.ts`, drafts entries for genuinely
-    photo-customizable new products, commits straight to `main` flagged
-    "needs review."
-  - **Job B** — screens every catalogued (`PRINT_PRODUCTS`) product's live
-    SEO metadata (title tag, meta description, image alt text, handle) and
-    writes plain-English recommendations with concrete suggested fixes.
-  - **Job C** — same four checks, applied store-wide: every other active
-    product plus every collection, capped at the 25 most significant issues
-    per run, plus duplicate-title detection across everything Job B and C
-    screened combined. Reuses Job A's product list — no extra fetch.
-  - Both SEO jobs are read-only against Shopify — neither writes a metafield.
-  - Silent if nothing to report ("no news, no noise").
-- **Human-in-the-loop stage:** Hostinger is manual-deploy-only (not wired to
-  auto-deploy from GitHub), so a Job A commit landing on `main` never reaches
-  production on its own. **The redeploy decision is the approval gate** —
-  review the email, then redeploy (or don't) via hPanel or
-  `hosting_deployJsApplication`.
+  - Sends `POST /api/admin/shopify/catalog-sync` with
+    `Authorization: Bearer $SHOPIFY_CATALOG_SYNC_SECRET`.
+  - The server reads every active product through Shopify Admin GraphQL with
+    cursor pagination and atomically replaces the runtime catalog snapshot.
+  - A failed Shopify or database request records a failed run while the last
+    good public snapshot remains live.
+  - No source file, Git branch, product, collection, or metafield is changed.
+  - Personalization is true only when Shopify's boolean
+    `custom.pawprint_personalizable` metafield is explicitly true.
+- **Verification:** an admin can inspect `GET /api/store/sync-status` and the
+  public projection at `GET /api/store/products`.
 
 ## Order-status reconciliation (webhook, not a routine)
 
@@ -41,15 +34,10 @@ Every routine gets one entry here when it's created or changed.
   `https://pawsome3d.com/api/webhooks/shopify-orders`. One-time manual setup;
   no ShopMCP tool manages webhook subscriptions.
 - **Secret:** `SHOPIFY_WEBHOOK_SECRET` (see `.env.example`)
-- **What it does:** matches the incoming order to a `pawprint_shopify_orders`
-  row via the reference stamped into the order's note at checkout
-  (`server/shopify.ts`'s `createPawprintCheckout` /
-  `extractPawprintOrderReference`), then updates `status` to `paid` or
-  `cancelled` and stamps `shopify_order_id` / `paid_at`. This is plain
-  signature-verified webhook code, not an agent — deterministic state sync
-  doesn't need one.
-- **Verification:** `scripts/verify-shopify-checkout.mjs --complete` drives
-  a real, zero-cost test order end to end and confirms the status flips.
+- **What it does:** reconciles only pre-existing `pawprint_shopify_orders`
+  records whose legacy order note contains a `pawprint_order:<uuid>` reference,
+  then updates status to `paid` or `cancelled`. Webhook IDs are stored to make
+  redelivery idempotent. New app-side PawPrint checkout creation is retired.
 
 ## Pawsome3D Runtime Log Watch
 
@@ -76,27 +64,32 @@ Every routine gets one entry here when it's created or changed.
   plugin-backed tools. The app now serves its own log data over HTTPS
   instead, which sidesteps the distinction entirely.
 
-## Pawsome3D App SEO Screen
+## Pawsome3D + Shopify SEO Sweep
 
-- **Trigger ID:** `trig_01DtQzq8Y2mPEqXmiBGKBtmT`
-- **Schedule:** `0 14 * * 1` UTC, weekly (Mondays)
-- **Environment:** reuses the same one as Runtime Log Watch
-  (`env_01VfgjpAPQSZqWX1wTwNvKih`, Custom network access incl.
-  `pawsome3d.com`) — created by pointing a new routine at an existing
-  environment_id, no repeat UI setup needed.
-- **Connectors:** Gmail
+- **Automation ID:** `6a80808fa688819188ea4a22a560fd06`
+- **Schedule:** 8:00am America/Denver every Monday and Wednesday
+  (`RRULE:FREQ=WEEKLY;BYDAY=MO,WE`). The local-time schedule no longer drifts
+  by an hour at daylight-saving boundaries.
+- **Connectors:** GitHub (`judysemu/PawsMemories`) and Shopify
+  (`Pawprints by Pawsome3D`).
+- **Supersedes:** the ineffective SEO-only RemoteTrigger
+  `trig_01DtQzq8Y2mPEqXmiBGKBtmT`. Retire that trigger after confirming the
+  replacement's first successful run. Do not disable the separate daily
+  Pawprints catalog pull `trig_01FWzpzCKkB1xnqtZVNeRua5`.
 - **Spec:** `docs/superpowers/specs/2026-08-14-seo-automation-spec.md`
-- **What it does:** cross-checks `src/seo.ts`, `server/seoMeta.ts`, and
-  `public/sitemap.xml` — three hand-maintained sources of the same
-  per-route SEO metadata that can (and, confirmed by inspection when this
-  was speced, already had) drift apart — flags missing/stale/mismatched
-  entries, title/description length issues, and does a live `curl`
-  spot-check against the deployed site to catch "the code is right but the
-  build is stale" separately from a code-level bug. Drafts a `fix/*` branch
-  only for the mechanical case (a missing sitemap URL); everything else
-  (wording, length, stale routes) is reported, not auto-fixed.
-- **Human-in-the-loop stage:** same as Runtime Log Watch — fixes land on a
-  branch, never `main`; merging is a human decision.
+- **What it does:**
+  - Screens every active Shopify product and collection, not a curated source
+    list, for SEO title/description quality, handles, featured-image alt text,
+    and duplicate or near-duplicate effective titles.
+  - Cross-checks `src/seo.ts`, `server/seoMeta.ts`, `public/sitemap.xml`, and
+    `public/robots.txt` for missing routes, mismatched metadata, length issues,
+    and indexing mistakes.
+  - Compares representative live `pawsome3d.com` metadata with `main`, reporting
+    source drift separately from stale deployment.
+  - Reports the 25 highest-priority actionable issues per property with total
+    counts and concrete recommended corrections.
+- **Write boundary:** read-only. It does not modify Shopify, create products,
+  commit to `main`, or open checkout paths.
 
 ## Deploy
 

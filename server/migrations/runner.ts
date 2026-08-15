@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 49;
+export const CURRENT_SCHEMA_VERSION = 50;
 
 export interface Migration {
   version: number;
@@ -2373,6 +2373,59 @@ export const MIGRATIONS: Migration[] = [
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
     skipWhenTableMissing: "avatars",
+  },
+  {
+    version: 50,
+    name: "pawprints_dual_assets_and_shopify_catalog",
+    statementRequiresTable: {
+      0: "pawprint_assets", 1: "pawprint_assets", 2: "pawprint_assets", 3: "pawprint_assets", 4: "pawprint_assets",
+      5: "pawprint_assets", 6: "pawprint_assets", 7: "pawprint_assets", 8: "pawprint_assets", 9: "pawprint_assets",
+    },
+    statements: [
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_assets' AND COLUMN_NAME='subject_art_id'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pawprint_assets ADD COLUMN subject_art_id INT NULL AFTER entry_mode','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @col_exists FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_assets' AND COLUMN_NAME='clean_image_url'`,
+      `SET @stmt=IF(@col_exists=0,'ALTER TABLE pawprint_assets ADD COLUMN clean_image_url TEXT NULL AFTER image_url','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `CREATE TABLE IF NOT EXISTS shopify_store_products (
+        shopify_product_gid VARCHAR(128) NOT NULL PRIMARY KEY,
+        handle VARCHAR(255) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        featured_image_url TEXT NULL,
+        featured_image_alt VARCHAR(500) NULL,
+        min_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+        max_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+        currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+        available_for_sale TINYINT(1) NOT NULL DEFAULT 0,
+        published TINYINT(1) NOT NULL DEFAULT 0,
+        product_url TEXT NOT NULL,
+        pawprint_personalizable TINYINT(1) NOT NULL DEFAULT 0,
+        variants_json JSON NOT NULL,
+        shopify_updated_at DATETIME(3) NULL,
+        last_synced_at DATETIME(3) NOT NULL,
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        UNIQUE KEY uniq_shopify_store_handle (handle),
+        KEY idx_shopify_store_public (active, published, pawprint_personalizable)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS shopify_catalog_sync_runs (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        status ENUM('running','succeeded','failed') NOT NULL,
+        product_count INT NOT NULL DEFAULT 0,
+        duration_ms INT NULL,
+        error_summary VARCHAR(500) NULL,
+        started_at DATETIME(3) NOT NULL,
+        completed_at DATETIME(3) NULL,
+        KEY idx_shopify_catalog_sync_status (status, started_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS shopify_webhook_receipts (
+        webhook_id VARCHAR(128) NOT NULL PRIMARY KEY,
+        topic VARCHAR(64) NOT NULL,
+        received_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        KEY idx_shopify_webhook_topic (topic, received_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
   },
 ];
 

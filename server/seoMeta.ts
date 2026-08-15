@@ -93,12 +93,17 @@ export const PAGE_META: Record<string, PageMeta> = {
   "/print-shop": {
     title: "Print Shop: Custom Pet Keepsakes | Pawsome3D",
     description:
-      "Order physical pet keepsakes — printed 3D figurines and Pawprints art — with your own photos. Add a shipping address and check out securely.",
+      "Order a physical 3D pet figurine from your model with secure checkout and tracked delivery.",
   },
   "/pawprints": {
-    title: "Personalized Pawprints Pet Art | Pawsome3D",
+    title: "Personalized Digital PawPrints Pet Art | Pawsome3D",
     description:
-      "Create digital and printable pet keepsakes with your photos, message, and chosen occasion.",
+      "Create personalized digital pet art from your photos, then download clean and composed PawPrint files.",
+  },
+  "/store": {
+    title: "Pawsome3D Shop: Pet Gifts and Merchandise | Pawsome3D",
+    description:
+      "Browse the live Pawsome3D Shopify catalog and open products directly in Shopify, including items that explicitly support PawPrint personalization.",
   },
   "/create": {
     title: "Create Your Custom 3D Pet Model | Pawsome3D",

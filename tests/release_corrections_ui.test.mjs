@@ -19,13 +19,14 @@ const petModelStudio = read("src/components/PetModelStudio.tsx");
 const requestMemory = read("src/components/RequestMemory.tsx");
 const editMemory = read("src/components/EditMemory.tsx");
 
-test("Shop cannot expose the retired print request or marketplace panels", () => {
+test("Shop exposes only the public Shopify catalog and completed PawPrint downloads", () => {
   assert.doesNotMatch(store, /PrintRequestForm|Start a print request|onOpenMarketplace/);
   assert.doesNotMatch(home, /Explore the 3D Pet Marketplace|Browse Marketplace|MARKETPLACE_CATEGORIES/);
   assert.doesNotMatch(app, /MarketplaceScreen|MarketplaceAdminScreen/);
-  assert.match(store, /legacy print-request and marketplace forms have been retired/i);
-  assert.match(store, /automatic repair and manufacturing validation/i);
-  assert.match(store, /onNavigate\(Screen\.CREATE\)/);
+  assert.match(store, /fetch\("\/api\/store\/products"\)/);
+  assert.match(store, /href=\{product\.productUrl\}/);
+  assert.match(store, /Download clean image/);
+  assert.match(store, /Download layout \+ words/);
   assert.ok(fs.existsSync("src/components/PrintRequestForm.tsx"), "legacy source stays preserved outside the route");
   assert.ok(fs.existsSync("src/components/MarketplaceAdminScreen.tsx"), "admin source stays preserved outside the route");
 });

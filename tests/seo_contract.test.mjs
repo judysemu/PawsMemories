@@ -28,6 +28,9 @@ test("sitemap, crawler rules, and server-rendered legal pages are discoverable",
   for (const path of ["https://pawsome3d.com/", "/legal/privacy", "/legal/terms", "/legal/sms"]) {
     assert.ok(sitemap.includes(path));
   }
+  assert.ok(sitemap.includes("https://pawsome3d.com/store"));
+  assert.doesNotMatch(robots, /Disallow: \/store/);
+  assert.match(seoSource, /\[Screen\.STORE\]/);
   assert.match(legalSource, /rel="canonical"/);
   assert.match(legalSource, /application\/ld\+json/);
 });

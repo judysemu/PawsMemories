@@ -11,7 +11,8 @@ self.onmessage = async (event: MessageEvent<ScaleRequest>) => {
   let bitmap: ImageBitmap | null = null;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    if (bitmap.width < 600 || bitmap.height < 600) throw new Error(`${file.name}: minimum size is 600 × 600 pixels.`);
+    const originalWidth = bitmap.width;
+    const originalHeight = bitmap.height;
     const edgeScale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     const pixelScale = Math.min(1, Math.sqrt(maxPixels / (bitmap.width * bitmap.height)));
     const scale = Math.min(edgeScale, pixelScale);
@@ -30,7 +31,7 @@ self.onmessage = async (event: MessageEvent<ScaleRequest>) => {
       blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
     }
     const buffer = await blob.arrayBuffer();
-    self.postMessage({ id, ok: true, width, height, mimeType: blob.type, buffer }, { transfer: [buffer] });
+    self.postMessage({ id, ok: true, width, height, originalWidth, originalHeight, mimeType: blob.type, buffer }, { transfer: [buffer] });
   } catch (error: any) {
     self.postMessage({ id, ok: false, error: error?.message || "The photo could not be prepared." });
   } finally {

@@ -1,5 +1,12 @@
 # SEO Automation — Shopify Store + pawsome3d.com
 
+> Historical proposal. Catalog sync was superseded by the digital-only runtime
+> snapshot in `docs/AUTOMATIONS.md`; no routine may edit `PRINT_PRODUCTS` or
+> commit catalog changes. The effective replacement SEO sweep is Automation
+> `6a80808fa688819188ea4a22a560fd06`, scheduled for 8:00am America/Denver every
+> Monday and Wednesday. It screens the full Shopify catalog plus the app's
+> repository and live metadata; this proposal remains only as design history.
+
 **Date:** 2026-08-14
 **Status:** Proposed — needs sign-off on §5 before either half is built/extended
 **Scope:** the Shopify catalog SEO screening already running (extend it), plus a

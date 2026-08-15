@@ -19,7 +19,7 @@ import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import { installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, saveCachedSubjectArt, insertPawprintShopifyOrder, findPawprintShopifyOrderByIdempotencyKey, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -51,7 +51,7 @@ import { requireCanonicalAssetsEnabled } from "./server/assets/featureFlag";
 import { planWagsBox, getPriorBoxHistory } from "./server/wags/planner";
 import { deliverBox, getOwnedWardrobeItems } from "./server/wags/delivery";
 import { materializeBoxAssets } from "./server/wags/materializer";
-import { DIGITAL_CATEGORIES, PRINT_PRODUCTS, STORY_PROMPT_TEMPLATE, findDigitalOption, findPrintProduct, findPrintOption, findPrintVariant } from "./shared/pawprintCatalog2";
+import { DIGITAL_CATEGORIES, STORY_PROMPT_TEMPLATE, findDigitalOption } from "./shared/pawprintCatalog2";
 import { RebakeRequestSchema, StylizeRequestSchema, viewsFromAvatarRow } from "./server/textureSchemas";
 import type { RebakeLikenessReport } from "./server/textureLikeness";
 import {
@@ -108,7 +108,7 @@ import {
 } from "./server/generationRefunds.ts";
 import { phraseKey } from "./src/three/ar/voice";
 import { decayCompliance, pointsForTrial, type TrialType } from "./src/brain";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomUUID, timingSafeEqual } from "crypto";
 import { resolveBreedProfile } from "./server/breedProfiles";
 import { decayDrives, DEFAULT_DRIVES, DEFAULT_HORMONES, weightsFromTemperament } from "./src/brain";
 import { uploadBase64Image, uploadBinaryFromUrl, fetchUrlAsBase64, uploadBase64Binary } from "./storage";
@@ -143,7 +143,8 @@ import { isAtLeastAge } from "./server/accountValidation";
 import { PrintUploadValidationError, validatePrintUpload } from "./server/printUploadValidation";
 import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
-import { isPawprintsShopifyEnabled, assertPawprintsShopifyEnabled, verifyShopifyConfiguration, createPawprintCheckout, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
+import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
+import { getShopifyCatalogSyncStatus, listPublicStoreProducts, synchronizeShopifyCatalog } from "./server/shopifyCatalog";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
 import {
@@ -429,6 +430,7 @@ async function runCreatePipelineRigStage(jobId: number): Promise<void> {
 import {
   signToken,
   requireAuth,
+  verifyToken,
   hashPassword,
   verifyPassword,
   generateResetToken,
@@ -890,10 +892,15 @@ async function startServer() {
   app.post("/api/webhooks/shopify-orders", express.raw({ type: "application/json" }), async (req, res) => {
     const hmacHeader = req.headers["x-shopify-hmac-sha256"] as string | undefined;
     const topic = String(req.headers["x-shopify-topic"] || "");
+    const webhookId = String(req.headers["x-shopify-webhook-id"] || "").trim().slice(0, 128);
     if (!verifyShopifyWebhookSignature(req.body as Buffer, hmacHeader)) {
       console.warn("[POST /api/webhooks/shopify-orders] Invalid or missing HMAC signature.");
       return res.status(401).json({ received: false });
     }
+    if (topic !== "orders/paid" && topic !== "orders/cancelled") {
+      return res.status(400).json({ received: false, error: "Unsupported Shopify webhook topic." });
+    }
+    if (!webhookId) return res.status(400).json({ received: false, error: "Missing Shopify webhook ID." });
     let order: any;
     try {
       order = JSON.parse((req.body as Buffer).toString("utf8"));
@@ -901,6 +908,11 @@ async function startServer() {
       return res.status(400).json({ received: false, error: "Malformed payload." });
     }
     try {
+      const [receipt] = await getPool().query(
+        `INSERT IGNORE INTO shopify_webhook_receipts (webhook_id, topic) VALUES (?, ?)`,
+        [webhookId, topic],
+      ) as any;
+      if (Number(receipt?.affectedRows || 0) === 0) return res.json({ received: true, duplicate: true });
       const reference = extractPawprintOrderReference(order?.note);
       if (!reference) {
         // Not every Shopify order is a Pawprint order (the store also sells
@@ -916,6 +928,7 @@ async function startServer() {
       await updatePawprintShopifyOrderStatus({ id: Number(row.id), status, shopifyOrderId: String(order?.id || "") });
       res.json({ received: true, matched: true });
     } catch (error: any) {
+      await getPool().query(`DELETE FROM shopify_webhook_receipts WHERE webhook_id = ?`, [webhookId]).catch(() => undefined);
       console.error("[POST /api/webhooks/shopify-orders] Error:", error?.message || error);
       res.status(500).json({ received: false });
     }
@@ -3071,9 +3084,50 @@ async function startServer() {
   app.get("/api/pawprints/templates", (_req, res) => {
     res.json({
       digitalCategories: DIGITAL_CATEGORIES,
-      printProducts: PRINT_PRODUCTS,
       storyPromptTemplate: STORY_PROMPT_TEMPLATE,
     });
+  });
+
+  app.get("/api/store/products", async (_req, res) => {
+    try {
+      const products = await listPublicStoreProducts();
+      res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=900");
+      res.json({ products });
+    } catch (error: any) {
+      console.error("[GET /api/store/products] Error:", error?.message || error);
+      res.status(503).json({ error: "The Pawsome3D Shop catalog is temporarily unavailable.", products: [] });
+    }
+  });
+
+  app.get("/api/store/sync-status", requireAuth, async (req: AuthedRequest, res) => {
+    if (!(await isUserAdmin(req.user!.phone))) return res.status(403).json({ error: "Admin access required." });
+    res.json({ status: await getShopifyCatalogSyncStatus() });
+  });
+
+  function matchesCatalogSyncSecret(candidate: string): boolean {
+    const configured = String(process.env.SHOPIFY_CATALOG_SYNC_SECRET || "");
+    if (!candidate || !configured) return false;
+    const actual = createHash("sha256").update(candidate).digest();
+    const expected = createHash("sha256").update(configured).digest();
+    return timingSafeEqual(actual, expected);
+  }
+
+  app.post("/api/admin/shopify/catalog-sync", async (req: AuthedRequest, res) => {
+    const authHeader = String(req.headers.authorization || "");
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    if (!matchesCatalogSyncSecret(bearer)) {
+      const user = bearer ? verifyToken(bearer) : null;
+      if (!user) return res.status(401).json({ error: "Catalog sync authorization is required." });
+      if (!(await isUserAdmin(user.phone))) return res.status(403).json({ error: "Admin access required." });
+      req.user = user;
+    }
+    try {
+      const result = await synchronizeShopifyCatalog();
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("[POST /api/admin/shopify/catalog-sync] Error:", error?.message || error);
+      res.status(502).json({ error: "The Shopify catalog sync failed; the last good catalog remains live." });
+    }
   });
 
   // Shared identity-preservation + composition boilerplate appended to every
@@ -3097,13 +3151,12 @@ async function startServer() {
   // guaranteed to match — see docs/superpowers/specs/2026-08-12-pawprints-flow-repair-design.md.
   app.post("/api/pawprints/generate-subject", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
     try {
-      const entryMode = String(req.body?.entryMode || "digital").trim();
-      if (entryMode !== "digital" && entryMode !== "print") {
-        return res.status(400).json({ error: "entryMode must be 'digital' or 'print'." });
+      const requestedEntryMode = String(req.body?.entryMode || "digital").trim();
+      if (requestedEntryMode !== "digital") {
+        return res.status(400).json({ error: "PawPrints now creates digital images only." });
       }
       const categoryId = String(req.body?.categoryId || "").trim();
       const optionId = String(req.body?.optionId || "").trim();
-      const shopifyProductId = String(req.body?.shopifyProductId || "").trim();
       const customPrompt = String(req.body?.customPrompt || "").trim().slice(0, 600);
       const photoBase64List: string[] = Array.isArray(req.body?.photoBase64List) ? req.body.photoBase64List : [];
 
@@ -3114,10 +3167,6 @@ async function startServer() {
       let script: string;
       if (customPrompt) {
         script = customPrompt;
-      } else if (entryMode === "print") {
-        const option = findPrintOption(shopifyProductId, categoryId, optionId);
-        if (!option) return res.status(400).json({ error: "Please choose a valid theme for this print product." });
-        script = option.premadeScript;
       } else {
         const option = findDigitalOption(categoryId, optionId);
         if (!option) return res.status(400).json({ error: "Please choose a valid theme." });
@@ -3126,12 +3175,12 @@ async function startServer() {
 
       const photoDigest = photoBase64List.map((img) => createHash("sha256").update(img).digest("hex")).join(":");
       const cacheKey = createHash("sha256")
-        .update(JSON.stringify({ entryMode, categoryId, optionId, shopifyProductId, customPrompt, photoDigest }))
+        .update(JSON.stringify({ entryMode: "digital", categoryId, optionId, customPrompt, photoDigest }))
         .digest("hex");
 
       const cached = await getCachedSubjectArt(req.user!.phone, cacheKey);
       if (cached) {
-        return res.json({ imageUrl: cached.imageUrl, cached: true });
+        return res.json({ subjectArtId: cached.id, imageUrl: cached.imageUrl, cached: true });
       }
 
       const inlineParts = photoBase64List.map((img) => {
@@ -3148,11 +3197,11 @@ async function startServer() {
       );
       if (!generated) throw new Error("Pawprint subject-art generation returned no image.");
       const imageUrl = await uploadBase64Image(generated, "pawprints");
-      await saveCachedSubjectArt({
-        userPhone: req.user!.phone, cacheKey, imageUrl, entryMode,
+      const subjectArtId = await saveCachedSubjectArt({
+        userPhone: req.user!.phone, cacheKey, imageUrl, entryMode: "digital",
         category: categoryId || null, optionId: optionId || null,
       });
-      res.json({ imageUrl, cached: false });
+      res.json({ subjectArtId, imageUrl, cached: false });
     } catch (err: any) {
       console.error("[POST /api/pawprints/generate-subject] Error:", err?.message || err);
       res.status(500).json({ error: "Could not generate the Pawprint art. Please try again." });
@@ -3166,24 +3215,34 @@ async function startServer() {
       if (!idempotencyKey) return res.status(400).json({ error: "An idempotency key is required." });
 
       const [existing] = await getPool().query(
-        `SELECT id, image_url, creation_id FROM pawprint_assets WHERE user_phone = ? AND idempotency_key = ? LIMIT 1`,
+        `SELECT id, image_url, clean_image_url, creation_id FROM pawprint_assets WHERE user_phone = ? AND idempotency_key = ? LIMIT 1`,
         [req.user!.phone, idempotencyKey]
       ) as any;
       if (existing?.[0]) {
-        return res.json({ pawprintId: existing[0].id, url: existing[0].image_url, creationId: existing[0].creation_id, idempotent: true });
+        return res.json({
+          pawprintId: existing[0].id,
+          cleanImageUrl: existing[0].clean_image_url || existing[0].image_url,
+          composedImageUrl: existing[0].image_url,
+          creationId: existing[0].creation_id,
+          idempotent: true,
+        });
       }
 
-      const entryMode = String(req.body?.entryMode || "digital").trim();
-      if (entryMode !== "digital" && entryMode !== "print") {
-        return res.status(400).json({ error: "entryMode must be 'digital' or 'print'." });
+      if (req.body?.entryMode && String(req.body.entryMode).trim() !== "digital") {
+        return res.status(400).json({ error: "PawPrints now creates digital images only." });
       }
       const categoryId = String(req.body?.categoryId || "").trim();
       const optionId = String(req.body?.optionId || "").trim();
-      const shopifyProductId = String(req.body?.shopifyProductId || "").trim();
       const customized = Boolean(req.body?.customized);
       const customName = String(req.body?.customName || "").trim().slice(0, 80);
+      const subjectArtId = Number(req.body?.subjectArtId);
+      if (!Number.isInteger(subjectArtId) || subjectArtId <= 0) {
+        return res.status(400).json({ error: "The clean PawPrint artwork is missing. Generate it again before saving." });
+      }
+      const subjectArt = await getOwnedSubjectArt(req.user!.phone, subjectArtId);
+      if (!subjectArt) return res.status(404).json({ error: "That clean PawPrint artwork was not found." });
 
-      let pawprintPrice = entryMode === "print" ? CREDIT_PRICES.PAWPRINT_PRINT : CREDIT_PRICES.PAWPRINT_DIGITAL;
+      let pawprintPrice = CREDIT_PRICES.PAWPRINT_DIGITAL;
       if (customized) pawprintPrice += CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON;
 
       // Stage 2 finalize: the client always submits the exact composite that
@@ -3235,15 +3294,23 @@ async function startServer() {
         image_url: finalUrl,
         pet_name: title,
       });
-      const layoutId = shopifyProductId ? `${shopifyProductId}:${categoryId}:${optionId}` : `${categoryId}:${optionId}`;
+      const layoutId = `${categoryId}:${optionId}`;
       const [inserted] = await getPool().query(
         `INSERT INTO pawprint_assets
-           (user_phone, idempotency_key, template_id, category, layout_id, entry_mode, image_url, creation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [req.user!.phone, idempotencyKey, layoutId, categoryId || "custom", layoutId, entryMode, finalUrl, creationId]
+           (user_phone, idempotency_key, template_id, category, layout_id, entry_mode,
+            subject_art_id, image_url, clean_image_url, creation_id)
+         VALUES (?, ?, ?, ?, ?, 'digital', ?, ?, ?, ?)`,
+        [req.user!.phone, idempotencyKey, layoutId, categoryId || "custom", layoutId, subjectArtId, finalUrl, subjectArt.imageUrl, creationId]
       ) as any;
       const user = await findUserByPhone(req.user!.phone);
-      res.status(201).json({ pawprintId: inserted.insertId, url: finalUrl, creationId, entryMode, user: toPublicUser(user, TERMS_VERSION) });
+      res.status(201).json({
+        pawprintId: inserted.insertId,
+        cleanImageUrl: subjectArt.imageUrl,
+        composedImageUrl: finalUrl,
+        creationId,
+        entryMode: "digital",
+        user: toPublicUser(user, TERMS_VERSION),
+      });
     } catch (err: any) {
       if (creditReservationId) {
         try { await refundReservedCredits(creditReservationId); } catch {}
@@ -3253,9 +3320,52 @@ async function startServer() {
     }
   });
 
-  // Send a saved Pawprint digitally. Digital-only — Print Pawprints are
-  // fulfilled through Shopify and are not re-sent by email. The recipient
-  // pays nothing; the sender is charged PAWPRINT_EMAIL.
+  app.get("/api/pawprints/:id(\\d+)", requireAuth, async (req: AuthedRequest, res) => {
+    const pawprintId = Number(req.params.id);
+    if (!Number.isInteger(pawprintId) || pawprintId <= 0) return res.status(400).json({ error: "A valid PawPrint is required." });
+    const asset = await getOwnedPawprintAsset(req.user!.phone, pawprintId);
+    if (!asset) return res.status(404).json({ error: "That PawPrint was not found." });
+    res.json({
+      pawprintId: asset.id,
+      creationId: asset.creationId,
+      cleanImageUrl: asset.cleanImageUrl,
+      composedImageUrl: asset.composedImageUrl,
+      cleanDownloadUrl: `/api/pawprints/${asset.id}/download?kind=clean`,
+      composedDownloadUrl: `/api/pawprints/${asset.id}/download?kind=composed`,
+      createdAt: asset.createdAt,
+    });
+  });
+
+  app.get("/api/pawprints/:id(\\d+)/download", requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const pawprintId = Number(req.params.id);
+      const kind = String(req.query.kind || "");
+      if (!Number.isInteger(pawprintId) || pawprintId <= 0 || (kind !== "clean" && kind !== "composed")) {
+        return res.status(400).json({ error: "Choose a valid PawPrint download." });
+      }
+      const asset = await getOwnedPawprintAsset(req.user!.phone, pawprintId);
+      if (!asset) return res.status(404).json({ error: "That PawPrint was not found." });
+      const sourceUrl = kind === "clean" ? asset.cleanImageUrl : asset.composedImageUrl;
+      const fetched = await fetchBoundedRemoteBuffer(sourceUrl, {
+        allowedOrigins: configuredMediaOrigins(),
+        maxBytes: 20 * 1024 * 1024,
+        timeoutMs: 20_000,
+        allowedContentTypes: ["image/*"],
+      });
+      const contentType = fetched.contentType.split(";", 1)[0].toLowerCase();
+      const extension = contentType === "image/png" ? "png" : contentType === "image/jpeg" ? "jpg" : "webp";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="pawprint-${kind}-${pawprintId}.${extension}"`);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(fetched.buffer);
+    } catch (error: any) {
+      console.error("[GET /api/pawprints/:id/download] Error:", error?.message || error);
+      res.status(502).json({ error: "The PawPrint download could not be prepared." });
+    }
+  });
+
+  // Send a saved PawPrint digitally. The recipient pays nothing; the sender
+  // is charged PAWPRINT_EMAIL. Historic physical records remain read-only.
   app.post("/api/pawprints/send", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;
     try {
@@ -3308,18 +3418,12 @@ async function startServer() {
   });
 
   app.get("/api/pawprints/print-products", (_req, res) => {
-    const enabled = isPawprintsShopifyEnabled();
-    const available = Boolean(enabled && PRINT_PRODUCTS.length > 0);
-    const blockers: string[] = [];
-    if (!enabled) blockers.push("shopify_not_configured");
-    if (!PRINT_PRODUCTS.length) blockers.push("pawprint_print_products");
-
-    res.json({
-      provider: "shopify",
-      configured: PRINT_PRODUCTS.length > 0,
-      available,
-      products: PRINT_PRODUCTS,
-      blockers,
+    res.status(410).json({
+      error: "Physical PawPrint checkout has moved to the Pawsome3D Shop.",
+      storeUrl: "/store",
+      available: false,
+      products: [],
+      blockers: ["pawprint_checkout_retired"],
     });
   });
 
@@ -3335,8 +3439,8 @@ async function startServer() {
     const readiness = buildFulfillmentReadiness({
       stripeConfigured: Boolean(stripe),
       slantConfigured: slant3dConfigured(),
-      shopifyConfigured: isPawprintsShopifyEnabled(),
-      pawprintProductCount: PRINT_PRODUCTS.length,
+      shopifyConfigured: false,
+      pawprintProductCount: 0,
       storageConfigured,
       workerConfigured,
     });
@@ -3350,10 +3454,7 @@ async function startServer() {
     if (!storageConfigured) modelBlockers.push("media_storage");
     if (!workerConfigured) modelBlockers.push("blender_worker");
 
-    const pawprintBlockers: string[] = [];
-    if (!isPawprintsShopifyEnabled()) pawprintBlockers.push("shopify_not_configured");
-    if (!PRINT_PRODUCTS.length) pawprintBlockers.push("pawprint_print_products");
-    if (!storageConfigured) pawprintBlockers.push("media_storage");
+    const pawprintBlockers: string[] = ["pawprint_checkout_retired"];
 
     res.json({
       modelPrinting: { ...readiness.modelPrinting, blockers: modelBlockers },
@@ -3372,11 +3473,13 @@ async function startServer() {
       );
       const stripeReady = Boolean(stripe && stripeWebhookSecret);
       const workerUrl = String(process.env.BLENDER_WORKER_URL || "").replace(/\/render$/, "").replace(/\/$/, "");
+      const catalogStatus = await getShopifyCatalogSyncStatus().catch(() => null);
+      const catalogProducts = await listPublicStoreProducts().catch(() => []);
 
       const slantCheck = slant3dConfigured()
         ? verifySlant3dConfiguration()
         : Promise.reject(new Error("not configured"));
-      const shopifyCheck = isPawprintsShopifyEnabled()
+      const shopifyCheck = process.env.SHOPIFY_STORE_DOMAIN && process.env.SHOPIFY_CLIENT_ID && process.env.SHOPIFY_CLIENT_SECRET
         ? verifyShopifyConfiguration()
         : Promise.reject(new Error("not configured"));
       const workerCheck = workerUrl && process.env.WORKER_SHARED_SECRET
@@ -3404,11 +3507,10 @@ async function startServer() {
       // Missing env vars are reported by name because this route is admin-only
       // and already behind isUserAdmin. Values are never echoed.
       const missingShopify: string[] = [];
-      if (!isPawprintsShopifyEnabled()) missingShopify.push("PAWPRINTS_SHOPIFY_ENABLED");
       if (!process.env.SHOPIFY_STORE_DOMAIN) missingShopify.push("SHOPIFY_STORE_DOMAIN");
       if (!process.env.SHOPIFY_CLIENT_ID) missingShopify.push("SHOPIFY_CLIENT_ID");
       if (!process.env.SHOPIFY_CLIENT_SECRET) missingShopify.push("SHOPIFY_CLIENT_SECRET");
-      if (!PRINT_PRODUCTS.length) missingShopify.push("pawprint print products (shared/pawprintCatalog2.ts)");
+      if (!process.env.SHOPIFY_CATALOG_SYNC_SECRET) missingShopify.push("SHOPIFY_CATALOG_SYNC_SECRET");
 
       const missingSlant: string[] = [];
       if (!process.env.SLANT3D_API_KEY) missingSlant.push("SLANT3D_API_KEY");
@@ -3435,8 +3537,9 @@ async function startServer() {
           ...(slantResult || {}),
         },
         shopify: {
-          ready: Boolean(shopifyResult?.authenticated && PRINT_PRODUCTS.length > 0),
-          productCount: PRINT_PRODUCTS.length,
+          ready: Boolean(shopifyResult?.authenticated && catalogStatus?.status === "succeeded"),
+          productCount: catalogProducts.length,
+          lastSync: catalogStatus,
           missingEnv: missingShopify,
           error: reasonFor(shopify),
           ...(shopifyResult || {}),
@@ -3469,48 +3572,10 @@ async function startServer() {
   });
 
   app.post("/api/pawprints/shopify-checkout", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
-    try {
-      assertPawprintsShopifyEnabled();
-      const schema = z.object({
-        creationId: z.number().int().positive(),
-        shopifyProductId: z.string().min(1).max(64),
-        shopifyVariantId: z.string().min(1).max(64),
-      });
-      const input = schema.parse(req.body);
-      if (!findPrintVariant(input.shopifyProductId, input.shopifyVariantId)) {
-        return res.status(400).json({ error: "That size is not available for this Pawprint product." });
-      }
-      const idempotencyKey = String(req.header("Idempotency-Key") || "").trim().slice(0, 128);
-      if (!idempotencyKey) return res.status(400).json({ error: "An idempotency key is required." });
-
-      const existing = await findPawprintShopifyOrderByIdempotencyKey(req.user!.phone, idempotencyKey);
-      if (existing) return res.json({ success: true, idempotent: true, checkoutUrl: existing.checkout_url });
-
-      const creation = (await getCreations(req.user!.phone)).find((item: any) => Number(item.id) === input.creationId && item.image_url);
-      if (!creation) return res.status(404).json({ error: "That Pawprint is not in your FurBin." });
-
-      const { checkoutUrl } = await createPawprintCheckout({
-        title: String(creation.pet_name || "Pawprint"),
-        imageUrl: String(creation.image_url),
-        shopifyVariantId: input.shopifyVariantId,
-        orderReference: idempotencyKey,
-      });
-      await insertPawprintShopifyOrder({
-        userPhone: req.user!.phone,
-        creationId: input.creationId,
-        shopifyProductId: input.shopifyProductId,
-        shopifyVariantId: input.shopifyVariantId,
-        checkoutUrl,
-        idempotencyKey,
-      });
-      res.status(201).json({ success: true, checkoutUrl });
-    } catch (error: any) {
-      if (error instanceof z.ZodError) return res.status(400).json({ error: error.issues[0]?.message || "Check the print selection." });
-      const message = error?.message || "Could not create the print checkout.";
-      if (/not configured|not enabled/i.test(message)) return res.status(503).json({ error: message });
-      console.error("[POST /api/pawprints/shopify-checkout] Error:", message);
-      res.status(502).json({ error: message });
-    }
+    res.status(410).json({
+      error: "PawPrint checkout is no longer created here. Download your PawPrint and personalize products in the Pawsome3D Shop.",
+      storeUrl: "/store",
+    });
   });
 
   app.post("/api/streak/claim", requireAuth, async (req: AuthedRequest, res) => {

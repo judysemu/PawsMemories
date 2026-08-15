@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ChevronLeft, Download, ImagePlus, LayoutGrid, Loader2, PawPrint, Printer, Sparkles, Type, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ImagePlus, LayoutGrid, Loader2, PawPrint, Sparkles, Type, X } from "lucide-react";
 import type { PublicUser, UserProfile } from "../../types";
-import { authedFetch, createPawprintShopifyCheckout } from "../../api";
+import { authedFetch } from "../../api";
 import { CREDIT_PRICES } from "../../pricing";
 import { MAX_PAWPRINT_PHOTOS } from "../../pawprints/collageEngine";
 import {
@@ -9,15 +9,12 @@ import {
   TITLE_MAX_LENGTH, MESSAGE_MAX_LENGTH, VARIATIONS, VariationPreview, renderPawprint, urlToDataUrl,
   type StudioPhoto, type Variation,
 } from "../../pawprints/renderPawprint";
-import type { PawprintPrintProduct } from "../../../shared/pawprintCatalog2";
-import type { PawprintEntryMode } from "./EntryStep";
+import { LowResolutionDialog } from "./PhotoStep";
 
 interface FinishStepProps {
-  entry: PawprintEntryMode;
   categoryId: string;
   optionId: string;
   categoryLabel: string;
-  shopifyProduct: PawprintPrintProduct | null;
   customPrompt: string;
   customized: boolean;
   photos: StudioPhoto[];
@@ -26,29 +23,20 @@ interface FinishStepProps {
   onOpenCreditStore: () => void;
   onUserUpdate: (user: PublicUser) => void;
   onCreationSaved?: () => Promise<void> | void;
+  onPawprintComplete: (pawprintId: number) => void;
   onBack: () => void;
 }
 
 export function FinishStep({
-  entry, categoryId, optionId, categoryLabel, shopifyProduct, customPrompt, customized,
-  photos, onPhotosChange, userProfile, onOpenCreditStore, onUserUpdate, onCreationSaved, onBack,
+  categoryId, optionId, categoryLabel, customPrompt, customized,
+  photos, onPhotosChange, userProfile, onOpenCreditStore, onUserUpdate, onCreationSaved, onPawprintComplete, onBack,
 }: FinishStepProps) {
   const [title, setTitle] = useState(categoryLabel);
   const [message, setMessage] = useState("Made with love.");
   const [variation, setVariation] = useState<Variation>("classic");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [resultUrl, setResultUrl] = useState("");
-  const [savedCreationId, setSavedCreationId] = useState<number | null>(null);
-  const [recipientEmail, setRecipientEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [printBusy, setPrintBusy] = useState(false);
-  const [printCheckoutError, setPrintCheckoutError] = useState("");
-  const [selectedVariantId, setSelectedVariantId] = useState("");
-
-  useEffect(() => {
-    setSelectedVariantId(shopifyProduct?.variants[0]?.shopifyVariantId || "");
-  }, [shopifyProduct]);
+  const [pendingLowResolutionPhotos, setPendingLowResolutionPhotos] = useState<{ all: StudioPhoto[]; normal: StudioPhoto[]; lowCount: number } | null>(null);
   const [signInNoticeDismissed, setSignInNoticeDismissed] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
   const variationsSectionRef = useRef<HTMLElement | null>(null);
@@ -58,6 +46,7 @@ export function FinishStep({
   // changes) — never per keystroke. Stage 2 (below) always composites from
   // this same cached result, so Live Preview and Save can never diverge.
   const [subjectArtUrl, setSubjectArtUrl] = useState("");
+  const [subjectArtId, setSubjectArtId] = useState<number | null>(null);
   const [subjectArtDataUrl, setSubjectArtDataUrl] = useState("");
   const [subjectArtLoading, setSubjectArtLoading] = useState(true);
   const [subjectArtError, setSubjectArtError] = useState("");
@@ -70,26 +59,28 @@ export function FinishStep({
     subjectArtRequestRef.current = requestId;
     setSubjectArtLoading(true);
     setSubjectArtError("");
+    setSubjectArtId(null);
     (async () => {
       try {
         const response = await authedFetch("/api/pawprints/generate-subject", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            entryMode: entry,
             categoryId,
             optionId,
-            shopifyProductId: shopifyProduct?.shopifyProductId || "",
             customPrompt,
             photoBase64List: photos.map((p) => p.dataUrl),
           }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "The Pawprint art could not be generated.");
+        const nextSubjectArtId = Number(data.subjectArtId);
+        if (!Number.isInteger(nextSubjectArtId) || nextSubjectArtId <= 0) throw new Error("The clean PawPrint artwork could not be identified.");
         if (subjectArtRequestRef.current !== requestId) return;
         const dataUrl = await urlToDataUrl(data.imageUrl);
         if (subjectArtRequestRef.current !== requestId) return;
         setSubjectArtUrl(data.imageUrl);
+        setSubjectArtId(nextSubjectArtId);
         setSubjectArtDataUrl(dataUrl);
       } catch (caught: any) {
         if (subjectArtRequestRef.current !== requestId) return;
@@ -99,14 +90,14 @@ export function FinishStep({
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     })();
-  }, [entry, categoryId, optionId, shopifyProduct?.shopifyProductId, customPrompt, photoIdentity]);
+  }, [categoryId, optionId, customPrompt, photoIdentity]);
 
   // Stage 2 composite: the generated subject art fills the hero slot; any
   // additional uploaded photos fill supporting slots on multi-photo layouts
   // (filmstrip, mosaic, story, etc.).
   const compositePhotos: StudioPhoto[] = useMemo(() => {
     if (!subjectArtDataUrl) return [];
-    return [{ id: "subject-art", name: "Pawprint Art", dataUrl: subjectArtDataUrl, width: 0, height: 0 }, ...photos];
+    return [{ id: "subject-art", name: "PawPrint Art", dataUrl: subjectArtDataUrl, width: 0, height: 0, originalWidth: 0, originalHeight: 0, lowResolution: false }, ...photos];
   }, [subjectArtDataUrl, photos]);
 
   const [previewUrl, setPreviewUrl] = useState("");
@@ -141,8 +132,7 @@ export function FinishStep({
   const liveDesignSignatureRef = useRef(designSignature);
   liveDesignSignatureRef.current = designSignature;
 
-  const pawprintCost = (entry === "print" ? CREDIT_PRICES.PAWPRINT_PRINT : CREDIT_PRICES.PAWPRINT_DIGITAL)
-    + (customized ? CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON : 0);
+  const pawprintCost = CREDIT_PRICES.PAWPRINT_DIGITAL + (customized ? CREDIT_PRICES.PAWPRINT_CUSTOMIZE_ADDON : 0);
   const creditsShort = !userProfile.isAdmin && userProfile.credits < pawprintCost;
   const creditsNeeded = Math.max(0, pawprintCost - userProfile.credits);
 
@@ -154,8 +144,12 @@ export function FinishStep({
     try {
       const prepared: StudioPhoto[] = [];
       for (const file of files.slice(0, remaining)) prepared.push(await preparePhoto(file));
-      onPhotosChange([...photos, ...prepared]);
-      setResultUrl("");
+      const lowResolution = prepared.filter((photo) => photo.lowResolution);
+      if (lowResolution.length) {
+        setPendingLowResolutionPhotos({ all: prepared, normal: prepared.filter((photo) => !photo.lowResolution), lowCount: lowResolution.length });
+      } else {
+        onPhotosChange([...photos, ...prepared]);
+      }
     } catch (caught: any) {
       setError(caught.message || "The photo could not be opened.");
     }
@@ -170,9 +164,9 @@ export function FinishStep({
   };
 
   const save = async () => {
-    if (!subjectArtDataUrl) return;
+    if (!subjectArtDataUrl || !subjectArtId) return;
     const submittedDesignSignature = designSignature;
-    setBusy(true); setError(""); setResultUrl(""); setSavedCreationId(null);
+    setBusy(true); setError("");
     try {
       const renderedImage = await renderPawprint({
         variation, photos: compositePhotos, title: title.trim() || categoryLabel, message: message.trim(), category: categoryId,
@@ -183,10 +177,9 @@ export function FinishStep({
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
-          entryMode: entry,
           categoryId,
           optionId,
-          shopifyProductId: shopifyProduct?.shopifyProductId || "",
+          subjectArtId,
           customized,
           customName: title.trim(),
           customMessage: message.trim(),
@@ -198,12 +191,13 @@ export function FinishStep({
       if (liveDesignSignatureRef.current !== submittedDesignSignature) {
         await onCreationSaved?.();
         if (data.user) onUserUpdate(data.user);
-        throw new Error("Your design changed while it was saving. Save the updated design before sending or printing it.");
+        throw new Error("Your design changed while it was saving. Save the updated design before continuing.");
       }
-      setResultUrl(data.url);
-      setSavedCreationId(Number(data.creationId) || null);
       await onCreationSaved?.();
       if (data.user) onUserUpdate(data.user);
+      const pawprintId = Number(data.pawprintId);
+      if (!Number.isInteger(pawprintId) || pawprintId <= 0) throw new Error("The saved PawPrint could not be identified.");
+      onPawprintComplete(pawprintId);
     } catch (caught: any) {
       setError(caught.message || "The Pawprint could not be saved.");
     } finally {
@@ -211,28 +205,11 @@ export function FinishStep({
     }
   };
 
-  const orderPrint = async () => {
-    if (!savedCreationId || !shopifyProduct || !selectedVariantId) return;
-    setPrintBusy(true);
-    setPrintCheckoutError("");
-    try {
-      const data = await createPawprintShopifyCheckout(
-        { creationId: savedCreationId, shopifyProductId: shopifyProduct.shopifyProductId, shopifyVariantId: selectedVariantId },
-        crypto.randomUUID(),
-      );
-      if (data.checkoutUrl) window.location.assign(String(data.checkoutUrl));
-    } catch (caught: any) {
-      setPrintCheckoutError(caught.message || "The print checkout could not be created.");
-    } finally {
-      setPrintBusy(false);
-    }
-  };
-
   const signInNotice = !userProfile.email && !signInNoticeDismissed ? (
     <div className="mb-6 flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-3 text-sm">
       <PawPrint size={18} className="mt-0.5 shrink-0 text-primary" />
       <p className="flex-1 font-semibold text-on-surface">
-        Free to design — <a href="/sign-up" className="underline">sign in</a> when you're ready to save, download, or print.
+        Free to design — <a href="/sign-up" className="underline">sign in</a> when you're ready to save and download.
       </p>
       <button type="button" onClick={() => setSignInNoticeDismissed(true)} aria-label="Dismiss sign-in notice" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-on-surface-variant hover:bg-on-surface/10">
         <X size={15} />
@@ -272,7 +249,7 @@ export function FinishStep({
               )}
             </div>
             {(subjectArtError || previewError) && <p role="alert" className="mt-2 text-center text-xs font-bold text-error">{subjectArtError || previewError}</p>}
-            <p className="mt-2 text-center text-[11px] text-on-surface-variant">Preview only — saving renders the full {FULL_PRINT_WIDTH} × {FULL_PRINT_HEIGHT} print file.</p>
+            <p className="mt-2 text-center text-[11px] text-on-surface-variant">Preview only — saving renders the full {FULL_PRINT_WIDTH} × {FULL_PRINT_HEIGHT} digital file.</p>
           </section>
           <section ref={variationsSectionRef} id="pawprint-variations" className="rounded-3xl bg-surface-container-low p-3 sm:p-6">
             <div className="mb-4 flex items-center justify-between"><div><h2 className="font-black">Choose a variation</h2><p className="text-xs text-on-surface-variant">Your photos and words stay the same.</p></div><span className="rounded-full bg-surface px-3 py-1 text-xs font-black">{VARIATIONS.length} options</span></div>
@@ -287,7 +264,7 @@ export function FinishStep({
           <section className="rounded-3xl border border-outline-variant/30 bg-surface p-5">
             <div className="mb-3 flex items-center gap-2"><ImagePlus size={18} className="text-primary" /><h2 className="font-black">Photos</h2><span className="ml-auto text-xs font-black text-primary">{photos.length}/{MAX_PAWPRINT_PHOTOS}</span></div>
             <button type="button" onClick={() => photoInput.current?.click()} className="min-h-40 w-full overflow-hidden rounded-2xl border-2 border-dashed border-outline-variant bg-surface-container-low transition hover:border-primary">
-              <span className="flex min-h-40 flex-col items-center justify-center gap-2 p-6 text-center"><ImagePlus size={30} className="text-primary" /><strong>Add photos</strong><small className="text-on-surface-variant">Multiple PNG, JPEG, or WebP files · up to 20 MB each<br />Minimum 600 × 600 · large images optimize automatically</small></span>
+              <span className="flex min-h-40 flex-col items-center justify-center gap-2 p-6 text-center"><ImagePlus size={30} className="text-primary" /><strong>Add photos</strong><small className="text-on-surface-variant">Multiple PNG, JPEG, or WebP files · up to 20 MB each<br />Low-resolution images are allowed after confirmation</small></span>
             </button>
             <input ref={photoInput} type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void choosePhotos(files); event.target.value = ""; }} />
             {photos.length > 0 && (
@@ -315,74 +292,6 @@ export function FinishStep({
             <p className="mt-1 text-right text-[10px] text-on-surface-variant">{message.length}/{MESSAGE_MAX_LENGTH}</p>
           </section>
           {error && <p className="rounded-xl bg-error/10 p-3 text-sm font-bold text-error">{error}</p>}
-          {resultUrl && (
-            <>
-              <a href={resultUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-primary font-black text-primary"><Download size={17} /> Open finished Pawprint</a>
-              {entry === "digital" && (
-                <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4">
-                  <label className="text-xs font-black text-on-surface-variant">Send this Pawprint by email</label>
-                  <div className="mt-2 flex gap-2">
-                    <input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} placeholder="friend@example.com" className="min-h-11 min-w-0 flex-1 rounded-xl border border-outline-variant bg-surface px-3 text-sm" />
-                    <button
-                      type="button"
-                      disabled={sending || !savedCreationId || !recipientEmail.trim()}
-                      onClick={async () => {
-                        setSending(true); setError("");
-                        try {
-                          const response = await authedFetch("/api/pawprints/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creationId: savedCreationId, email: recipientEmail }) });
-                          const data = await response.json();
-                          if (!response.ok) throw new Error(data.error || "Could not send the Pawprint.");
-                          setRecipientEmail("");
-                        } catch (caught: any) {
-                          setError(caught.message || "Could not send the Pawprint.");
-                        } finally {
-                          setSending(false);
-                        }
-                      }}
-                      className="min-h-11 rounded-xl bg-primary px-4 text-xs font-black text-on-primary disabled:opacity-40"
-                    >
-                      {sending ? "Sending…" : "Send"}
-                    </button>
-                  </div>
-                  <p className="mt-2 text-[10px] text-on-surface-variant">Sending an email costs {CREDIT_PRICES.PAWPRINT_EMAIL} PupCoins. Digital Pawprints only.</p>
-                </div>
-              )}
-              {entry === "print" && shopifyProduct && (
-                <div className="rounded-2xl border border-primary/25 bg-surface-container-low p-4">
-                  <div className="flex items-center gap-2"><Printer size={17} className="text-primary" /><h2 className="text-sm font-black">Order your print</h2></div>
-                  <p className="mt-2 text-xs text-on-surface-variant">{shopifyProduct.title} — you'll finish checkout, including shipping, on our store.</p>
-                  {shopifyProduct.variants.length > 1 && (
-                    <div className="mt-3">
-                      <label className="text-xs font-bold text-on-surface-variant">Size</label>
-                      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {shopifyProduct.variants.map((variant) => (
-                          <button
-                            key={variant.shopifyVariantId}
-                            type="button"
-                            onClick={() => setSelectedVariantId(variant.shopifyVariantId)}
-                            className={`rounded-xl border-2 px-2 py-2 text-center text-xs font-bold transition ${selectedVariantId === variant.shopifyVariantId ? "border-primary bg-primary/10 text-primary" : "border-outline-variant/40 text-on-surface-variant hover:border-primary/50"}`}
-                          >
-                            <span className="block">{variant.label}</span>
-                            <span className="block text-[11px] font-semibold opacity-80">${(variant.priceCents / 100).toFixed(2)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {printCheckoutError && <p className="mt-2 rounded-xl bg-error/10 p-2 text-xs font-bold text-error">{printCheckoutError}</p>}
-                  <button
-                    type="button"
-                    onClick={() => void orderPrint()}
-                    disabled={printBusy || !selectedVariantId}
-                    className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-black text-on-primary disabled:opacity-40"
-                  >
-                    {printBusy ? <Loader2 size={17} className="animate-spin" /> : <Printer size={17} />}
-                    {printBusy ? "Preparing checkout…" : "Continue to checkout"}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
           <div className="sticky bottom-4 z-20 space-y-2 rounded-2xl bg-surface/85 p-2 backdrop-blur md:static md:bg-transparent md:p-0 md:backdrop-blur-none">
             {!userProfile.email ? (
               <button onClick={() => { window.location.href = "/sign-up"; }} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 font-black text-on-primary">Sign In to Save Pawprint</button>
@@ -394,7 +303,7 @@ export function FinishStep({
                 <p className="text-center text-[11px] font-semibold text-on-surface-variant">Saving this Pawprint costs {pawprintCost} PupCoins. You have {userProfile.credits}.</p>
               </>
             ) : (
-              <button onClick={() => void save()} disabled={busy || !subjectArtDataUrl} title={busy ? "Saving your Pawprint…" : !subjectArtDataUrl ? "Waiting for your Pawprint art to finish generating…" : undefined} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 font-black text-on-primary disabled:opacity-40">
+              <button onClick={() => void save()} disabled={busy || !subjectArtDataUrl || !subjectArtId} title={busy ? "Saving your PawPrint…" : !subjectArtDataUrl || !subjectArtId ? "Waiting for your PawPrint art to finish generating…" : undefined} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 font-black text-on-primary disabled:opacity-40">
                 {busy ? <Loader2 className="animate-spin" size={19} /> : <Sparkles size={19} />}
                 {busy ? "Saving…" : `Save selected variation · ${pawprintCost} PupCoins`}
               </button>
@@ -402,6 +311,21 @@ export function FinishStep({
           </div>
         </aside>
       </div>
+      {pendingLowResolutionPhotos && (
+        <LowResolutionDialog
+          count={pendingLowResolutionPhotos.lowCount}
+          onContinue={() => {
+            onPhotosChange([...photos, ...pendingLowResolutionPhotos.all]);
+            setPendingLowResolutionPhotos(null);
+            setError("");
+          }}
+          onReject={() => {
+            if (pendingLowResolutionPhotos.normal.length) onPhotosChange([...photos, ...pendingLowResolutionPhotos.normal]);
+            setPendingLowResolutionPhotos(null);
+            setError("The low-resolution image was not added.");
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -52,8 +52,12 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
     desc: "Honor a beloved companion with a personalized memorial model designed for physical printing."
   },
   [Screen.PAWPRINTS]: {
-    title: `Personalized Pawprints Pet Art | ${BRAND}`,
-    desc: "Create digital and printable pet keepsakes with your photos, message, and chosen occasion."
+    title: `Personalized Digital PawPrints Pet Art | ${BRAND}`,
+    desc: "Create personalized digital pet art from your photos, then download clean and composed PawPrint files."
+  },
+  [Screen.STORE]: {
+    title: `Pawsome3D Shop: Pet Gifts and Merchandise | ${BRAND}`,
+    desc: "Browse the live Pawsome3D Shopify catalog and open products directly in Shopify, including items that explicitly support PawPrint personalization."
   },
   [Screen.HOW_IT_WORKS]: {
     title: `How Custom 3D Pet Models Work | ${BRAND}`,
@@ -69,7 +73,7 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
   },
   [Screen.PRINT_SHOP]: {
     title: `Print Shop: Custom Pet Keepsakes | ${BRAND}`,
-    desc: "Order physical pet keepsakes — printed 3D figurines and Pawprints art — with your own photos. Add a shipping address and check out securely."
+    desc: "Order a physical 3D pet figurine from your model with secure checkout and tracked delivery."
   }
 };
 
@@ -80,7 +84,6 @@ const PRIVATE_TITLES: Partial<Record<Screen, string>> = {
   [Screen.FURBIN]: "Fur Bin",
   [Screen.ALBUMS]: "My Albums",
   [Screen.PROFILE]: "Profile",
-  [Screen.STORE]: "Store",
   [Screen.VOICE_TEST]: "Voice and Lip-Sync Test",
   [Screen.BIM]: "Scaled BIM Preview",
   [Screen.COMMUNITY]: "Community",

@@ -1126,7 +1126,10 @@ export async function initDb(): Promise<void> {
         template_id VARCHAR(80) NOT NULL,
         category VARCHAR(80) NOT NULL,
         layout_id VARCHAR(80) NOT NULL,
+        entry_mode VARCHAR(16) NOT NULL DEFAULT 'digital',
+        subject_art_id INT NULL,
         image_url TEXT NOT NULL,
+        clean_image_url TEXT NULL,
         creation_id INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_pawprint_request (user_phone, idempotency_key),
@@ -1135,8 +1138,7 @@ export async function initDb(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Pawprints v2: entry_mode ("digital"|"print") gates the email-send route
-    // (Digital-only) and distinguishes Shopify- vs local-fulfilled designs.
+    // Legacy rows may still say "print"; every new PawPrint is digital.
     try {
       const [pawprintAssetColumns] = await getPool().query(
         `SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -1169,12 +1171,9 @@ export async function initDb(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Pawprints v2 Print fulfillment: one Shopify product/checkout per
-    // physical order. status is reconciled by the orders/paid and
-    // orders/cancelled webhooks in server.ts (POST /api/webhooks/shopify-orders),
-    // matched via the idempotency_key stamped into the order's note at
-    // checkout time (see server/shopify.ts's createPawprintCheckout /
-    // extractPawprintOrderReference).
+    // Legacy PawPrint Shopify orders remain read-only. Status can still be
+    // reconciled by signed orders/paid and orders/cancelled webhooks using the
+    // idempotency reference already present in historic order notes.
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS pawprint_shopify_orders (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -3794,6 +3793,14 @@ export interface PawprintSubjectArtRecord {
   createdAt: Date;
 }
 
+export interface PawprintAssetRecord {
+  id: number;
+  creationId: number | null;
+  cleanImageUrl: string;
+  composedImageUrl: string;
+  createdAt: Date;
+}
+
 export async function getCachedSubjectArt(userPhone: string, cacheKey: string): Promise<PawprintSubjectArtRecord | null> {
   const [rows] = await getPool().query(
     `SELECT id, image_url, created_at FROM pawprint_subject_art WHERE user_phone = ? AND cache_key = ? LIMIT 1`,
@@ -3804,44 +3811,51 @@ export async function getCachedSubjectArt(userPhone: string, cacheKey: string): 
   return { id: row.id, imageUrl: row.image_url, createdAt: row.created_at };
 }
 
+export async function getOwnedSubjectArt(userPhone: string, subjectArtId: number): Promise<PawprintSubjectArtRecord | null> {
+  const [rows] = await getPool().query(
+    `SELECT id, image_url, created_at FROM pawprint_subject_art WHERE id = ? AND user_phone = ? LIMIT 1`,
+    [subjectArtId, userPhone],
+  ) as any;
+  const row = rows?.[0];
+  if (!row) return null;
+  return { id: Number(row.id), imageUrl: String(row.image_url), createdAt: row.created_at };
+}
+
+export async function getOwnedPawprintAsset(userPhone: string, pawprintId: number): Promise<PawprintAssetRecord | null> {
+  const [rows] = await getPool().query(
+    `SELECT id, creation_id, clean_image_url, image_url, created_at
+       FROM pawprint_assets
+      WHERE id = ? AND user_phone = ?
+      LIMIT 1`,
+    [pawprintId, userPhone],
+  ) as any;
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    creationId: row.creation_id == null ? null : Number(row.creation_id),
+    cleanImageUrl: String(row.clean_image_url || row.image_url),
+    composedImageUrl: String(row.image_url),
+    createdAt: row.created_at,
+  };
+}
+
 export async function saveCachedSubjectArt(input: {
   userPhone: string; cacheKey: string; imageUrl: string; entryMode: string; category?: string | null; optionId?: string | null;
-}): Promise<void> {
-  await getPool().query(
-    `INSERT INTO pawprint_subject_art (user_phone, cache_key, image_url, entry_mode, category, option_id)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE image_url = VALUES(image_url)`,
-    [input.userPhone, input.cacheKey, input.imageUrl, input.entryMode, input.category || null, input.optionId || null],
-  );
-}
-
-// ============================================================================
-// Pawprints v2: Shopify print orders
-//
-// v1 has no order webhook (see server/shopify.ts) — status stays 'redirected'
-// until a future reconciliation pass adds one.
-// ============================================================================
-
-export async function insertPawprintShopifyOrder(input: {
-  userPhone: string; creationId: number; shopifyProductId: string; shopifyVariantId: string;
-  checkoutUrl: string; idempotencyKey: string;
 }): Promise<number> {
   const [result] = await getPool().query(
-    `INSERT INTO pawprint_shopify_orders
-       (user_phone, creation_id, shopify_product_id, shopify_variant_id, checkout_url, idempotency_key)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [input.userPhone, input.creationId, input.shopifyProductId, input.shopifyVariantId, input.checkoutUrl, input.idempotencyKey],
+    `INSERT INTO pawprint_subject_art (user_phone, cache_key, image_url, entry_mode, category, option_id)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), image_url = VALUES(image_url)`,
+    [input.userPhone, input.cacheKey, input.imageUrl, input.entryMode, input.category || null, input.optionId || null],
   ) as any;
-  return result.insertId;
+  return Number(result.insertId);
 }
 
-export async function findPawprintShopifyOrderByIdempotencyKey(userPhone: string, idempotencyKey: string) {
-  const [rows] = await getPool().query(
-    `SELECT id, checkout_url, status FROM pawprint_shopify_orders WHERE user_phone = ? AND idempotency_key = ? LIMIT 1`,
-    [userPhone, idempotencyKey],
-  ) as any;
-  return rows?.[0] || null;
-}
+// ============================================================================
+// Legacy PawPrint Shopify orders. New checkout writes are retired; only
+// owner-scoped history and signed webhook reconciliation remain.
+// ============================================================================
 
 /** Webhook-side lookup: the incoming order/webhook payload carries only the
  *  reference stamped into the order note (see extractPawprintOrderReference),

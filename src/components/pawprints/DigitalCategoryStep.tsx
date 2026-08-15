@@ -1,5 +1,4 @@
 import React from "react";
-import { ChevronLeft } from "lucide-react";
 import type { PawprintCategoryDef } from "../../../shared/pawprintCatalog2";
 import { CREDIT_PRICES } from "../../pricing";
 
@@ -45,7 +44,7 @@ export function CustomizeChoice({ customizeChosen, onChoose }: {
 }) {
   return (
     <div className="mb-8 max-w-2xl">
-      <h2 className="text-xl font-black text-on-surface">Would you like to customize your print?</h2>
+      <h2 className="text-xl font-black text-on-surface">Would you like to add custom art instructions?</h2>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <button
           type="button"
@@ -67,7 +66,7 @@ export function CustomizeChoice({ customizeChosen, onChoose }: {
 }
 
 export function DigitalCategoryStep({
-  categories, categoryId, optionId, customizeChosen, onChooseOption, onChooseCustomize, onContinue, onBack,
+  categories, categoryId, optionId, customizeChosen, onChooseOption, onChooseCustomize, onContinue,
 }: {
   categories: PawprintCategoryDef[];
   categoryId: string;
@@ -76,18 +75,16 @@ export function DigitalCategoryStep({
   onChooseOption: (categoryId: string, optionId: string) => void;
   onChooseCustomize: (customize: boolean) => void;
   onContinue: () => void;
-  onBack: () => void;
 }) {
   const canContinue = Boolean(categoryId && optionId && customizeChosen !== null);
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pb-28 pt-8">
-      <button onClick={onBack} className="mb-6 flex min-h-11 items-center gap-2 text-sm font-black text-primary"><ChevronLeft size={18} /> Back</button>
       <CategoryOptionPicker
         categories={categories}
         categoryId={categoryId}
         optionId={optionId}
         onChoose={onChooseOption}
-        heading="Digital Pawprint"
+        heading="Digital PawPrint"
         subheading="Choose a theme for your pet's portrait"
       />
       <CustomizeChoice customizeChosen={customizeChosen} onChoose={onChooseCustomize} />

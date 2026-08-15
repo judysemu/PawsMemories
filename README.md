@@ -149,9 +149,7 @@ src/               React frontend (App, components, api client, types)
   three/ar/        AR stage + brain bridge (ARPetStage, IK, navmesh, voice, trials)
 blender-worker/    Standalone Express + Docker microservice for running Blender scripts (+ bake_lod.py)
 x-dm-service/      X DM conversation refinement service (Node 20 + Express + TypeScript)
-scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip),
-                   verify-shopify-checkout.mjs (Playwright: drives a real
-                   Pawprints checkout with zero manual input)
+scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip)
 dist/              Build output (vite assets + server.cjs)
 .env.example       Documented environment variables
 docs/AUTOMATIONS.md  Index of scheduled routines (agents) this repo depends
@@ -167,7 +165,7 @@ Test runner is the built-in `node:test` via `tsx` (not Vitest): `npm test`, or s
 
 The homepage Famous Portraits collection is driven by `shared/historicalPetCatalog.ts`. The public projection removes private sports-inspiration and jersey-verification sources before records reach customer UI. Sports portraits use generalized pet-athlete roles, fictional marks, and only source-verified jersey numbers; unavailable final art is labeled honestly instead of requesting a missing image.
 
-**Pawprints v2** (`shared/pawprintCatalog2.ts`) replaced the old Printful-backed Historic Pawprints line. Digital designs are three fixed themed categories (`DIGITAL_CATEGORIES`); physical prints map to real, already-listed Shopify products with a genuine photo-customization option (`PRINT_PRODUCTS`), fulfilled through the store at `pawprints-by-pawsome3d.myshopify.com` rather than Printful. Generation is a two-stage pipeline — one cached Gemini "subject art" call per (theme, photo-set) via `POST /api/pawprints/generate-subject`, then a client-side canvas composite (`renderPawprint()`) that both Live Preview and Save render identically, so what a customer previews is exactly what's saved. Checkout hands off to Shopify via `POST /api/pawprints/shopify-checkout`; order status (paid/cancelled) is reconciled by a signed `POST /api/webhooks/shopify-orders` webhook, not polling. A scheduled routine keeps the Shopify-sourced half of the catalog in sync and screens live SEO metadata — see `docs/AUTOMATIONS.md` for what runs, on what schedule, and where its one human-approval step is.
+**PawPrints v3** (`shared/pawprintCatalog2.ts`) is digital-only. Customers select one of three themed categories, upload photos (with an explicit confirmation instead of a hard failure for low-resolution files), and run a two-stage pipeline: one cached Gemini subject-art call per theme/photo set via `POST /api/pawprints/generate-subject`, followed by a deterministic client canvas composite (`renderPawprint()`). Save persists both the clean generated artwork and the composed design, and ownership-checked download routes expose each file independently. After completion the app opens the public `/store?pawprint=<id>` experience, where a runtime snapshot of active Shopify products links directly to Shopify. Personalizable products are classified only by the boolean `custom.pawprint_personalizable` metafield. Existing PawPrint Shopify order history and signed webhook reconciliation remain read-only for legacy records; new app-side PawPrint checkouts are retired. See `docs/AUTOMATIONS.md` for catalog refresh operations.
 
 Fur Reels is the customer-facing eight-second AI video generator. It combines a persisted source portrait, one of thirteen directed scripts, four timed beats, lighting, camera, native sound, and an optional short voice line. It is not the manual Animator. Generated video jobs retain the existing account-scoped persistence and credit-refund boundaries.
 
@@ -214,7 +212,8 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `LAYER8_BASE_URL` | Base URL for Layer8 control plane (e.g., `https://layer8.pawsome.ai`) | |
 | `LAYER8_TENANT_API_KEY` | Tenant API key for Layer8 spatial operations | |
 | `LAYER8_SPATIAL_TIMEOUT_MS` | Optional timeout for Layer8 spatial calls (default 30000) | |
-| `PAWPRINTS_SHOPIFY_ENABLED` / `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` / `SHOPIFY_API_VERSION` | Pawprints v2 physical fulfillment — client-credentials Admin API access to `pawprints-by-pawsome3d.myshopify.com` (`server/shopify.ts`). All required together once enabled. |
+| `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` / `SHOPIFY_API_VERSION` | Read-only Admin GraphQL access used to refresh the public `/store` runtime catalog snapshot. The ID and secret must be the matched pair for the Hostinger catalog app installed on that store; do not mix them with the separate read-only external-routine app in `tools/shopify-app`. |
+| `SHOPIFY_CATALOG_SYNC_SECRET` | Long random Bearer token for the scheduled `POST /api/admin/shopify/catalog-sync` request. |
 | `SHOPIFY_WEBHOOK_SECRET` | Signing secret from the `orders/paid` / `orders/cancelled` webhooks registered in Shopify Admin → Settings → Notifications, pointed at `POST /api/webhooks/shopify-orders`. Without it that route 401s every delivery rather than trusting an unsigned request. |
 | `RUNTIME_LOG_API_KEY` | Shared secret for `GET /api/admin/runtime-log` — lets the scheduled "Pawsome3D Runtime Log Watch" routine read `logs/runtime-*.log` over plain HTTPS, since this host exposes no live runtime-log API of its own. See `docs/AUTOMATIONS.md`. |
 

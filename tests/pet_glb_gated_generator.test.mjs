@@ -269,9 +269,8 @@ test("model studio accepts one photo, supports Tripo view remakes, and requires 
 test("migration 39 persists immutable customer stage attempts", () => {
   const migration = MIGRATIONS.find((entry) => entry.version === 39);
   assert.ok(migration);
-  // MG-9 added migration 49 (avatars.resume_attempts) as the idempotency
-  // record for the legacy resumeStalledBuilds sweep.
-  assert.equal(CURRENT_SCHEMA_VERSION, 49);
+  // MG-9 added migration 49; later additive migrations must preserve it.
+  assert.ok(CURRENT_SCHEMA_VERSION >= 49);
   const sql = migration.statements.join("\n");
   assert.match(sql, /CREATE TABLE IF NOT EXISTS pet_glb_stage_attempts/);
   assert.match(sql, /artifact_sha256 CHAR\(64\)/);

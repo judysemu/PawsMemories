@@ -24,6 +24,9 @@ export interface StudioPhoto {
   dataUrl: string;
   width: number;
   height: number;
+  originalWidth: number;
+  originalHeight: number;
+  lowResolution: boolean;
 }
 
 export const FULL_PRINT_WIDTH = 2400;
@@ -108,7 +111,7 @@ async function normalizePhotoInWorker(file: File, mobile: boolean): Promise<Stud
   const worker = new Worker(new URL("./photoWorker.ts", import.meta.url), { type: "module" });
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
   try {
-    const result = await new Promise<{ width: number; height: number; mimeType: string; buffer: ArrayBuffer }>((resolve, reject) => {
+    const result = await new Promise<{ width: number; height: number; originalWidth: number; originalHeight: number; mimeType: string; buffer: ArrayBuffer }>((resolve, reject) => {
       const timeout = window.setTimeout(() => reject(new Error("Photo optimization timed out.")), 30_000);
       worker.onmessage = (event) => {
         if (event.data?.id !== id) return;
@@ -128,7 +131,16 @@ async function normalizePhotoInWorker(file: File, mobile: boolean): Promise<Stud
         quality: mobile ? 0.86 : 0.9,
       });
     });
-    return { id, name: file.name, dataUrl: await blobDataUrl(new Blob([result.buffer], { type: result.mimeType })), width: result.width, height: result.height };
+    return {
+      id,
+      name: file.name,
+      dataUrl: await blobDataUrl(new Blob([result.buffer], { type: result.mimeType })),
+      width: result.width,
+      height: result.height,
+      originalWidth: result.originalWidth,
+      originalHeight: result.originalHeight,
+      lowResolution: result.originalWidth < 600 || result.originalHeight < 600,
+    };
   } finally {
     worker.terminate();
   }
@@ -149,7 +161,8 @@ async function normalizePhoto(file: File): Promise<StudioPhoto> {
   const sourceUrl = URL.createObjectURL(file);
   try {
     const image = await loadImage(sourceUrl);
-    if (image.naturalWidth < 600 || image.naturalHeight < 600) throw new Error(`${file.name}: minimum size is 600 × 600 pixels.`);
+    const originalWidth = image.naturalWidth;
+    const originalHeight = image.naturalHeight;
     const mobile = window.matchMedia?.("(max-width: 760px), (pointer: coarse)").matches ?? false;
     const maxEdge = mobile ? 1_600 : 2_400;
     const maxPixels = mobile ? 3_200_000 : 7_000_000;
@@ -176,6 +189,9 @@ async function normalizePhoto(file: File): Promise<StudioPhoto> {
       dataUrl,
       width,
       height,
+      originalWidth,
+      originalHeight,
+      lowResolution: originalWidth < 600 || originalHeight < 600,
     };
   } finally {
     URL.revokeObjectURL(sourceUrl);
@@ -190,7 +206,7 @@ export async function preparePhoto(file: File): Promise<StudioPhoto> {
     try {
       return await normalizePhotoInWorker(file, mobile);
     } catch (error: any) {
-      if (/minimum size|smaller than|choose PNG/i.test(error?.message || "")) throw error;
+      if (/smaller than|choose PNG/i.test(error?.message || "")) throw error;
       // Safari versions without worker OffscreenCanvas use the bounded main-thread path.
     }
   }

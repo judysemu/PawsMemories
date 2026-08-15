@@ -500,23 +500,6 @@ export async function fetchPawprintPrintOrders(): Promise<PawprintShopifyOrder[]
   return (await res.json()).orders || [];
 }
 
-export interface CreatePawprintShopifyCheckoutInput {
-  creationId: number;
-  shopifyProductId: string;
-  shopifyVariantId: string;
-}
-
-export async function createPawprintShopifyCheckout(input: CreatePawprintShopifyCheckoutInput, idempotencyKey: string) {
-  const res = await authedFetch("/api/pawprints/shopify-checkout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify(input),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "The print checkout could not be created.");
-  return data;
-}
-
 export async function fetchAlbums(): Promise<Album[]> {
   try {
     const res = await authedFetch("/api/albums");

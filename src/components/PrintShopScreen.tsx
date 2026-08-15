@@ -1,18 +1,6 @@
 /**
- * PrintShopScreen — the single storefront for everything Pawsome3D ships as a
- * physical object.
- *
- * Two vendors sit behind this page and they are deliberately kept visually
- * distinct, because they fail independently:
- *
- *   • Pawprints (paper/canvas art)  → Printful
- *   • Pet figurines (3D printing)   → Slant 3D
- *
- * The page always renders both storefronts. When a vendor is not yet
- * configured, its options are shown read-only with a "coming soon" notice
- * rather than being hidden — hiding them was the previous behaviour and it made
- * an unconfigured vendor indistinguishable from a feature that does not exist,
- * for customers and for whoever was debugging the deployment.
+ * PrintShopScreen — the physical storefront for Pawsome3D figurines.
+ * Digital PawPrints and Shopify merchandise live in their own public Store.
  *
  * Ordering itself is never client-authoritative. Every price, variant and
  * filament is resolved server-side; this page only collects intent and a
@@ -28,16 +16,6 @@ import {
 } from "../api";
 import { UserProfile } from "../types";
 
-interface PawprintFormat {
-  code: string;
-  label: string;
-  description: string;
-  widthIn: number;
-  heightIn: number;
-  priceCents?: number;
-  orderable?: boolean;
-}
-
 interface ShippingAddress {
   name: string;
   email: string;
@@ -50,7 +28,6 @@ interface ShippingAddress {
 
 interface Props {
   userProfile: UserProfile;
-  onOpenPawprints: () => void;
 }
 
 const PRINT_EXAMPLES = [
@@ -112,9 +89,7 @@ function ComingSoonNotice({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props) {
-  const [pawprintAvailable, setPawprintAvailable] = useState(false);
-  const [pawprintFormats, setPawprintFormats] = useState<PawprintFormat[]>([]);
+export default function PrintShopScreen({ userProfile }: Props) {
   const [modelPrintingAvailable, setModelPrintingAvailable] = useState(false);
 
   const [models, setModels] = useState<ModelLibraryItem[]>([]);
@@ -139,19 +114,6 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
 
   useEffect(() => {
     let active = true;
-
-    fetch("/api/pawprints/print-products")
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return;
-        setPawprintFormats(Array.isArray(data.products) ? data.products : []);
-        setPawprintAvailable(data.available === true);
-      })
-      .catch(() => {
-        if (!active) return;
-        setPawprintFormats([]);
-        setPawprintAvailable(false);
-      });
 
     fetchFulfillmentReadiness()
       .then((readiness) => active && setModelPrintingAvailable(readiness.modelPrinting.available))
@@ -249,7 +211,7 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
         <p className="text-xs font-black uppercase tracking-[.2em] text-primary">Print Shop</p>
         <h1 className="mt-2 text-3xl font-black text-on-surface">Order your pet as a physical keepsake</h1>
         <p className="mt-2 text-on-surface-variant">
-          Framed art prints and full-colour 3D figurines, produced by our print partners and shipped to your door.
+          Full-colour 3D figurines, produced by our print partner and shipped to your door.
         </p>
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs font-bold text-on-surface-variant">
           <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-primary" /> Secure Stripe checkout</span>
@@ -261,61 +223,6 @@ export default function PrintShopScreen({ userProfile, onOpenPawprints }: Props)
       {error && <p className="mb-6 rounded-xl bg-error/10 p-3 text-sm font-bold text-error">{error}</p>}
 
       <div className="space-y-6">
-        {/* ── Printful: Pawprints art prints ──────────────────────────────── */}
-        <SectionShell
-          title="Pawprint art prints"
-          subtitle="Your Pawprint design on museum-quality poster paper or stretched canvas."
-          icon={<Printer size={20} />}
-          badge={<StatusBadge available={pawprintAvailable} />}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            {pawprintFormats.map((format) => (
-              <article key={format.code} className="rounded-2xl border border-outline-variant/40 bg-surface-container-low p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-on-surface">{format.label}</p>
-                    <p className="mt-1 text-xs text-on-surface-variant">{format.description}</p>
-                  </div>
-                  {format.priceCents ? (
-                    <span className="shrink-0 text-sm font-black text-primary">${(format.priceCents / 100).toFixed(2)}</span>
-                  ) : null}
-                </div>
-                <p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
-                  {format.widthIn} × {format.heightIn} in · 300 DPI
-                </p>
-              </article>
-            ))}
-          </div>
-
-          {pawprintAvailable ? (
-            <>
-              <p className="mt-4 text-xs text-on-surface-variant">
-                Physical prints are ordered from the finished design. Create or open a Pawprint, then choose a print format at the final step.
-              </p>
-              <button
-                type="button"
-                onClick={onOpenPawprints}
-                className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-black text-on-primary"
-              >
-                <Printer size={17} /> Go to Pawprints Studio
-              </button>
-            </>
-          ) : (
-            <>
-              <ComingSoonNotice>
-                These are the formats we print. Physical Pawprint ordering is being switched on shortly — every Pawprint you create now stays saved and will be printable from your FurBin.
-              </ComingSoonNotice>
-              <button
-                type="button"
-                onClick={onOpenPawprints}
-                className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-primary/40 px-5 text-sm font-black text-primary"
-              >
-                Design a Pawprint now
-              </button>
-            </>
-          )}
-        </SectionShell>
-
         {/* ── Slant 3D: printed figurines ─────────────────────────────────── */}
         <SectionShell
           title="3D printed figurines"

@@ -6,7 +6,6 @@ Disallow: /furball3d
 Disallow: /animator
 Disallow: /fidos-styles
 Disallow: /fur-bin
-Disallow: /store
 Disallow: /community
 Disallow: /profile
 Disallow: /albums
