@@ -140,7 +140,7 @@ in `docs/current/FULL_CODEBASE_AUDIT_2026-07-31.md` and
 ## Project structure
 
 ```
-server.ts          Express app: static hosting + /api routes + Stripe webhook
+server.ts          Express app: static hosting + /api routes + Stripe and Shopify webhooks
 auth.ts            Email/password helpers, JWT sign/verify, requireAuth middleware
 db.ts              MySQL pool, table init, user/account CRUD helpers
 src/               React frontend (App, components, api client, types)
@@ -149,9 +149,14 @@ src/               React frontend (App, components, api client, types)
   three/ar/        AR stage + brain bridge (ARPetStage, IK, navmesh, voice, trials)
 blender-worker/    Standalone Express + Docker microservice for running Blender scripts (+ bake_lod.py)
 x-dm-service/      X DM conversation refinement service (Node 20 + Express + TypeScript)
-scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip)
+scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip),
+                   verify-shopify-checkout.mjs (Playwright: drives a real
+                   Pawprints checkout with zero manual input)
 dist/              Build output (vite assets + server.cjs)
 .env.example       Documented environment variables
+docs/AUTOMATIONS.md  Index of scheduled routines (agents) this repo depends
+                     on but has no other pointer to — trigger IDs, schedules,
+                     connectors, and each one's human-approval stage
 ```
 
 Test runner is the built-in `node:test` via `tsx` (not Vitest): `npm test`, or scoped
@@ -162,7 +167,7 @@ Test runner is the built-in `node:test` via `tsx` (not Vitest): `npm test`, or s
 
 The homepage Famous Portraits collection is driven by `shared/historicalPetCatalog.ts`. The public projection removes private sports-inspiration and jersey-verification sources before records reach customer UI. Sports portraits use generalized pet-athlete roles, fictional marks, and only source-verified jersey numbers; unavailable final art is labeled honestly instead of requesting a missing image.
 
-Historic Pawprints begins with **Historic Pawprint Pet Digital** or **Pawprint Pet Physical**. Twenty digital roles are allowlisted in `shared/historicPawprintTemplates.ts` (the count is `HISTORIC_ROLES.length` — treat that array as the source of truth rather than this sentence); the physical path is limited to five approved designs and continues to submit only a server-owned Printful product code. Browsers cannot provide a Printful variant ID or price.
+**Pawprints v2** (`shared/pawprintCatalog2.ts`) replaced the old Printful-backed Historic Pawprints line. Digital designs are three fixed themed categories (`DIGITAL_CATEGORIES`); physical prints map to real, already-listed Shopify products with a genuine photo-customization option (`PRINT_PRODUCTS`), fulfilled through the store at `pawprints-by-pawsome3d.myshopify.com` rather than Printful. Generation is a two-stage pipeline — one cached Gemini "subject art" call per (theme, photo-set) via `POST /api/pawprints/generate-subject`, then a client-side canvas composite (`renderPawprint()`) that both Live Preview and Save render identically, so what a customer previews is exactly what's saved. Checkout hands off to Shopify via `POST /api/pawprints/shopify-checkout`; order status (paid/cancelled) is reconciled by a signed `POST /api/webhooks/shopify-orders` webhook, not polling. A scheduled routine keeps the Shopify-sourced half of the catalog in sync and screens live SEO metadata — see `docs/AUTOMATIONS.md` for what runs, on what schedule, and where its one human-approval step is.
 
 Fur Reels is the customer-facing eight-second AI video generator. It combines a persisted source portrait, one of thirteen directed scripts, four timed beats, lighting, camera, native sound, and an optional short voice line. It is not the manual Animator. Generated video jobs retain the existing account-scoped persistence and credit-refund boundaries.
 
@@ -209,6 +214,9 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `LAYER8_BASE_URL` | Base URL for Layer8 control plane (e.g., `https://layer8.pawsome.ai`) | |
 | `LAYER8_TENANT_API_KEY` | Tenant API key for Layer8 spatial operations | |
 | `LAYER8_SPATIAL_TIMEOUT_MS` | Optional timeout for Layer8 spatial calls (default 30000) | |
+| `PAWPRINTS_SHOPIFY_ENABLED` / `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` / `SHOPIFY_API_VERSION` | Pawprints v2 physical fulfillment — client-credentials Admin API access to `pawprints-by-pawsome3d.myshopify.com` (`server/shopify.ts`). All required together once enabled. |
+| `SHOPIFY_WEBHOOK_SECRET` | Signing secret from the `orders/paid` / `orders/cancelled` webhooks registered in Shopify Admin → Settings → Notifications, pointed at `POST /api/webhooks/shopify-orders`. Without it that route 401s every delivery rather than trusting an unsigned request. |
+| `RUNTIME_LOG_API_KEY` | Shared secret for `GET /api/admin/runtime-log` — lets the scheduled "Pawsome3D Runtime Log Watch" routine read `logs/runtime-*.log` over plain HTTPS, since this host exposes no live runtime-log API of its own. See `docs/AUTOMATIONS.md`. |
 
 > **Hostinger note:** set `DB_HOST` to `127.0.0.1`, not `localhost`. On Node 18+, `mysql2` resolves `localhost` to IPv6 (`::1`), which the Hostinger MySQL user grant does not cover — causing `Access denied … @'::1'`. Forcing IPv4 with `127.0.0.1` resolves it.
 
