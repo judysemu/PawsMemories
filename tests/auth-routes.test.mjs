@@ -185,7 +185,11 @@ test("Public routes are reachable without a token", async () => {
   );
   const pawprintTemplates = await pawprintTemplatesRes.json();
   assert.ok(Array.isArray(pawprintTemplates.digitalCategories));
-  assert.ok(Array.isArray(pawprintTemplates.printProducts));
+  assert.equal(
+    Object.hasOwn(pawprintTemplates, "printProducts"),
+    false,
+    "PawPrint templates endpoint should not expose retired physical-print options"
+  );
 });
 
 test("Studio proxy is isolated to /api/studio", async () => {
