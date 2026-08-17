@@ -42,6 +42,7 @@ import { createRigPipelineRouter } from "./server/rig-pipeline/routes";
 import { RigPipelineService } from "./server/rig-pipeline/service";
 import { isRigPipelineV4Enabled } from "./server/rig-pipeline/featureFlag";
 import { createFurBinRouter } from "./server/fur-bin/routes";
+import { barkleyRoutes } from "./server/barkley/routes";
 import { AiVideoScriptSchema, compileEightSecondPrompt } from "./server/ai-video/scripts";
 import { submitFalVideo, type FurReelDuration } from "./server/ai-video/falVideo";
 import { getAiVideoProvider, pollAndFinishFalVideoJob } from "./server/ai-video/finish";
@@ -1025,6 +1026,10 @@ async function startServer() {
   app.use("/api/spatial-generator", requireAuth, spatialGeneratorRouter);
   app.use("/api/rig-pipeline", requireAuth, createRigPipelineRouter(getPool));
   app.use("/api/fur-bin", createFurBinRouter(getPool, { isAdmin: isUserAdmin }));
+
+  // ── Barkley Presenter (BARKLEY_PRESENTER) ──────────────────────────────
+  // Feature-gated interactive educational presenter. 503 when disabled or clips missing.
+  app.use("/api/barkley", barkleyRoutes());
 
   // ── Paid pet GLB (CUSTOM_RIGGED_PET_GLB_V1) ────────────────────────────────
   // The production pet builder is always mounted. Deps are still built lazily
