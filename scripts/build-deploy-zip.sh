@@ -168,6 +168,11 @@ node scripts/verify-release-directory.mjs "$EXTRACT_DIR/dist"
 # bundles to CommonJS) while tsc, the test suite, and `tsx server.ts` were all
 # green — source and artifact are not the same thing. Boot the real artifact.
 echo "Boot-testing the packaged bundle..."
+# The archive deliberately omits node_modules — Hostinger runs npm install on
+# its side — so the extracted copy cannot resolve dependencies on its own.
+# Link the already-installed tree in rather than installing again: the point of
+# this gate is to execute the bundled server code, not to re-validate npm.
+ln -s "$PROJECT_ROOT/node_modules" "$EXTRACT_DIR/node_modules" 2>/dev/null || true
 SMOKE_PORT=$(( 39000 + RANDOM % 900 ))
 SMOKE_LOG=$(mktemp)
 ( cd "$EXTRACT_DIR" && PORT="$SMOKE_PORT" node server.cjs > "$SMOKE_LOG" 2>&1 & echo $! > "$EXTRACT_DIR/.smoke.pid" )
