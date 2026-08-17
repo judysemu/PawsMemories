@@ -145,6 +145,8 @@ import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
 import { createFreeImageRouter } from "./server/free-image/routes";
 import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
+import { referenceFromOrderPayload } from "./server/pawprint-purchase/cartPermalink";
+import { createPawprintPurchaseRouter, sweepPaidPawprintOrders, isPawprintPurchaseGateEnabled } from "./server/pawprint-purchase/routes";
 import { getShopifyCatalogSyncStatus, listPublicStoreProducts, synchronizeShopifyCatalog } from "./server/shopifyCatalog";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
 import { handleCustomizeOrderPayment, registerCustomizerBuyerRoutes } from "./server/customizerCheckout";
@@ -914,7 +916,10 @@ async function startServer() {
         [webhookId, topic],
       ) as any;
       if (Number(receipt?.affectedRows || 0) === 0) return res.json({ received: true, duplicate: true });
-      const reference = extractPawprintOrderReference(order?.note);
+      // Cart permalinks carry the reference as a cart attribute; legacy orders
+      // carry it in the note. Read both so neither path silently loses a paid
+      // order we cannot match back to the customer's artwork.
+      const reference = referenceFromOrderPayload(order) || extractPawprintOrderReference(order?.note);
       if (!reference) {
         // Not every Shopify order is a Pawprint order (the store also sells
         // non-personalized merch) — silently ignore, this is expected.
@@ -4238,6 +4243,44 @@ async function startServer() {
   // Free first image. Mounted here because it depends on the image generator
   // defined just above. paidLimiter applies even though nothing is charged: it
   // is a generation endpoint, and the entitlement check happens inside.
+  app.use("/api/pawprints/purchase", createPawprintPurchaseRouter(getPool));
+
+  // Paid orders become art on an interval, not inside the webhook: Shopify
+  // expects a fast 200, and a webhook timeout would trigger retries and risk
+  // duplicate paid work. The sweep claims each row before generating.
+  let pawprintSweepActive = false;
+  async function runPawprintPurchaseSweep(): Promise<void> {
+    if (pawprintSweepActive) return;
+    pawprintSweepActive = true;
+    try {
+      await sweepPaidPawprintOrders(getPool, {
+        generate: async (spec, userPhone) => {
+          const composed = spec.personalText
+            ? `${spec.prompt}. Render the exact text "${spec.personalText}" cleanly into the artwork.`
+            : spec.prompt;
+          const image = await generateImageWithFallback(
+            [{ text: buildPawprintPrompt(composed, spec.photoAssetKeys.length) }],
+            "pawprint-paid-order",
+            userPhone,
+            undefined,
+            "4:5",
+          );
+          if (!image) throw new Error("PawPrint generation returned no image.");
+          return image;
+        },
+        deliver: async (userPhone, imageBase64) => uploadBase64Image(imageBase64, "pawprints"),
+      });
+    } catch (error: any) {
+      console.error("[pawprint-purchase] sweep failed:", error?.message || error);
+    } finally {
+      pawprintSweepActive = false;
+    }
+  }
+  if (isPawprintPurchaseGateEnabled()) {
+    void runPawprintPurchaseSweep();
+    setInterval(() => void runPawprintPurchaseSweep(), 60 * 1000).unref();
+  }
+
   app.use(
     "/api/free-image",
     paidLimiter,
