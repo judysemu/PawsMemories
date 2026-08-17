@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 51;
+export const CURRENT_SCHEMA_VERSION = 52;
 
 export interface Migration {
   version: number;
@@ -2450,6 +2450,35 @@ export const MIGRATIONS: Migration[] = [
         INDEX idx_email_verif_user (user_phone),
         INDEX idx_email_verif_token (token_hash)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 52,
+    name: "pawprint_purchase_gate",
+    statementRequiresTable: {
+      0: "pawprint_shopify_orders", 1: "pawprint_shopify_orders", 2: "pawprint_shopify_orders",
+      3: "pawprint_shopify_orders", 4: "pawprint_shopify_orders", 5: "pawprint_shopify_orders",
+      6: "pawprint_shopify_orders", 7: "pawprint_shopify_orders", 8: "pawprint_shopify_orders",
+      9: "pawprint_shopify_orders", 10: "pawprint_shopify_orders", 11: "pawprint_shopify_orders",
+      12: "pawprint_shopify_orders", 13: "pawprint_shopify_orders",
+    },
+    statements: [
+      // The gate moved earlier: an order is now created BEFORE any art exists,
+      // so creation_id can no longer be NOT NULL. The legacy flow created the
+      // creation first, which is exactly the middle state this phase removes.
+      `ALTER TABLE pawprint_shopify_orders MODIFY COLUMN creation_id INT NULL`,
+      // The composed spec the customer paid for. Generation reads this after
+      // the webhook confirms payment, so the prompt cannot be altered between
+      // checkout and fulfilment.
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='draft_spec_json'`,
+      `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN draft_spec_json LONGTEXT NULL','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='review_status'`,
+      `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN review_status VARCHAR(32) NOT NULL DEFAULT \'none\'','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+      `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='furbin_item_uuid'`,
+      `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN furbin_item_uuid CHAR(36) NULL, ADD COLUMN generation_error VARCHAR(500) NULL, ADD COLUMN reviewed_by VARCHAR(190) NULL, ADD COLUMN reviewed_at TIMESTAMP NULL','SELECT 1')`,
+      `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
     ],
   },
 ];
