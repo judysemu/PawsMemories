@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Creation, PublicUser, UserProfile } from "../types";
 import type { PawprintCategoryDef } from "../../shared/pawprintCatalog2";
 import type { StudioPhoto } from "../pawprints/renderPawprint";
@@ -28,6 +28,21 @@ export default function PawprintsStudio(props: PawprintsStudioProps) {
   const [optionId, setOptionId] = useState("");
   const [customizeChosen, setCustomizeChosen] = useState<boolean | null>(null);
   const [customPrompt, setCustomPrompt] = useState("");
+  // v3 personalization. Held here (not in the step) so it survives Back/Next
+  // navigation and is available to the generate call alongside the prompt.
+  const [personalText, setPersonalText] = useState("");
+  const [occasionId, setOccasionId] = useState<string | null>(null);
+
+  // The printed caption is folded into the prompt rather than sent as a
+  // separate field, so this phase needs no backend change. The wording asks for
+  // the exact string so the model renders it verbatim instead of paraphrasing,
+  // and asks for room in the composition so it is not crammed into an edge.
+  const effectivePrompt = useMemo(() => {
+    const base = customPrompt.trim();
+    const caption = personalText.trim();
+    if (!caption) return base;
+    return `${base}. Render the exact text "${caption}" cleanly into the artwork, leaving room for it in the composition.`;
+  }, [customPrompt, personalText]);
   const [photos, setPhotos] = useState<StudioPhoto[]>([]);
   const [photoError, setPhotoError] = useState("");
   const [stage, setStage] = useState<WizardStage>("category");
@@ -98,6 +113,10 @@ export default function PawprintsStudio(props: PawprintsStudioProps) {
 
         {stage === "custom-prompt" && (
           <CustomPromptStep
+            personalText={personalText}
+            occasionId={occasionId}
+            onPersonalTextChange={setPersonalText}
+            onOccasionChange={setOccasionId}
             customPrompt={customPrompt}
             onChange={setCustomPrompt}
             onContinue={() => setStage("photo")}
@@ -121,7 +140,7 @@ export default function PawprintsStudio(props: PawprintsStudioProps) {
             categoryId={categoryId}
             optionId={optionId}
             categoryLabel={categoryLabel}
-            customPrompt={customPrompt}
+            customPrompt={effectivePrompt}
             customized={Boolean(customizeChosen)}
             photos={photos}
             onPhotosChange={setPhotos}

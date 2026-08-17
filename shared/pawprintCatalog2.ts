@@ -88,3 +88,129 @@ export function findDigitalOption(categoryId: string, optionId: string): Pawprin
   const category = DIGITAL_CATEGORIES.find((entry) => entry.id === categoryId);
   return category?.options.find((option) => option.id === optionId);
 }
+
+// ─── PawPrints v3 teaching layer ────────────────────────────────────────────
+// The studio's job is not only to produce a portrait but to teach the customer
+// how to drive the model. Every prompt screen shows two samples: the first is
+// broken into labelled sections with a one-line reason for each, the second is
+// shown whole so they can see a finished prompt read naturally.
+
+export interface PromptSection {
+  id: string;
+  /** Short label shown on the chip, e.g. "Scene". */
+  label: string;
+  /** The actual prompt fragment this section contributes. */
+  text: string;
+  /** Plain-language reason this section earns its place. No jargon. */
+  explanation: string;
+}
+
+export interface AnnotatedSamplePrompt {
+  id: string;
+  title: string;
+  sections: PromptSection[];
+}
+
+/** Sample 1 — dissected. Each section is explained beneath it in the UI. */
+export const ANNOTATED_SAMPLE_PROMPT: AnnotatedSamplePrompt = {
+  id: "eiffel-birthday",
+  title: "A birthday card from Paris",
+  sections: [
+    {
+      id: "scene",
+      label: "Scene",
+      text: "On the observation deck of the Eiffel Tower at golden hour",
+      explanation: "Where it happens. Real landmarks work well — the model knows them.",
+    },
+    {
+      id: "subject",
+      label: "Subject",
+      text: "my corgi Tuck and our family of four, all smiling",
+      explanation: "Who is in it. Your uploaded photos keep everyone's real face and markings.",
+    },
+    {
+      id: "personal",
+      label: "Personal text",
+      text: '"Happy Birthday, Grandma!"',
+      explanation: "Optional caption printed onto the card or frame.",
+    },
+    {
+      id: "mood",
+      label: "Mood",
+      text: "warm, joyful, a little silly",
+      explanation: "Sets the colours and expressions. One or two adjectives is plenty.",
+    },
+    {
+      id: "composition",
+      label: "Composition",
+      text: "postcard style, with room for text along the bottom",
+      explanation: "How it is framed, and where your caption can sit.",
+    },
+  ],
+};
+
+/** Sample 2 — shown whole, so a finished prompt reads as one sentence. */
+export const PLAIN_SAMPLE_PROMPT =
+  "Salem the cat as a Renaissance duchess in an oil-painting style, gentle and regal, soft window light, framed portrait with space for a short message.";
+
+/** Joins an annotated sample back into the single prompt it represents. */
+export function composeSamplePrompt(sample: AnnotatedSamplePrompt): string {
+  return sample.sections.map((section) => section.text).join(", ") + ".";
+}
+
+export interface IdeaChip {
+  id: string;
+  label: string;
+  emoji: string;
+  /** Seeded into the prompt box as editable text, never locked. */
+  seed: string;
+}
+
+/** Starting points for customers who freeze at an empty box. */
+export const IDEA_CHIPS: IdeaChip[] = [
+  {
+    id: "famous_location",
+    label: "Famous locations",
+    emoji: "🗼",
+    seed: "My pet and me at the Eiffel Tower at golden hour, warm and joyful, postcard style",
+  },
+  {
+    id: "historical_figure",
+    label: "Historical figure",
+    emoji: "👑",
+    seed: "My pet as a Renaissance duchess in an oil-painting style, regal and gentle, framed portrait",
+  },
+  {
+    id: "occupation",
+    label: "Occupation costume",
+    emoji: "🚒",
+    seed: "My pet in a firefighter's coat and helmet beside a gleaming engine, brave and cheerful",
+  },
+  {
+    id: "holiday",
+    label: "Holiday theme",
+    emoji: "🎄",
+    seed: "My pet by a decorated tree with warm string lights and a cosy fireplace glow, festive and snug",
+  },
+];
+
+export interface OccasionPreset {
+  id: string;
+  label: string;
+  emoji: string;
+  /** Prefilled caption the customer can edit or clear. */
+  defaultText: string;
+}
+
+/** Occasions for the optional printed caption. */
+export const OCCASION_PRESETS: OccasionPreset[] = [
+  { id: "birthday", label: "Birthday", emoji: "🎂", defaultText: "Happy Birthday!" },
+  { id: "framed", label: "Framed photo", emoji: "🖼", defaultText: "" },
+  { id: "holiday", label: "Holiday card", emoji: "🎄", defaultText: "Happy Holidays!" },
+  { id: "congrats", label: "Congratulations", emoji: "🎉", defaultText: "Congratulations!" },
+  { id: "get_well", label: "Get well", emoji: "💐", defaultText: "Get well soon!" },
+  { id: "missing_you", label: "Missing you", emoji: "💌", defaultText: "Missing you." },
+];
+
+/** Server-side and client-side cap for the printed caption. */
+export const PERSONAL_TEXT_MAX_LENGTH = 120;
