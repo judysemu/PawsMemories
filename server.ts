@@ -19,7 +19,7 @@ import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import { installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, createEmailVerification, consumeEmailVerification, secondsSinceLastEmailVerification, claimFreeImage, releaseFreeImage, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -1512,6 +1512,11 @@ async function startServer() {
   // --- Password reset (self-serve, email link via Resend) ------------------
   app.use("/api/auth/forgot-password", authLimiter);
   app.use("/api/auth/reset-password", authLimiter);
+  // Both verification routes send or consume tokens; rate-limit them the same
+  // way as the reset pair. The per-account resend floor is enforced separately
+  // inside the route, since authLimiter is per-IP.
+  app.use("/api/auth/send-verification", authLimiter);
+  app.use("/api/auth/verify-email", authLimiter);
 
   app.post("/api/auth/forgot-password", async (req, res) => {
     // Always respond with the same generic 200 — never reveal whether an email
@@ -1564,6 +1569,79 @@ async function startServer() {
     } catch (err: any) {
       console.error("reset-password error:", err?.message || err);
       return res.status(500).json({ error: "Could not reset your password. Please try again." });
+    }
+  });
+
+  // --- Email verification -------------------------------------------------
+  // Deliberately mirrors the password-reset pair above: hash-only token
+  // storage, single use, SQL-enforced expiry, and a uniform generic response.
+  // Verification gates the free first image, so it is an abuse boundary, not a
+  // cosmetic badge.
+
+  /** Minimum seconds between verification sends for one account. */
+  const VERIFICATION_RESEND_FLOOR_SECONDS = 60;
+  /** Verification links live longer than password resets — this is not a
+   *  credential-recovery path, and a longer window means fewer resends. */
+  const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+  app.post("/api/auth/send-verification", requireAuth, async (req: AuthedRequest, res) => {
+    // One generic response for every outcome. A signed-in caller must not be
+    // able to probe whether a send happened, and the client does not need to
+    // know: it reads emailVerified from the user object either way.
+    const generic = { success: true, message: "If your address still needs verifying, a link is on its way." };
+    try {
+      const user = await findUserByPhone(req.user!.phone);
+      if (!user || !user.email || user.email_verified) return res.json(generic);
+
+      // Resend floor. authLimiter caps per-IP bursts, but a logged-in session
+      // could still be used to repeatedly mail a third party's address, which
+      // is what actually damages sender reputation.
+      const age = await secondsSinceLastEmailVerification(user.phone);
+      if (age !== null && age < VERIFICATION_RESEND_FLOOR_SECONDS) return res.json(generic);
+
+      const { raw, hash } = generateResetToken();
+      await createEmailVerification(user.phone, user.email, hash, new Date(Date.now() + VERIFICATION_TTL_MS));
+      const appUrl = process.env.APP_URL || "https://pawsome3d.com";
+      const link = `${appUrl}/verify-email?token=${raw}`;
+      await sendMail({
+        to: user.email,
+        subject: "Confirm your email — your free PawPrint image is waiting",
+        html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.6">
+          <h2>One quick step, then your free image 🐾</h2>
+          <p>Confirm this is your email address and we'll unlock your first AI pet image — free, on us.</p>
+          <p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#442a22;color:#fff;border-radius:8px;text-decoration:none">Confirm my email</a></p>
+          <p style="color:#666;font-size:13px">This link expires in 24 hours and can be used once. If you didn't create a Pawsome3D account, you can safely ignore this email.</p>
+        </div>`,
+        replyTo: "rob@stelar.host",
+      });
+      return res.json(generic);
+    } catch (err: any) {
+      // Never surface send failures — they would leak whether an address is
+      // registered, and the caller can simply request another link.
+      console.error("send-verification error:", err?.message || err);
+      return res.json(generic);
+    }
+  });
+
+  app.post("/api/auth/verify-email", async (req, res) => {
+    try {
+      const token = String(req.body?.token || "");
+      if (!token) return res.status(400).json({ error: "Verification token is required." });
+      const phone = await consumeEmailVerification(hashResetToken(token));
+      if (!phone) {
+        // One message for invalid, expired, already-used, and address-changed.
+        // Distinguishing them tells an attacker which tokens once existed.
+        return res.status(400).json({ error: "This verification link is invalid or has expired. Request a new one from your profile." });
+      }
+      const user = await findUserByPhone(phone);
+      return res.json({
+        success: true,
+        message: "Email confirmed. Your free image is unlocked!",
+        user: user ? toPublicUser(user, TERMS_VERSION) : null,
+      });
+    } catch (err: any) {
+      console.error("verify-email error:", err?.message || err);
+      return res.status(500).json({ error: "Could not confirm your email. Please try again." });
     }
   });
 
