@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 50;
+export const CURRENT_SCHEMA_VERSION = 51;
 
 export interface Migration {
   version: number;
@@ -2424,6 +2424,31 @@ export const MIGRATIONS: Migration[] = [
         topic VARCHAR(64) NOT NULL,
         received_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         KEY idx_shopify_webhook_topic (topic, received_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 51,
+    name: "email_verification_tokens",
+    statements: [
+      // Mirrors password_resets: only the SHA-256 hash of the token is stored,
+      // rows are single-use via used_at, and expiry is enforced in SQL.
+      //
+      // `email` records the address the token was actually sent to. The token
+      // proves control of THAT address, so consuming it must not verify a
+      // different one if the account email changed in between. Without this
+      // column a user could request a link, change their email, then click the
+      // link and have the new, unproven address marked verified.
+      `CREATE TABLE IF NOT EXISTS email_verifications (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        user_phone  VARCHAR(32) NOT NULL,
+        email       VARCHAR(190) NOT NULL,
+        token_hash  VARCHAR(64) NOT NULL,
+        expires_at  TIMESTAMP NOT NULL,
+        used_at     TIMESTAMP NULL,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_email_verif_user (user_phone),
+        INDEX idx_email_verif_token (token_hash)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },

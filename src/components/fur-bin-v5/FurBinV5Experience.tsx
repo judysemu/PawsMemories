@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FolderPlus,
   History,
+  Image as ImageIcon,
   Library,
   Loader2,
   PackageOpen,
@@ -65,7 +66,36 @@ function Badge({ badge }: { badge: FurBinItem["badges"][number] }) {
   );
 }
 
+/**
+ * True when the item's current version is a flat image rather than a 3D model.
+ * Fur Bin holds both: generated GLBs and, since the free-first-image work, 2D
+ * artwork. The asset registry was already type-agnostic, so the only thing that
+ * needed to learn the difference is the renderer.
+ */
+export function isImageItem(item: FurBinItem): boolean {
+  const current =
+    item.versions.find((version) => version.isCurrent) ||
+    item.versions.find((version) => version.versionNumber === item.currentVersionNumber) ||
+    item.versions[0];
+  return !!current?.mimeType?.startsWith("image/");
+}
+
 function Preview({ item, detail = false }: { item: FurBinItem; detail?: boolean }) {
+  // A 2D asset must never reach PetModelViewer: model-viewer cannot decode a
+  // PNG and renders an empty stage with no error, which reads as a broken
+  // item. For images the signed URL IS the artwork, so show it directly.
+  if (isImageItem(item)) {
+    const src = item.signedViewUrl || item.coverUrl;
+    if (src) {
+      return <img className="furbin-v5-preview" src={src} alt={`Artwork: ${item.title}`} />;
+    }
+    return (
+      <div className="furbin-v5-preview furbin-v5-preview-fallback" role="img" aria-label={`${item.title}, preview unavailable`}>
+        <ImageIcon aria-hidden="true" size={38} />
+        <span>Preview is still preparing</span>
+      </div>
+    );
+  }
   if (detail && item.signedViewUrl) {
     return (
       <PetModelViewer

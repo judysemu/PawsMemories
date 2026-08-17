@@ -2,6 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { Screen, UserProfile, Creation, Album, PublicUser } from "./types";
 import SignUp from "./components/SignUp";
 import ResetPassword from "./components/ResetPassword";
+import VerifyEmail from "./components/VerifyEmail";
 import AnimationStudio from "./components/AnimationStudio";
 import Welcome from "./components/Welcome";
 import Tutorial from "./components/Tutorial";
@@ -583,6 +584,13 @@ export default function App() {
   // before auth/warehouse so a logged-out user can reset from any deploy target.
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
     return <ResetPassword />;
+  }
+
+  // Standalone email-confirmation page. Rendered before auth for the same
+  // reason as the reset page: the emailed link is frequently opened in a
+  // different browser than the one holding the session.
+  if (typeof window !== "undefined" && window.location.pathname === "/verify-email") {
+    return <VerifyEmail />;
   }
 
   // While we check for an existing session, show a lightweight loader.

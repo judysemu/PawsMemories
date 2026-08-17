@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { UserProfile, PublicUser } from "../types";
 import { User, Zap, Flame, LogOut, Sun, Moon, Trophy, MapPin, History, Camera, ImagePlus, Trash2, Loader2, Gift, Shield, FileText, Mail, Phone, Download, AlertTriangle, Share2, ExternalLink } from "lucide-react";
-import { getCreditHistory, CreditTxn, getUserPhotos, addUserPhoto, deleteUserPhoto, uploadProfilePhoto, UserPhoto, authedFetch, fetchStorageUsage, purchaseStorageGb, fetchHiddenAvatars, restoreAvatar, type StorageUsage } from "../api";
+import { getCreditHistory, CreditTxn, getUserPhotos, addUserPhoto, deleteUserPhoto, uploadProfilePhoto, UserPhoto, authedFetch, fetchStorageUsage, purchaseStorageGb, fetchHiddenAvatars, restoreAvatar, sendVerificationEmail, type StorageUsage } from "../api";
 import StorageMeter from "./StorageMeter";
 
 interface ProfileScreenProps {
@@ -51,6 +51,22 @@ export default function ProfileScreen({
 
   // Editable fields
   const [editFullName, setEditFullName] = useState("");
+  const [verifySending, setVerifySending] = useState(false);
+  const [verifyNote, setVerifyNote] = useState<string | null>(null);
+
+  // The server answers identically whether or not it actually sent (already
+  // verified, throttled, unknown), so there is nothing to branch on here.
+  const requestEmailVerification = async () => {
+    setVerifySending(true);
+    setVerifyNote(null);
+    try {
+      setVerifyNote(await sendVerificationEmail());
+    } catch (err: any) {
+      setVerifyNote(err?.message || "Could not send the link. Please try again shortly.");
+    } finally {
+      setVerifySending(false);
+    }
+  };
   const [editBio, setEditBio] = useState("");
   const [editZip, setEditZip] = useState("");
   const [saving, setSaving] = useState(false);
@@ -203,6 +219,22 @@ export default function ProfileScreen({
             <p className="text-xs text-on-surface-variant truncate">{userProfile.email}
               {pData?.user?.emailVerified && <span className="ml-1 text-emerald-500 font-bold">✓</span>}
             </p>
+            {/* The only in-app way to request a confirmation link. Existing
+                accounts were never verified, so this is also how they unlock
+                their free image. */}
+            {pData?.user && !pData.user.emailVerified && (
+              <div className="mt-1">
+                <button
+                  type="button"
+                  onClick={requestEmailVerification}
+                  disabled={verifySending}
+                  className="text-[11px] font-bold text-primary hover:underline disabled:opacity-60"
+                >
+                  {verifySending ? "Sending…" : "Confirm your email to unlock a free image"}
+                </button>
+                {verifyNote && <p className="text-[10px] text-on-surface-variant mt-0.5">{verifyNote}</p>}
+              </div>
+            )}
             {pData?.user?.phoneVerified && (
               <p className="text-[10px] text-emerald-500 flex items-center gap-1 mt-0.5">
                 <Phone size={10} /> Phone verified

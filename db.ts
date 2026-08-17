@@ -165,6 +165,7 @@ export interface UserRow {
   referral_code?: string | null;
   referred_by?: string | null;
   free_avatar_available?: number;
+  free_image_claimed?: number;
 }
 
 /** Public-safe shape returned to the client. */
@@ -189,6 +190,8 @@ export interface PublicUser {
   bio?: string | null;
   phoneVerified?: boolean;
   emailVerified?: boolean;
+  /** True when the account has verified its email and not yet used its one free image. */
+  freeImageAvailable?: boolean;
   referralCode?: string | null;
   profileBonusGranted?: boolean;
   acceptedTermsVersion?: string | null;
@@ -224,6 +227,7 @@ export function toPublicUser(userRow: any, currentTermsVersion?: string): Public
     bio: userRow.bio || null,
     phoneVerified: !!userRow.phone_verified,
     emailVerified: !!userRow.email_verified,
+    freeImageAvailable: !!userRow.email_verified && !userRow.free_image_claimed,
     referralCode: userRow.referral_code || null,
     profileBonusGranted: !!userRow.profile_bonus_granted,
     acceptedTermsVersion,
@@ -301,6 +305,9 @@ export async function initDb(): Promise<void> {
       { name: "pawprint_tokens",    ddl: "ADD COLUMN pawprint_tokens INT NOT NULL DEFAULT 0" },
       { name: "referral_code",      ddl: "ADD COLUMN referral_code VARCHAR(32) NULL" },
       { name: "referred_by",        ddl: "ADD COLUMN referred_by VARCHAR(32) NULL" },
+      // One free generated image per verified account. Claimed via a conditional
+      // UPDATE (see claimFreeImage) so a double-submit cannot yield two frees.
+      { name: "free_image_claimed", ddl: "ADD COLUMN free_image_claimed TINYINT(1) NOT NULL DEFAULT 0" },
     ];
     for (const col of requiredColumns) {
       if (!columnNames.includes(col.name)) {
@@ -1855,6 +1862,34 @@ export async function releaseFreeAvatar(phone: string): Promise<void> {
   await getPool().query(
     `UPDATE users SET free_avatar_available = 1
       WHERE phone = ? AND free_avatar_available = 0`,
+    [phone]
+  );
+}
+
+/**
+ * Claim the one free generated image. The entitlement is spent by the same
+ * conditional UPDATE that checks it, so two concurrent requests cannot both
+ * win: the second sees affectedRows === 0. Verification is re-checked here
+ * rather than trusted from the caller's session, which may predate a change.
+ */
+export async function claimFreeImage(phone: string): Promise<boolean> {
+  const [result] = await getPool().query(
+    `UPDATE users SET free_image_claimed = 1
+      WHERE phone = ? AND email_verified = 1 AND free_image_claimed = 0`,
+    [phone]
+  ) as any;
+  return result.affectedRows === 1;
+}
+
+/**
+ * Give the free image back after a failed generation, so a provider error does
+ * not silently burn the customer's single free credit. Mirrors
+ * releaseFreeAvatar; the guard keeps it idempotent under retry.
+ */
+export async function releaseFreeImage(phone: string): Promise<void> {
+  await getPool().query(
+    `UPDATE users SET free_image_claimed = 0
+      WHERE phone = ? AND free_image_claimed = 1`,
     [phone]
   );
 }
@@ -3894,6 +3929,93 @@ export async function listPawprintShopifyOrders(userPhone: string) {
 // ---------------------------------------------------------------------------
 // Password reset
 // ---------------------------------------------------------------------------
+
+/**
+ * Store an email-verification token hash, invalidating any prior unused tokens
+ * for the user so only one link is ever live. `email` is the address the token
+ * is being sent to; consumeEmailVerification refuses to verify if the account
+ * email has changed since, so a link cannot be redirected to a new address.
+ */
+export async function createEmailVerification(
+  userPhone: string,
+  email: string,
+  tokenHash: string,
+  expiresAt: Date,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE email_verifications SET used_at = NOW() WHERE user_phone = ? AND used_at IS NULL",
+    [userPhone]
+  );
+  await getPool().query(
+    "INSERT INTO email_verifications (user_phone, email, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+    [userPhone, email.toLowerCase(), tokenHash, expiresAt]
+  );
+}
+
+/**
+ * Seconds since the newest unused verification token was issued, or null if
+ * there is none. Backs the resend floor: a signed-in session must not be able
+ * to mailbomb a third party's address, which is the abuse that damages sender
+ * reputation and therefore every other transactional email.
+ */
+export async function secondsSinceLastEmailVerification(userPhone: string): Promise<number | null> {
+  const [rows] = await getPool().query(
+    `SELECT TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age
+       FROM email_verifications
+      WHERE user_phone = ? AND used_at IS NULL
+      ORDER BY id DESC LIMIT 1`,
+    [userPhone]
+  ) as any;
+  if (!rows || rows.length === 0) return null;
+  return Number(rows[0].age);
+}
+
+/**
+ * Validate a verification-token hash. On success marks the token used, flips
+ * users.email_verified, and returns the user key. Returns null for anything
+ * invalid — unknown, expired, already used, or issued for an address the
+ * account no longer uses. Callers must not distinguish these to the client.
+ *
+ * The token row and the users row are updated together in a transaction: a
+ * token consumed without the flag being set would be unrecoverable, since the
+ * link is single-use and the customer has no way to retry it.
+ */
+export async function consumeEmailVerification(tokenHash: string): Promise<string | null> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      `SELECT v.id, v.user_phone, v.email, u.email AS current_email
+         FROM email_verifications v
+         JOIN users u ON u.phone = v.user_phone
+        WHERE v.token_hash = ? AND v.used_at IS NULL AND v.expires_at > NOW()
+        ORDER BY v.id DESC LIMIT 1
+        FOR UPDATE`,
+      [tokenHash]
+    ) as any;
+    if (!rows || rows.length === 0) {
+      await conn.rollback();
+      return null;
+    }
+    const row = rows[0];
+    // The token proves control of the address it was mailed to. If the account
+    // email changed after issue, this token proves nothing about the new one.
+    if (String(row.email || "").toLowerCase() !== String(row.current_email || "").toLowerCase()) {
+      await conn.query("UPDATE email_verifications SET used_at = NOW() WHERE id = ?", [row.id]);
+      await conn.commit();
+      return null;
+    }
+    await conn.query("UPDATE email_verifications SET used_at = NOW() WHERE id = ?", [row.id]);
+    await conn.query("UPDATE users SET email_verified = 1 WHERE phone = ?", [row.user_phone]);
+    await conn.commit();
+    return row.user_phone as string;
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
 
 /** Store a reset-token hash, invalidating any prior unused tokens for the user. */
 export async function createPasswordReset(userPhone: string, tokenHash: string, expiresAt: Date): Promise<void> {

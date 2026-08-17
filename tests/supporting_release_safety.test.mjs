@@ -68,8 +68,11 @@ test("known landing and Animator surfaces do not advertise absent release media"
   }
 });
 
-test("README and Render blueprint do not point operators at absent documents", () => {
-  const source = `${fs.readFileSync("README.md", "utf8")}\n${fs.readFileSync("render.yaml", "utf8")}`;
+// render.yaml was removed when the blender worker moved from Render.com to
+// Azure Container Apps; the Render service no longer exists. README remains the
+// operator-facing document this guard protects.
+test("README does not point operators at absent documents", () => {
+  const source = fs.readFileSync("README.md", "utf8");
   for (const missing of [
     "AR_PET_SIM_SPEC.md",
     "AR_PET_SIM_HANDOFF.md",

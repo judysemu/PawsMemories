@@ -200,6 +200,33 @@ export async function resetPassword(token: string, newPassword: string): Promise
   return data.message || "Password updated.";
 }
 
+/**
+ * Ask for a fresh verification link. The server answers identically whether or
+ * not it sent one (already verified, throttled, or unknown address all look the
+ * same), so this resolves rather than throwing on those cases by design.
+ */
+export async function sendVerificationEmail(): Promise<string> {
+  const res = await authedFetch("/api/auth/send-verification", { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res, "Could not send the verification email."));
+  const data = await res.json();
+  return data.message || "If your address still needs verifying, a link is on its way.";
+}
+
+/**
+ * Confirm an emailed verification token. Returns the refreshed user so the
+ * caller can pick up emailVerified and freeImageAvailable without a reload.
+ */
+export async function verifyEmail(token: string): Promise<{ message: string; user: PublicUser | null }> {
+  const res = await fetch("/api/auth/verify-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Could not confirm your email."));
+  const data = await res.json();
+  return { message: data.message || "Email confirmed.", user: (data.user as PublicUser) || null };
+}
+
 /** Restore the session on app load. Returns null if there is no valid session. */
 export async function fetchMe(): Promise<PublicUser | null> {
   if (!getToken()) return null;

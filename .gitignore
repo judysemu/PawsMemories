@@ -15,3 +15,6 @@ data/
 PawsMemories/
 .worktrees/
 scripts/verify-shopify-checkout-output/
+
+# Generated scratch artifacts (usdz/glb exports) — not release fixtures
+fixtures/scratch/

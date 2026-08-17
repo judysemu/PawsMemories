@@ -30,7 +30,9 @@ test("PawPrint personalization is an explicit Shopify boolean metafield", () => 
 });
 
 test("schema v50 persists dual PawPrint assets and the last-known-good catalog", () => {
-  assert.equal(CURRENT_SCHEMA_VERSION, 50);
+  // Migration 50 must remain present and intact; later migrations may raise the
+  // current version, so this asserts a floor rather than an exact match.
+  assert.ok(CURRENT_SCHEMA_VERSION >= 50);
   const migration = MIGRATIONS.find((item) => item.version === 50);
   assert.ok(migration);
   const sql = migration.statements.join("\n");
