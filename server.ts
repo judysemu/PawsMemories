@@ -143,6 +143,7 @@ import { isAtLeastAge } from "./server/accountValidation";
 import { PrintUploadValidationError, validatePrintUpload } from "./server/printUploadValidation";
 import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
+import { createFreeImageRouter } from "./server/free-image/routes";
 import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
 import { getShopifyCatalogSyncStatus, listPublicStoreProducts, synchronizeShopifyCatalog } from "./server/shopifyCatalog";
 import { printfulCatalogConfigured, searchProducts, listVariants, getTemplateContext, clearCatalogueCache } from "./server/printfulCatalog";
@@ -4233,6 +4234,18 @@ async function startServer() {
     if (!userPhone) throw new Error("Authenticated image-generation owner is required.");
     return generateImageWithFallback([...imageParts, { text: referencePrompt }], "referenceImage", userPhone, errRef);
   }
+
+  // Free first image. Mounted here because it depends on the image generator
+  // defined just above. paidLimiter applies even though nothing is charged: it
+  // is a generation endpoint, and the entitlement check happens inside.
+  app.use(
+    "/api/free-image",
+    paidLimiter,
+    createFreeImageRouter(getPool, {
+      generateImage: (prompt, userPhone, aspectRatio) =>
+        generateImageWithFallback([{ text: prompt }], "free-first-image", userPhone, undefined, aspectRatio),
+    }),
+  );
 
   app.post("/api/avatars", requireAuth, paidLimiter, async (req: AuthedRequest, res) => {
     let creditReservationId: string | null = null;

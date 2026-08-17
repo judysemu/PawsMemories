@@ -11,5 +11,8 @@ Disallow: /profile
 Disallow: /albums
 Disallow: /request-memory
 Disallow: /sign-up
+# Token-bearing links from transactional email. Never indexable.
+Disallow: /verify-email
+Disallow: /reset-password
 
 Sitemap: https://pawsome3d.com/sitemap.xml

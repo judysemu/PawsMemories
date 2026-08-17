@@ -108,3 +108,65 @@ test("verify-email gives one message for every failure mode", () => {
 test("the public user exposes the free-image entitlement without leaking the raw flag", () => {
   assert.match(db, /freeImageAvailable: !!userRow\.email_verified && !userRow\.free_image_claimed/);
 });
+
+// ─── Free first image ───────────────────────────────────────────────────────
+
+const freeImage = fs.readFileSync("server/free-image/routes.ts", "utf8");
+const furBinUi = fs.readFileSync("src/components/fur-bin-v5/FurBinV5Experience.tsx", "utf8");
+const app = fs.readFileSync("src/App.tsx", "utf8");
+const robots = fs.readFileSync("public/robots.txt", "utf8");
+
+test("the free image is claimed before any generation spend", () => {
+  const claimAt = freeImage.indexOf("await claimFreeImage(");
+  const generateAt = freeImage.indexOf("deps.generateImage(");
+  assert.ok(claimAt > 0 && generateAt > 0);
+  assert.ok(claimAt < generateAt, "the entitlement must be claimed before calling the provider");
+});
+
+test("a failed generation releases the entitlement rather than burning it", () => {
+  assert.match(freeImage, /catch[\s\S]*await releaseFreeImage\(userPhone\)/);
+  // A failed release must be loud — the entitlement is stuck spent otherwise.
+  assert.match(freeImage, /FAILED TO RELEASE/);
+});
+
+test("free-image failures distinguish unverified from already-used", () => {
+  assert.match(freeImage, /EMAIL_NOT_VERIFIED/);
+  assert.match(freeImage, /FREE_IMAGE_ALREADY_USED/);
+  assert.match(freeImage, /status\(403\)/);
+  assert.match(freeImage, /status\(402\)/);
+});
+
+test("the free image is dark by default and refuses without its delivery surface", () => {
+  assert.match(freeImage, /FREE_FIRST_IMAGE_ENABLED === "true"/);
+  assert.match(freeImage, /isFurBinV5Enabled\(\)/);
+  assert.match(freeImage, /FEATURE_DISABLED/);
+});
+
+test("the generated image is registered as a versioned, owned asset", () => {
+  assert.match(freeImage, /INSERT INTO assets/);
+  assert.match(freeImage, /INSERT INTO asset_versions/);
+  assert.match(freeImage, /furBin\.registerItem/);
+  assert.match(freeImage, /free_generated_image/);
+});
+
+test("Fur Bin renders 2D assets as images, never through the 3D viewer", () => {
+  assert.match(furBinUi, /export function isImageItem/);
+  assert.match(furBinUi, /mimeType\?\.startsWith\("image\/"\)/);
+  // The image branch must return before the PetModelViewer branch is reached.
+  const imageBranch = furBinUi.indexOf("if (isImageItem(item))");
+  const viewerBranch = furBinUi.indexOf("if (detail && item.signedViewUrl)");
+  assert.ok(imageBranch > 0 && viewerBranch > 0);
+  assert.ok(imageBranch < viewerBranch, "images must be handled before the 3D viewer branch");
+});
+
+test("the verify-email page is reachable without a session", () => {
+  assert.match(app, /window\.location\.pathname === "\/verify-email"/);
+  assert.match(app, /<VerifyEmail \/>/);
+  // It must be rendered before the auth gate, like the reset page.
+  assert.ok(app.indexOf('"/verify-email"') < app.indexOf("if (!authChecked)"));
+});
+
+test("token-bearing links are never indexable", () => {
+  assert.match(robots, /Disallow: \/verify-email/);
+  assert.match(robots, /Disallow: \/reset-password/);
+});
