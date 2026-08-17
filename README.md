@@ -42,7 +42,7 @@ body-rig profile only; it does not claim to embed AI behavior inside a GLB.
 - **AI / 3D:** Google Gemini for chat, Imagen for stills, Veo for video. **Tripo3D** for Image-to-3D mesh generation (replaced Meshy for higher quality and reliability). Blender 3D via dedicated `bpy` microservice with EEVEE PBR rendering and 24-frame cycles.
 - **Payments:** Stripe Checkout for credit packs and configured physical fulfillment, with signed webhook verification
 - **Notifications:** Optional email/SMS notifications for supported generation and fulfillment events
-- **Hosting:** Hostinger for main app. Render.com for the Blender microservice.
+- **Hosting:** Hostinger for the main app. **Azure Container Apps** for the Blender microservice (`pawsome3d-blender-worker`, resource group `pawsome3d-blender-worker-prod`, East US).
 
 ## How it fits together
 
@@ -109,7 +109,7 @@ Pawsome3D features an interactive, Tamagotchi-style pet avatar system with the f
   - *Reason*: Formulates a step-by-step Blender build plan with breed-specific anatomy, facial rigging (jaw, ears, eyes), and 24-frame cycles.
   - *Act & Verify*: Generates and executes Blender Python (`bpy`) scripts iteratively, verifying geometry and bone hierarchies.
   - *Visual-Verify*: Uses Gemini Vision to compare the final 3D viewport render against the original photo, automatically recovering from anatomical anomalies.
-- **Microservice Architecture**: Because the main app runs on Hostinger shared hosting, the generated `bpy` scripts are sent securely via HTTP to a dedicated Docker microservice (`blender-worker`) running on Render, which safely executes the render and returns the 3D Avatar.
+- **Microservice Architecture**: Because the main app runs on Hostinger shared hosting, the generated `bpy` scripts are sent securely via HTTP to a dedicated Docker microservice (`blender-worker`) running on **Azure Container Apps**, which safely executes the render and returns the 3D Avatar.
 - **Life-like Biological Economy**: Avatars track their **Food** and **Water** levels. Both levels decay naturally over time (5% per hour). Users must feed and water their pets to keep them healthy.
 - **Daily Treats**: Claiming the daily login streak rewards users with virtual **Treats** in addition to credits. Treats can be fed to avatars for bonus food.
 - **3D Playpen Yard**: Displays pets in a grassy yard featuring:
@@ -194,7 +194,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `HEYGEN_API_KEY` / `HEYGEN_DEFAULT_VOICE_ID` | HeyGen API for talking avatar video generation |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_MODEL_ID` / `ELEVENLABS_DEFAULT_VOICE_ID` | Animator live voice preview; defaults are documented in `.env.example` |
 | `RHUBARB_BIN` | Optional absolute path to the Rhubarb Linux executable; enables Tier B visemes and falls back to Tier A when absent |
-| `BLENDER_WORKER_URL` | URL to the separate blender microservice (e.g. `https://pawsmemories.onrender.com/render`) |
+| `BLENDER_WORKER_URL` | URL of the Azure Container Apps blender microservice (e.g. `https://pawsome3d-blender-worker.<env>.eastus.azurecontainerapps.io`) |
 | `WORKER_SHARED_SECRET` | Secret key for blender-worker auth |
 | `MODEL_BUILD_V3_ENABLED` / `RIG_PIPELINE_V4_ENABLED` | Default-off durable model and measured rig rollout flags |
 | `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Fur Bin API and build-time UI flags; enabled for generated GLB delivery |
@@ -207,7 +207,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `SLANT3D_API_KEY` / `SLANT3D_PLATFORM_ID` / `SLANT3D_DEFAULT_FILAMENT_ID` | Slant3D API credentials and print material used by the Stationery adapter |
 | `PRINTFUL_WEBHOOK_SECRET` / `SLANT3D_WEBHOOK_SECRET` | Provider callback HMAC secrets |
 | `WAGS_V2_ENABLED` / `WAGS_STRIPE_WEBHOOK_SECRET` | Keep `false` until the separate Wags Stripe webhook and sandbox gate pass and one Plus box can reserve its seven image assets atomically. Plus materialization currently fails closed before the first provider call. |
-| `BIM_V2_ENABLED` / `VITE_BIM_V2_ENABLED` | Keep both `false` until accepted-model, Shell-worker, Render IFC, and browser gates pass |
+| `BIM_V2_ENABLED` / `VITE_BIM_V2_ENABLED` | Keep both `false` until accepted-model, Shell-worker, IFC-worker, and browser gates pass |
 | `INHOUSE_SPATIAL_GENERATOR_ENABLED` | Keep `false` until the Pixel/Hermes, Blender, attachment-source, and orchestrator readiness blockers are resolved. If enabled early, the release now fails closed before any spatial-job PupCoin reservation. Organic avatars still use Tripo. |
 | `LAYER8_BASE_URL` | Base URL for Layer8 control plane (e.g., `https://layer8.pawsome.ai`) | |
 | `LAYER8_TENANT_API_KEY` | Tenant API key for Layer8 spatial operations | |

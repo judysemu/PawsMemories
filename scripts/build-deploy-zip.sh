@@ -109,7 +109,19 @@ bootstrapServer.listen(port, "0.0.0.0", () => {
 });
 NODE
 
-MUST_HAVE=(package.json package-lock.json server.cjs dist/index.html dist/server.cjs dist/release-manifest.json)
+# Passenger restart trigger. Hostinger's deploy only copies files into the app
+# root; it does NOT restart the Passenger process. Passenger keeps its existing
+# workers alive until tmp/restart.txt is newer than the running app, so a deploy
+# could leave pre-deploy workers serving old code alongside new ones. That is
+# exactly what stranded the fal.ai cutover: jobs written by new workers
+# (provider=fal-ai) were polled by a surviving MuAPI worker, which 404'd on a
+# fal request id. Stamping a fresh restart.txt into every archive makes the
+# restart automatic and the split-brain impossible.
+mkdir -p "$STAGING_DIR/tmp"
+printf 'restart requested for commit %s at %s\n' \
+  "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGING_DIR/tmp/restart.txt"
+
+MUST_HAVE=(package.json package-lock.json server.cjs tmp/restart.txt dist/index.html dist/server.cjs dist/release-manifest.json)
 for required in "${MUST_HAVE[@]}"; do
   if [ ! -f "$STAGING_DIR/$required" ]; then
     echo "Required deployment file is missing: $required"
