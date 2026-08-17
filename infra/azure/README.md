@@ -13,63 +13,15 @@ live acceptance gates below pass.
 
 - `main.bicep` + `platform.bicep`: stable core/orchestrator, storage, Key Vault,
   and optional GibiWorld resources in `coreLocation` (currently East US).
-- `gpu-lane-main.bicep`: independent subscription-level GPU entry point. It
-  creates only the GPU resource group and delegates the private lane and core
-  integration modules.
-- `gpu-lane.bicep`: one private-only TRELLIS/Blender VM, its non-overlapping
-  regional VNet, NSG, managed identity, NVIDIA extension, and shutdown guard.
-- `core-gpu-integration.bicep`: adds the reverse VNet peering and grants the GPU
-  identity access to the existing private model/artifact storage and Key Vault.
-  It does not redeploy the core VM, GibiWorld VM, their NICs, or their disks.
+- `container-apps-gpu-main.bicep` + `container-apps-gpu.bicep`: the serverless
+  A100 lane (see below). This is the only supported GPU path.
+- `pbr-worker-main.bicep`: the PBR worker environment and registry.
 
-The stable VNet uses `10.42.0.0/16`, with the exact core subnet
-`10.42.1.0/24`. The independent GPU VNet defaults to `10.43.0.0/16`, with the
-worker at `10.43.2.10`. Two-way global VNet peering provides private routing.
-The GPU VM has no public IP. Its subnet uses an explicit egress-only NAT
-gateway because new Azure VNets do not receive implicit default outbound
-access. The NAT address is not attached to the VM and creates no inbound path.
-The NSG allows TCP 22, 8000, and 10000 only from `10.42.1.0/24`, then explicitly
-denies other peered-network and Internet inbound traffic.
+The stable VNet uses `10.42.0.0/16`, with the exact core subnet `10.42.1.0/24`.
 
-At runtime, TRELLIS and Blender exchange artifacts only on the private GPU
-host. `/opt/paws-gpu/jobs` is writable by TRELLIS and mounted read-only at
-`/shared-model-artifacts` in Blender. The shared `WORKER_SHARED_SECRET`
-authenticates service calls and belongs only in the VM secret files.
+The dedicated GPU VM lane that formerly occupied this section was retired; see
+"GPU: the dedicated VM lane is retired" below.
 
-## Same-subscription and cross-subscription modes
-
-The default is the existing subscription:
-
-```bash
-export AZURE_CORE_SUBSCRIPTION_ID="<existing-core-subscription-id>"
-export AZURE_GPU_LOCATION="<approved-region>"
-```
-
-If Microsoft grants GPU quota on another subscription under the same startup
-billing account, add:
-
-```bash
-export AZURE_GPU_SUBSCRIPTION_ID="<gpu-quota-subscription-id>"
-```
-
-The deploy helper keeps the core subscription unchanged and submits the GPU
-deployment to `AZURE_GPU_SUBSCRIPTION_ID`. Cross-subscription mode requires:
-
-1. Both subscriptions are enabled in the same Microsoft Entra tenant.
-2. The deployment identity can create resources in the GPU subscription.
-3. It has Network Contributor permission on the existing core VNet so it can
-   add the reverse peering.
-4. It has permission to create role assignments on the existing Key Vault and
-   storage account (Owner or User Access Administrator plus the needed resource
-   write permissions).
-5. `Microsoft.Network` is registered in both subscriptions; the GPU
-   subscription also has the providers checked by `preflight.sh` registered.
-6. The two VNet address spaces remain non-overlapping.
-
-The script stops if the subscription tenant IDs differ. Cross-tenant peering is
-deliberately outside this deployment contract. It reads every address prefix on
-the existing core VNet plus the exact core subnet before planning, and rejects
-any overlapping or invalid GPU network range before any Azure write.
 
 ## Foundation commands
 
@@ -88,58 +40,28 @@ CONFIRM_AZURE_SPEND=YES ./infra/azure/scripts/deploy.sh core-gibi
 `deploy.sh full` is intentionally refused. The GPU lane must never be smuggled
 into a foundation redeployment.
 
-## GPU quota and regional preflight
+## GPU: the dedicated VM lane is retired
 
-Set the exact region and SKU from the approved support response. The current
-24-vCPU A100 request is the default:
+The dedicated GPU VM lane (`gpu-lane.bicep`, `gpu-lane-main.bicep`,
+`core-gpu-integration.bicep`, `deploy-gpu-lane.sh`, `preflight.sh`,
+`validate-gpu-network.py`) has been removed from this repository.
 
-```bash
-AZURE_GPU_LOCATION="<approved-region>" \
-AZURE_GPU_VM_SIZE=Standard_NC24ads_A100_v4 \
-./infra/azure/scripts/preflight.sh
-```
+It was never deployable. GPU VM quota is **0 across all 63 physical Azure
+regions** on both subscriptions in this account, for every NC/ND/NV family, and
+`Subscription Dedicated NCA100 Gpus` is 0/0. The cross-subscription escape
+hatch it was built around does not help: the second subscription is empty, has
+no resource providers registered, and holds no GPU quota either. A pinned A100
+would also cost four figures a month and idle at full price.
 
-Preflight reads quota and usage from the GPU subscription and GPU region only.
-It does not add core or GibiWorld vCPUs to the regional requirement. It verifies
-the applied family limit, remaining family and total regional quota, the SKU's
-subscription restriction list, providers, and current retail rate. Quota and a
-clean SKU listing do not guarantee physical capacity; the first allocation is
-still the capacity proof.
+**Use the serverless Container Apps A100 lane below instead.** It bills per
+second of actual use with no idle charge, uses a different quota system from
+GPU VM quota, and a `Consumption-GPU-NC24-A100` workload profile is already
+provisioned and accepted on `pawspbr-pbr-a100-env` in East US.
 
-For an H100 approval, override the size explicitly:
-
-```bash
-AZURE_GPU_LOCATION="<approved-region>" \
-AZURE_GPU_VM_SIZE=Standard_NC40ads_H100_v5 \
-./infra/azure/scripts/preflight.sh
-```
-
-## GPU plan and deployment
-
-The GPU helper defaults to a read-only What-If. Review it and confirm that the
-stable core and GibiWorld VMs, NICs, public IPs, and disks have no changes:
-
-```bash
-AZURE_GPU_LOCATION="<approved-region>" \
-./infra/azure/scripts/deploy-gpu-lane.sh what-if
-```
-
-Only after quota, physical capacity expectations, What-If, and spend are
-accepted:
-
-```bash
-CONFIRM_AZURE_SPEND=YES \
-AZURE_GPU_LOCATION="<approved-region>" \
-./infra/azure/scripts/deploy-gpu-lane.sh apply
-```
-
-The deployment adds a peering and two narrowly scoped managed-identity roles to
-the existing foundation. It does not run `main.bicep` and does not move or
-recreate core/GibiWorld.
 
 ## Optional cross-tenant Container Apps A100 lane
 
-The VM lane above remains intact. `container-apps-gpu-main.bicep` and
+`container-apps-gpu-main.bicep` and
 `container-apps-gpu.bicep` add a separate, optional serverless-A100 target for
 an explicitly selected subscription and tenant. They never reference the core
 resource group, VNet, Key Vault, storage, or identity. This makes the lane

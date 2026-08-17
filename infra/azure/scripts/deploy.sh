@@ -8,7 +8,7 @@ fi
 
 mode="${1:-foundation}"
 if [[ "$mode" == "full" ]]; then
-  echo "The GPU lane is intentionally separate. Deploy core/Gibi here, then use deploy-gpu-lane.sh in the approved GPU region."
+  echo "The dedicated GPU VM lane was retired: GPU VM quota is 0 across every region on this account. Use the serverless Container Apps A100 lane (deploy-container-apps-gpu.sh) instead."
   exit 2
 fi
 if [[ "$mode" != "foundation" && "$mode" != "core-gibi" ]]; then
