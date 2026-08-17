@@ -162,5 +162,30 @@ EXPECTED_BRANCH="$BRANCH" \
 REQUIRE_CLEAN="$REQUIRE_CLEAN" \
 node scripts/verify-release-directory.mjs "$EXTRACT_DIR/dist"
 
+# Boot gate. Manifest and checksum verification prove the archive CONTAINS the
+# right files; they cannot prove the bundle RUNS. That gap shipped a release
+# whose CJS bundle threw at startup (import.meta.url is undefined once esbuild
+# bundles to CommonJS) while tsc, the test suite, and `tsx server.ts` were all
+# green — source and artifact are not the same thing. Boot the real artifact.
+echo "Boot-testing the packaged bundle..."
+SMOKE_PORT=$(( 39000 + RANDOM % 900 ))
+SMOKE_LOG=$(mktemp)
+( cd "$EXTRACT_DIR" && PORT="$SMOKE_PORT" node server.cjs > "$SMOKE_LOG" 2>&1 & echo $! > "$EXTRACT_DIR/.smoke.pid" )
+smoke_pid=$(cat "$EXTRACT_DIR/.smoke.pid" 2>/dev/null || echo "")
+smoke_ok=false
+for _ in $(seq 1 30); do
+  sleep 2
+  if curl -fsS --max-time 3 "http://127.0.0.1:${SMOKE_PORT}/healthz" >/dev/null 2>&1; then smoke_ok=true; break; fi
+done
+if [ -n "$smoke_pid" ]; then kill "$smoke_pid" 2>/dev/null || true; fi
+if [ "$smoke_ok" != true ]; then
+  echo "FAIL: the packaged bundle did not serve /healthz. Startup output:"
+  tail -30 "$SMOKE_LOG"
+  rm -f "$SMOKE_LOG"
+  exit 1
+fi
+rm -f "$SMOKE_LOG"
+echo "Boot test passed: bundle served /healthz."
+
 echo "Archive verification passed: $ZIP_NAME"
 echo "Archive SHA-256: $(shasum -a 256 "$ZIP_NAME" | awk '{print $1}')"
