@@ -19,7 +19,7 @@ import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
 import { installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
 import rateLimit from "express-rate-limit";
-import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, createEmailVerification, consumeEmailVerification, secondsSinceLastEmailVerification, claimFreeImage, releaseFreeImage, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
+import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, createEmailVerification, consumeEmailVerification, secondsSinceLastEmailVerification, claimFreeImage, releaseFreeImage, FREE_AVATAR_GATE, isFreeAvatarGateOpen, setAppSetting, addGateNotifyOptin, listPendingGateNotifications, markGateNotified, resetGateNotifications, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
 import {
   ImageGenerationBudgetError,
@@ -4243,6 +4243,71 @@ async function startServer() {
   // Free first image. Mounted here because it depends on the image generator
   // defined just above. paidLimiter applies even though nothing is charged: it
   // is a generation endpoint, and the entitlement check happens inside.
+  // ── Free-avatar window ───────────────────────────────────────────────────
+  // The window is opened and closed on your command, so it lives in
+  // app_settings rather than an env var: an env change would need a redeploy.
+
+  app.get("/api/free-avatar/gate", async (_req, res) => {
+    try {
+      res.json({ open: await isFreeAvatarGateOpen() });
+    } catch (err: any) {
+      console.error("[free-avatar/gate]", err?.message || err);
+      res.status(500).json({ error: "Could not read the window status." });
+    }
+  });
+
+  app.post("/api/free-avatar/notify-me", requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      await addGateNotifyOptin(req.user!.phone, FREE_AVATAR_GATE, String(req.body?.channel || "email"));
+      res.json({ success: true, message: "We'll email you when the window opens." });
+    } catch (err: any) {
+      console.error("[free-avatar/notify-me]", err?.message || err);
+      res.status(500).json({ error: "Could not save your reminder." });
+    }
+  });
+
+  app.post("/api/admin/free-avatar/gate", requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      if (!(await isUserAdmin(req.user!.phone))) return res.status(403).json({ error: "Admins only." });
+      const action = String(req.body?.action || "");
+      if (!["open", "close"].includes(action)) {
+        return res.status(400).json({ error: "Action must be open or close." });
+      }
+      await setAppSetting(FREE_AVATAR_GATE, action === "open" ? "open" : "closed", req.user!.phone);
+      if (action !== "open") return res.json({ success: true, open: false, notified: 0 });
+
+      // Opening a window makes every opt-in notifiable again, including people
+      // who were told about an earlier window. notified_at then stops anyone
+      // being told twice about THIS window.
+      await resetGateNotifications(FREE_AVATAR_GATE);
+      const pending = await listPendingGateNotifications(FREE_AVATAR_GATE);
+      const appUrl = process.env.APP_URL || "https://pawsome3d.com";
+      const notified: string[] = [];
+      // Sent one at a time rather than as a blast: a sudden burst of near
+      // identical mail is exactly the shape that trips spam heuristics, and
+      // verification mail depends on the same sender reputation.
+      for (const optin of pending) {
+        const sent = await sendMail({
+          to: optin.email,
+          subject: "🎉 The free 3D avatar window is open",
+          html: `<div style="font-family:system-ui,Arial,sans-serif;line-height:1.6">
+            <h2>Your free avatar is ready to claim 🐾</h2>
+            <p>The free 3D avatar window is open. Claim yours while it lasts — one per member.</p>
+            <p><a href="${appUrl}" style="display:inline-block;padding:10px 18px;background:#442a22;color:#fff;border-radius:8px;text-decoration:none">Claim my free avatar</a></p>
+            <p style="color:#666;font-size:13px">You asked to be told when this opened. You won't be emailed about this window again.</p>
+          </div>`,
+          replyTo: "rob@stelar.host",
+        });
+        if (sent) notified.push(optin.user_phone);
+      }
+      await markGateNotified(FREE_AVATAR_GATE, notified);
+      res.json({ success: true, open: true, notified: notified.length, eligible: pending.length });
+    } catch (err: any) {
+      console.error("[admin/free-avatar/gate]", err?.message || err);
+      res.status(500).json({ error: "Could not change the window." });
+    }
+  });
+
   app.use("/api/pawprints/purchase", createPawprintPurchaseRouter(getPool));
 
   // Paid orders become art on an interval, not inside the webhook: Shopify

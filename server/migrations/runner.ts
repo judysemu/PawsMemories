@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 52;
+export const CURRENT_SCHEMA_VERSION = 53;
 
 export interface Migration {
   version: number;
@@ -2479,6 +2479,33 @@ export const MIGRATIONS: Migration[] = [
       `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='furbin_item_uuid'`,
       `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN furbin_item_uuid CHAR(36) NULL, ADD COLUMN generation_error VARCHAR(500) NULL, ADD COLUMN reviewed_by VARCHAR(190) NULL, ADD COLUMN reviewed_at TIMESTAMP NULL','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
+    ],
+  },
+  {
+    version: 53,
+    name: "free_avatar_gate_and_notify",
+    statements: [
+      // Server-owned switches. Keyed settings rather than env vars because the
+      // gate is opened and closed on demand by an admin, and an env change
+      // would require a redeploy.
+      `CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key VARCHAR(64) NOT NULL PRIMARY KEY,
+        setting_value VARCHAR(255) NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        updated_by VARCHAR(190) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      // notified_at is per-window: it is cleared when a window opens so one
+      // opt-in can be told about several windows, but never twice about one.
+      `CREATE TABLE IF NOT EXISTS gate_notify_optins (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_phone VARCHAR(32) NOT NULL,
+        gate VARCHAR(64) NOT NULL,
+        channel VARCHAR(16) NOT NULL DEFAULT 'email',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        notified_at TIMESTAMP NULL,
+        UNIQUE KEY uniq_gate_optin (user_phone, gate),
+        KEY idx_gate_pending (gate, notified_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },
 ];
