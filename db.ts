@@ -1849,13 +1849,89 @@ export async function getCreditBalance(phone: string): Promise<number> {
   return user ? user.credits : 0;
 }
 
+/** Gate key for the free-avatar window. */
+export const FREE_AVATAR_GATE = "free_avatar_gate";
+
+/** Reads a server-owned setting. Missing rows return the fallback so a gate
+ *  that has never been opened is closed, not undefined. */
+export async function getAppSetting(key: string, fallback: string): Promise<string> {
+  try {
+    const [rows] = await getPool().query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = ? LIMIT 1", [key]
+    ) as any;
+    return rows?.length ? String(rows[0].setting_value) : fallback;
+  } catch {
+    // Before migration 53 lands the table does not exist; closed is the safe read.
+    return fallback;
+  }
+}
+
+export async function setAppSetting(key: string, value: string, updatedBy: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO app_settings (setting_key, setting_value, updated_by) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)`,
+    [key, value, updatedBy]
+  );
+}
+
+export async function isFreeAvatarGateOpen(): Promise<boolean> {
+  return (await getAppSetting(FREE_AVATAR_GATE, "closed")) === "open";
+}
+
+/**
+ * Claim the one free avatar. Two conditions must hold: the per-user
+ * entitlement is unspent, and the global window is open. The gate is checked
+ * inside the same statement as the claim so a window closing mid-request
+ * cannot let a claim slip through.
+ */
 export async function claimFreeAvatar(phone: string): Promise<boolean> {
   const [result] = await getPool().query(
     `UPDATE users SET free_avatar_available = 0
-      WHERE phone = ? AND profile_complete = 1 AND free_avatar_available = 1`,
-    [phone]
+      WHERE phone = ? AND profile_complete = 1 AND free_avatar_available = 1
+        AND (SELECT setting_value FROM app_settings WHERE setting_key = ?) = 'open'`,
+    [phone, FREE_AVATAR_GATE]
   ) as any;
   return result.affectedRows === 1;
+}
+
+/** Record an opt-in for the next window. Unique per (user, gate), so repeated
+ *  taps are idempotent rather than creating duplicate notifications. */
+export async function addGateNotifyOptin(phone: string, gate: string, channel: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO gate_notify_optins (user_phone, gate, channel) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE channel = VALUES(channel)`,
+    [phone, gate, channel === "sms" ? "sms" : "email"]
+  );
+}
+
+/** Opt-ins still owed a notification for this window, limited to users who can
+ *  actually use the window — telling someone who already spent their free
+ *  avatar is noise that costs sender reputation. */
+export async function listPendingGateNotifications(gate: string, limit = 200): Promise<{ user_phone: string; email: string; channel: string }[]> {
+  const [rows] = await getPool().query(
+    `SELECT o.user_phone, u.email, o.channel
+       FROM gate_notify_optins o
+       JOIN users u ON u.phone = o.user_phone
+      WHERE o.gate = ? AND o.notified_at IS NULL
+        AND u.free_avatar_available = 1 AND u.email IS NOT NULL
+      LIMIT ?`,
+    [gate, limit]
+  ) as any;
+  return rows || [];
+}
+
+export async function markGateNotified(gate: string, phones: string[]): Promise<void> {
+  if (!phones.length) return;
+  await getPool().query(
+    `UPDATE gate_notify_optins SET notified_at = NOW() WHERE gate = ? AND user_phone IN (?)`,
+    [gate, phones]
+  );
+}
+
+/** Clearing notified_at is what makes a NEW window notifiable. Without this a
+ *  customer would only ever hear about the first window they opted into. */
+export async function resetGateNotifications(gate: string): Promise<void> {
+  await getPool().query(`UPDATE gate_notify_optins SET notified_at = NULL WHERE gate = ?`, [gate]);
 }
 
 export async function releaseFreeAvatar(phone: string): Promise<void> {
