@@ -2474,7 +2474,11 @@ export const MIGRATIONS: Migration[] = [
       `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN draft_spec_json LONGTEXT NULL','SELECT 1')`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
       `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='review_status'`,
-      `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN review_status VARCHAR(32) NOT NULL DEFAULT \'none\'','SELECT 1')`,
+      // Double-quoted SQL string literals so the 'none' default needs no
+      // escaping. A backslash-escaped quote inside a single-quoted SQL string
+      // terminates it early and is a parse error, which failed database init
+      // outright and left this migration half-applied.
+      `SET @stmt=IF(@c=0, "ALTER TABLE pawprint_shopify_orders ADD COLUMN review_status VARCHAR(32) NOT NULL DEFAULT 'none'", "SELECT 1")`,
       `PREPARE stmt FROM @stmt`, `EXECUTE stmt`, `DEALLOCATE PREPARE stmt`,
       `SELECT COUNT(*) INTO @c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pawprint_shopify_orders' AND COLUMN_NAME='furbin_item_uuid'`,
       `SET @stmt=IF(@c=0,'ALTER TABLE pawprint_shopify_orders ADD COLUMN furbin_item_uuid CHAR(36) NULL, ADD COLUMN generation_error VARCHAR(500) NULL, ADD COLUMN reviewed_by VARCHAR(190) NULL, ADD COLUMN reviewed_at TIMESTAMP NULL','SELECT 1')`,

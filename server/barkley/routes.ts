@@ -9,7 +9,8 @@
  * POST /api/barkley/replay        — replay a specific beat
  */
 
-import type { Request, Response } from "express";
+import { Router, type Request, type Response } from "express";
+import { BARKLEY_SHOW as CANONICAL_SHOW } from "../../src/barkley/shows";
 import {
   isBarkleyPresenterEnabled,
   BarkleyFeatureError,
@@ -22,33 +23,21 @@ import {
 } from "./featureFlag";
 
 // Lazy-import shows manifest (client-side file available at build time)
-// In production this is bundled; the route reads it at runtime.
-// We load it here so the server can serve show data without duplicating it.
-let BARKLEY_SHOW: any;
-try {
-  // This import works because the TS compiler resolves src/barkley/shows.ts
-  // and bundles it into the server output.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { BARKLEY_SHOW: show } = require("../../src/barkley/shows");
-  BARKLEY_SHOW = show;
-} catch {
-  // During dev or if path aliasing isn't resolved, fall back to a minimal stub.
-  BARKLEY_SHOW = {
-    id: "pawsome3d-intro",
-    name: "Welcome to Pawsome3D",
-    description: "Barkley guides you through the platform.",
-    beats: [],
-    totalDurationSeconds: 0,
-    featureFlag: "BARKLEY_PRESENTER",
-  };
-}
+// The canonical show definition, imported statically.
+//
+// This previously used a lazy CommonJS require(), which cannot work in this
+// ESM project ("type": "module") — it threw ReferenceError at startup and
+// aborted startServer(), so every route mounted after it 404'd. A static
+// import is also resolvable by the esbuild server bundle, so the try/catch
+// stub it carried is unnecessary.
+const BARKLEY_SHOW = CANONICAL_SHOW;
 
 // ──────────────────────────────────────────────────────────────────
 // Express router
 // ──────────────────────────────────────────────────────────────────
 
 export function barkleyRoutes(): any {
-  const router = require("express").Router();
+  const router = Router();
 
   // GET /api/barkley/status — feature flag + clip readiness
   router.get("/status", (_req: Request, res: Response) => {

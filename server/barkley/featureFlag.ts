@@ -2,7 +2,13 @@
  * Barkley Presenter — server-side feature flag and types.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+// ESM has no __dirname; derive it from import.meta.url.
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export type BarkleyState =
   | "idle" | "loading" | "playing" | "paused" | "interacting" | "speaking" | "complete" | "error";
@@ -159,9 +165,7 @@ export function getMissingClips(): string[] {
     "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
   ];
 
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const clipDir = path.join(__dirname, "..", "..", "public", "barkley");
+  const clipDir = path.join(MODULE_DIR, "..", "..", "public", "barkley");
   const availableClips = fs.existsSync(clipDir)
     ? fs.readdirSync(clipDir)
         .filter((f: string) => f.endsWith(".glb"))
