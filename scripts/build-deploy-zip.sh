@@ -175,7 +175,14 @@ echo "Boot-testing the packaged bundle..."
 ln -s "$PROJECT_ROOT/node_modules" "$EXTRACT_DIR/node_modules" 2>/dev/null || true
 SMOKE_PORT=$(( 39000 + RANDOM % 900 ))
 SMOKE_LOG=$(mktemp)
-( cd "$EXTRACT_DIR" && PORT="$SMOKE_PORT" node server.cjs > "$SMOKE_LOG" 2>&1 & echo $! > "$EXTRACT_DIR/.smoke.pid" )
+# Deliberately given a throwaway JWT secret and NO database configuration. The
+# app treats a missing DB as "accounts disabled" rather than fatal, so it still
+# boots and serves /healthz — which is all this gate needs. Keeping the real
+# .env out means the build never runs migrations or touches production.
+( cd "$EXTRACT_DIR" && env -u DB_HOST -u DB_NAME -u DB_USER -u DB_PASSWORD \
+    JWT_SECRET="smoke-test-secret-not-used-for-anything-real-0123456789" \
+    NODE_ENV=development PORT="$SMOKE_PORT" \
+    node server.cjs > "$SMOKE_LOG" 2>&1 & echo $! > "$EXTRACT_DIR/.smoke.pid" )
 smoke_pid=$(cat "$EXTRACT_DIR/.smoke.pid" 2>/dev/null || echo "")
 smoke_ok=false
 for _ in $(seq 1 30); do
