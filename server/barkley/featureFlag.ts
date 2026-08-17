@@ -4,11 +4,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-// ESM has no __dirname; derive it from import.meta.url.
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+// Resolved from the working directory, not the module path. The server ships
+// as a CJS esbuild bundle where import.meta.url is undefined and __dirname
+// points into dist/, so neither locates public/barkley. Every other runtime
+// asset lookup in this app (e.g. blender-worker/profiles) is cwd-relative for
+// the same reason.
+const CLIP_DIR = path.join(process.cwd(), "public", "barkley");
 
 export type BarkleyState =
   | "idle" | "loading" | "playing" | "paused" | "interacting" | "speaking" | "complete" | "error";
@@ -165,7 +168,7 @@ export function getMissingClips(): string[] {
     "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
   ];
 
-  const clipDir = path.join(MODULE_DIR, "..", "..", "public", "barkley");
+  const clipDir = CLIP_DIR;
   const availableClips = fs.existsSync(clipDir)
     ? fs.readdirSync(clipDir)
         .filter((f: string) => f.endsWith(".glb"))
