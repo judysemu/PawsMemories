@@ -455,6 +455,31 @@ function splitDataUrl(s: string): { data: string; mimeType: string } {
   return { mimeType: "image/jpeg", data: s };
 }
 
+// Report which third-party credentials are present, as booleans only. The value
+// of a secret is never read out here — only whether the process has one. This
+// exists because the hosting panel masks saved secrets, so a blank-looking field
+// is indistinguishable from a missing one, and "is the key actually loaded?"
+// otherwise can only be answered by spending money on a live provider call.
+// Placeholder values left over from a template count as absent.
+export function summarizeProviderConfig(env: NodeJS.ProcessEnv = process.env) {
+  const present = (...names: string[]) =>
+    names.every((name) => {
+      const value = String(env[name] ?? "").trim();
+      if (!value) return false;
+      return !/^(my_|your_|paste_|replace_|changeme|todo)/i.test(value);
+    });
+  return {
+    fal: present("FAL_KEY"),
+    gemini: present("GEMINI_API_KEY"),
+    resend: present("RESEND_API_KEY"),
+    stripe: present("STRIPE_SECRET_KEY"),
+    elevenlabs: present("ELEVENLABS_API_KEY"),
+    shopify: present("SHOPIFY_CLIENT_SECRET"),
+    mediaBucket: present("MEDIA_BUCKET_KEY", "MEDIA_BUCKET_SECRET"),
+    byokVault: present("KEY_ENCRYPTION_SECRET"),
+  };
+}
+
 export function formatReadinessResponse(database: { configured: boolean; healthy: boolean; latencyMs: number; error?: string }, buildInfo: any) {
   if (!database.healthy) {
     if (database.error) {
@@ -483,6 +508,7 @@ export function formatReadinessResponse(database: { configured: boolean; healthy
         latencyMs: database.latencyMs,
       },
       build: buildInfo,
+      providers: summarizeProviderConfig(),
     },
   };
 }
