@@ -65,17 +65,38 @@ export function createPawprintPurchaseRouter(getPool: () => mysql.Pool): Router 
       // Only a product Shopify has explicitly flagged personalizable can be the
       // checkout target. Failing closed here is deliberate: silently picking an
       // arbitrary product would take money for the wrong item.
+      //
+      // The customer chooses which one. The handle is re-validated against the
+      // same filter rather than trusted, so a stale or forged handle cannot
+      // route an order to a product that is not actually on sale. With no
+      // handle supplied there is no safe default — a portrait printed on
+      // whichever product happens to be cheapest is not a choice anyone made —
+      // so the request is refused with the list to choose from.
+      const requestedHandle = String(req.body?.productHandle || "").trim().slice(0, 255);
       const [rows]: any = await pool.query(
         `SELECT shopify_product_gid, variants_json, title
            FROM shopify_store_products
           WHERE active = 1 AND published = 1 AND available_for_sale = 1
             AND pawprint_personalizable = 1
-          ORDER BY min_price ASC LIMIT 1`,
+            AND handle = ?
+          LIMIT 1`,
+        [requestedHandle],
       );
       if (!rows.length) {
-        return res.status(503).json({
-          error: "PawPrint prints are not on sale yet. Please check back shortly.",
-          code: "NO_PERSONALIZABLE_PRODUCT",
+        const [available]: any = await pool.query(
+          `SELECT COUNT(*) AS n FROM shopify_store_products
+            WHERE active = 1 AND published = 1 AND available_for_sale = 1
+              AND pawprint_personalizable = 1`,
+        );
+        if (!Number(available[0]?.n || 0)) {
+          return res.status(503).json({
+            error: "PawPrint prints are not on sale yet. Please check back shortly.",
+            code: "NO_PERSONALIZABLE_PRODUCT",
+          });
+        }
+        return res.status(400).json({
+          error: "Choose which product to print your PawPrint on.",
+          code: "PRODUCT_NOT_CHOSEN",
         });
       }
 
@@ -121,6 +142,36 @@ export function createPawprintPurchaseRouter(getPool: () => mysql.Pool): Router 
       }
       console.error("[pawprint-purchase/checkout]", err?.message || err);
       return res.status(500).json({ error: "Could not start checkout. Please try again." });
+    }
+  });
+
+  /**
+   * The products a PawPrint can be printed on. Only Shopify-flagged
+   * personalizable, published, in-stock products qualify — the same filter the
+   * checkout enforces, so the list can never offer something checkout refuses.
+   */
+  router.get("/products", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const [rows]: any = await getPool().query(
+        `SELECT shopify_product_gid, handle, title, description, featured_image_url,
+                min_price, currency_code, variants_json
+           FROM shopify_store_products
+          WHERE active = 1 AND published = 1 AND available_for_sale = 1
+            AND pawprint_personalizable = 1
+          ORDER BY min_price ASC`,
+      );
+      const products = (rows as any[]).map((row) => ({
+        handle: row.handle,
+        title: row.title,
+        description: row.description,
+        imageUrl: row.featured_image_url,
+        price: Number(row.min_price),
+        currency: row.currency_code,
+      }));
+      return res.json({ products });
+    } catch (err: any) {
+      console.error("[pawprint-purchase/products]", err?.message || err);
+      return res.status(500).json({ error: "Could not load the print options." });
     }
   });
 

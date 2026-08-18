@@ -54,6 +54,28 @@ test("checkout stores a frozen spec and generates nothing", () => {
   assert.doesNotMatch(body, /generateImage|generate\(/);
 });
 
+test("the customer chooses the product; the choice is re-validated, not trusted", () => {
+  const route = routes.slice(routes.indexOf('router.post("/checkout"'));
+  const body = route.slice(0, route.indexOf('router.get("/products"') > 0
+    ? route.indexOf('router.get("/products"') : route.indexOf('router.get("/orders"'));
+  assert.match(body, /req\.body\?\.productHandle/);
+  // The handle is re-checked against the same personalizable filter, so a
+  // stale or forged handle cannot route an order to an off-sale product.
+  assert.match(body, /AND handle = \?/);
+  assert.match(body, /pawprint_personalizable = 1/);
+  // No silent cheapest-product fallback.
+  assert.doesNotMatch(body, /ORDER BY min_price ASC LIMIT 1/);
+  assert.match(body, /PRODUCT_NOT_CHOSEN/);
+});
+
+test("the product list offers exactly what checkout will accept", () => {
+  const list = routes.slice(routes.indexOf('router.get("/products"'));
+  const body = list.slice(0, list.indexOf("router.get(\"/orders\""));
+  for (const clause of ["active = 1", "published = 1", "available_for_sale = 1", "pawprint_personalizable = 1"]) {
+    assert.match(body, new RegExp(clause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), clause);
+  }
+});
+
 test("checkout fails closed when no personalizable product exists", () => {
   assert.match(routes, /pawprint_personalizable = 1/);
   assert.match(routes, /NO_PERSONALIZABLE_PRODUCT/);
