@@ -240,3 +240,121 @@ export const AI_VIDEO_SCRIPTS: AiVideoScriptTemplate[] = [
 ];
 
 export const DEFAULT_AI_VIDEO_SCRIPT = AI_VIDEO_SCRIPTS[0];
+
+// ─── Video Studio v2 teaching layer ─────────────────────────────────────────
+// The same idea as the PawPrints teaching panel, applied to video. The sections
+// below are not an invented taxonomy: they are literally the fields of
+// AiVideoScriptTemplate, so explaining them explains the form the customer is
+// already filling in.
+
+export interface VideoPromptSection {
+  /** Matches a field name on AiVideoScriptTemplate. */
+  id: "setting" | "characters" | "motions" | "stageDirections" | "lighting" | "filter" | "camera";
+  label: string;
+  text: string;
+  /** Plain-language reason this section earns its place. No film-school jargon. */
+  explanation: string;
+}
+
+export interface AnnotatedVideoSample {
+  id: string;
+  title: string;
+  durationSeconds: 8 | 15;
+  sections: VideoPromptSection[];
+}
+
+/** Sample 1 for the 8-second tier — dissected section by section. */
+export const ANNOTATED_VIDEO_SAMPLE_8S: AnnotatedVideoSample = {
+  id: "hero-pup-8s",
+  title: "Cape-flapping hero pup",
+  durationSeconds: 8,
+  sections: [
+    { id: "setting", label: "Setting", text: "A rooftop above a bright city at sunrise",
+      explanation: "One clear place and time of day. This anchors the whole shot." },
+    { id: "characters", label: "Characters", text: "Your dog in a small red cape, exact face and markings kept",
+      explanation: "Always ask to keep the pet's real markings and proportions, or the model drifts." },
+    { id: "motions", label: "Motion", text: "Ears lift, head turns, cape catches the wind, then a proud pose",
+      explanation: "Small physical movements read best. Eight seconds is not long enough for a plot." },
+    { id: "stageDirections", label: "Four beats", text: "close-up → head turn → low camera arc → hold the pose",
+      explanation: "Four beats is about two seconds each. The model paces them for you." },
+    { id: "lighting", label: "Lighting", text: "Warm sunrise key light, cool city fill, golden rim on the fur",
+      explanation: "Where the light comes from and what colour it is." },
+    { id: "filter", label: "Filter", text: "Polished family-film colour with a subtle cinematic bloom",
+      explanation: "The overall look. Two adjectives beat ten." },
+    { id: "camera", label: "Camera", text: "Low-angle 35mm push-in, one smooth move, no cuts",
+      explanation: "Saying 'no cuts' keeps your pet's face consistent all the way through." },
+  ],
+};
+
+/** Sample 1 for the 15-second tier. Same sections; the extra time buys a
+ *  second location and a longer camera move rather than more cuts. */
+export const ANNOTATED_VIDEO_SAMPLE_15S: AnnotatedVideoSample = {
+  id: "seaside-stroll-15s",
+  title: "Seaside stroll at golden hour",
+  durationSeconds: 15,
+  sections: [
+    { id: "setting", label: "Setting", text: "A quiet beach at golden hour, moving from the dunes down to the water",
+      explanation: "Fifteen seconds affords a journey between two places. Eight does not." },
+    { id: "characters", label: "Characters", text: "Your cat carried in a tote bag beside you, both faces kept exactly",
+      explanation: "Name everyone who appears. Your photos hold their real likeness." },
+    { id: "motions", label: "Motion", text: "Walking pace, the bag sways, ears twitch at the gulls, a slow look to camera",
+      explanation: "Give the longer clip continuous motion or it starts to feel static." },
+    { id: "stageDirections", label: "Four beats", text: "dunes wide → walk toward the water → the look to camera → settle as waves reach the sand",
+      explanation: "Still four beats, roughly four seconds each. Let each one breathe." },
+    { id: "lighting", label: "Lighting", text: "Low golden sun behind, soft sand bounce in front, long shadows",
+      explanation: "Backlight at golden hour is the most forgiving light there is." },
+    { id: "filter", label: "Filter", text: "Warm film stock, gentle grain, slightly lifted blacks",
+      explanation: "The overall look, held steady across the whole clip." },
+    { id: "camera", label: "Camera", text: "A single slow tracking shot alongside, 50mm, no cuts",
+      explanation: "One continuous move suits the longer runtime better than several short ones." },
+  ],
+};
+
+/** Sample 2 per tier — shown whole, so a finished prompt reads as one piece. */
+export const PLAIN_VIDEO_SAMPLE_8S =
+  "Lofi rainy-window cat: slow blink, ear twitch, tail tip curling, amber lamp light against a blue rainy night, soft film grain, one very slow dolly in, no cuts.";
+
+export const PLAIN_VIDEO_SAMPLE_15S =
+  "My dog in a firefighter's coat at a gleaming station: sits proudly, stands, walks to the engine and looks back, warm tungsten light and long shadows, rich cinematic colour, one continuous tracking shot, no cuts.";
+
+export function annotatedVideoSampleFor(durationSeconds: 8 | 15): AnnotatedVideoSample {
+  return durationSeconds === 15 ? ANNOTATED_VIDEO_SAMPLE_15S : ANNOTATED_VIDEO_SAMPLE_8S;
+}
+
+export function plainVideoSampleFor(durationSeconds: 8 | 15): string {
+  return durationSeconds === 15 ? PLAIN_VIDEO_SAMPLE_15S : PLAIN_VIDEO_SAMPLE_8S;
+}
+
+export interface VideoIdeaChip {
+  id: string;
+  label: string;
+  emoji: string;
+  /** Applied to the Setting and Characters fields, which is where these ideas
+   *  actually live — the rest of the script stays as the customer set it. */
+  setting: string;
+  characters: string;
+}
+
+export const VIDEO_IDEA_CHIPS: VideoIdeaChip[] = [
+  { id: "famous_location", label: "Famous locations", emoji: "🗼",
+    setting: "At the foot of the Eiffel Tower at golden hour, Paris rooftops behind",
+    characters: "You and your pet together, faces and markings kept exactly" },
+  { id: "historical_figure", label: "Historical figure", emoji: "👑",
+    setting: "A candlelit Renaissance study lined with books and oil paintings",
+    characters: "Your pet dressed as a Renaissance duchess, likeness kept exactly" },
+  { id: "occupation", label: "Occupation costume", emoji: "🚒",
+    setting: "A gleaming fire station with the engine polished and ready",
+    characters: "Your pet in a firefighter's coat and helmet, likeness kept exactly" },
+  { id: "holiday", label: "Holiday theme", emoji: "🎄",
+    setting: "A cosy living room with a decorated tree and warm string lights",
+    characters: "You and your pet by the fire, faces and markings kept exactly" },
+];
+
+/** What each duration actually buys, in the customer's terms rather than
+ *  provider names. Shown on the duration picker so the choice is informed. */
+export const VIDEO_DURATION_NOTES: Record<8 | 15, { headline: string; detail: string }> = {
+  8: { headline: "8 seconds · with sound",
+       detail: "Google's Veo 3. Generates its own audio. Best for one clear moment." },
+  15: { headline: "15 seconds · longer story",
+        detail: "Kling v3 Pro. Room for a journey between two places or a longer camera move." },
+};
