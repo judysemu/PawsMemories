@@ -3,6 +3,7 @@ import { Download, Film, ImagePlus, RefreshCw, Sparkles, Wand2, X } from "lucide
 import { Creation, UserProfile } from "../types";
 import { addUserPhoto, createVideo, pollJob } from "../api";
 import { AI_VIDEO_SCRIPTS, DEFAULT_AI_VIDEO_SCRIPT, type AiVideoScriptTemplate } from "../aiVideoScripts";
+import { VideoTeachingPanel, isVideoStudioV2Enabled } from "./video/VideoTeachingPanel";
 import { animatedVideoCost } from "../pricing";
 
 interface AnimationStudioProps {
@@ -83,6 +84,34 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
   const selectTemplate = (templateId: string) => {
     const template = AI_VIDEO_SCRIPTS.find((candidate) => candidate.id === templateId) || DEFAULT_AI_VIDEO_SCRIPT;
     setScript(editable(template));
+  };
+
+  // v2 teaching panel handlers. A sample fills the whole script; an idea chip
+  // touches only Setting and Characters, so a customer who has already tuned
+  // lighting, camera and beats does not lose that work to a single tap.
+  const applyTeachingSample = (sample: { sections: { id: string; text: string }[] }) => {
+    const byId = Object.fromEntries(sample.sections.map((section) => [section.id, section.text]));
+    setScript((current) => ({
+      ...current,
+      setting: byId.setting ?? current.setting,
+      characters: byId.characters ?? current.characters,
+      motions: byId.motions ?? current.motions,
+      lighting: byId.lighting ?? current.lighting,
+      filter: byId.filter ?? current.filter,
+      camera: byId.camera ?? current.camera,
+      // The annotated sample states its beats as one arrow-joined line; split
+      // it back into the four fields the form actually holds.
+      stageDirections: (() => {
+        const beats = String(byId.stageDirections || "").split("→").map((beat) => beat.trim()).filter(Boolean);
+        return beats.length === 4
+          ? (beats as [string, string, string, string])
+          : current.stageDirections;
+      })(),
+    }));
+  };
+
+  const applyTeachingIdea = (idea: { setting: string; characters: string }) => {
+    setScript((current) => ({ ...current, setting: idea.setting, characters: idea.characters }));
   };
 
   const updateStageDirection = (index: number, value: string) => {
@@ -269,6 +298,13 @@ export default function AnimationStudio({ creations, userProfile, onOpenCreditSt
                   <button type="button" onClick={() => setDuration(8)} className={`flex-1 px-3 py-2 text-sm font-bold ${duration === 8 ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>8 seconds</button>
                   <button type="button" onClick={() => setDuration(15)} className={`flex-1 px-3 py-2 text-sm font-bold ${duration === 15 ? "bg-primary text-on-primary" : "bg-surface text-on-surface-variant"}`}>15 seconds</button>
                 </div>
+                {isVideoStudioV2Enabled() && (
+                  <VideoTeachingPanel
+                    durationSeconds={duration}
+                    onApplySample={applyTeachingSample}
+                    onApplyIdea={applyTeachingIdea}
+                  />
+                )}
                 <p className="mt-1 text-[10px] text-on-surface-variant">{animatedVideoCost(duration)} PupCoins</p>
               </div>
 
