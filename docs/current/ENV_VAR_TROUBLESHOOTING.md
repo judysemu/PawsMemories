@@ -118,3 +118,44 @@ not under production's runtime. `scripts/build.mjs` passes no esbuild
 guarantee is narrower than it looks: it proves the bundle runs *somewhere*,
 not that it runs on the host's Node. Worth closing if the versions ever
 diverge across a major.
+
+## Follow-up: presence was not enough (2026-08-18, same day)
+
+The boolean answered "is a credential loaded?" but not "is it the *right* one",
+and that gap mattered within hours. During a rotation of a possibly-leaked
+`FAL_KEY`, the panel reported success and `/readyz` reported `"fal": true` —
+while production was still serving the **old** key. A stale value and a fresh
+one are both `true`, so the boolean could not tell them apart, and the panel's
+own display could not be trusted either.
+
+`fingerprintProviderConfig()` closes this. `/readyz` now carries
+`providerFingerprints`: the first eight hex characters of SHA-256 over each
+value. Not invertible to a high-entropy secret, but enough to compare against
+the key you just issued.
+
+It caught the problem on first use. Production read `99997cee`, which matched
+the *local* `.env` — the un-rotated key. A live call confirmed it:
+`401 credential has been revoked`. The first save had silently not persisted.
+After re-entering the key the fingerprint moved to `873bb54f`, every other
+provider fingerprint stayed byte-identical (proving only `FAL_KEY` was
+touched), and the same live call returned `403 TOP_UP` — valid credential,
+billing lock only.
+
+### How to verify any future rotation
+
+```bash
+curl -s https://pawsome3d.com/readyz          # read providerFingerprints.<name>
+```
+
+```bash
+node -e "require('dotenv').config({quiet:true}); console.log(require('crypto').createHash('sha256').update(process.env.FAL_KEY.trim()).digest('hex').slice(0,8))"
+```
+
+Matching fingerprints prove the same key is in both places. Then distinguish
+validity from billing state with a live call: `401` means revoked or wrong,
+`403 TOP_UP` means valid but unfunded, `200` means ready.
+
+### The lesson
+
+A health check that reports *presence* will happily report success while
+serving a dead credential. Report *identity* for anything that gets rotated.
