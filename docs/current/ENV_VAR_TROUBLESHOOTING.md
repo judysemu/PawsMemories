@@ -85,3 +85,36 @@ answering while the service is degraded should say as little as possible.
 - Keep the previous key valid until a replacement is observed working.
 - Trust the application over the hosting panel. `/readyz` reads the same
   `process.env` the feature code reads; the panel reads a database row.
+
+## Outcome (2026-08-18)
+
+Deployed at commit `2e195f2`. The first reading settled it:
+
+```json
+"providers": { "fal": true, "gemini": true, "resend": true, "stripe": true,
+               "elevenlabs": true, "shopify": true, "mediaBucket": true, "byokVault": true }
+```
+
+`FAL_KEY` was present the entire time. Nothing was dropped by any restart;
+the panel was masking a populated field. No rotation was required, and
+rotating would have made the situation harder to reason about, not easier.
+
+Incidental findings from the same reading: the deploy carried the schema
+from 54 to 55 (`photo_edit_cache`), and `KEY_ENCRYPTION_SECRET` is present,
+so `BYOK_PLAYGROUND_ENABLED` is no longer blocked on a missing secret.
+
+What `true` does and does not mean: the process holds a non-empty,
+non-placeholder value. It does not identify *which* key, and it does not
+mean the provider will accept it. A locked or unfunded account still fails
+with a perfectly good credential.
+
+## Note on the build that shipped this
+
+The engine check was bypassed — built under Node v25.8.1 against a required
+`>=24.15 <25`, while the host runs v24.6.0. The boot gate in
+`scripts/build-deploy-zip.sh` therefore booted the artifact under Node 25,
+not under production's runtime. `scripts/build.mjs` passes no esbuild
+`--target`, so syntax is emitted unchanged. It deployed fine, but the gate's
+guarantee is narrower than it looks: it proves the bundle runs *somewhere*,
+not that it runs on the host's Node. Worth closing if the versions ever
+diverge across a major.
