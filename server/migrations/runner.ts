@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 54;
+export const CURRENT_SCHEMA_VERSION = 55;
 
 export interface Migration {
   version: number;
@@ -2538,6 +2538,28 @@ export const MIGRATIONS: Migration[] = [
         last_used_at TIMESTAMP NULL,
         UNIQUE KEY uniq_user_provider (user_phone, provider),
         KEY idx_user_api_keys_status (user_phone, status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 55,
+    name: "photo_edit_cache",
+    statements: [
+      // Background-removal results, keyed by the SHA-256 of the ORIGINAL bytes.
+      // Matting is deterministic per image and customers retry, so every cache
+      // hit is a provider call not paid for. Keyed by (source, provider) so
+      // swapping providers re-mattes rather than serving a stale cutout from a
+      // model we no longer use.
+      `CREATE TABLE IF NOT EXISTS photo_edit_cache (
+        id            BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        source_sha256 CHAR(64) NOT NULL,
+        provider      VARCHAR(32) NOT NULL,
+        object_key    VARCHAR(512) NOT NULL,
+        mime_type     VARCHAR(64) NOT NULL DEFAULT 'image/webp',
+        width_px      INT NOT NULL,
+        height_px     INT NOT NULL,
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_source_provider (source_sha256, provider)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },
