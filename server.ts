@@ -145,6 +145,7 @@ import { PrintUploadValidationError, validatePrintUpload } from "./server/printU
 import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./src/wardrobe/catalog";
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
 import { createFreeImageRouter } from "./server/free-image/routes";
+import { createByokRouter, isByokPlaygroundEnabled } from "./server/byok/routes";
 import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
 import { referenceFromOrderPayload } from "./server/pawprint-purchase/cartPermalink";
 import { createPawprintPurchaseRouter, sweepPaidPawprintOrders, isPawprintPurchaseGateEnabled } from "./server/pawprint-purchase/routes";
@@ -4312,6 +4313,47 @@ async function startServer() {
       res.status(500).json({ error: "Could not change the window." });
     }
   });
+
+  // BYOK playground. Every call constructs a client from the CUSTOMER's key —
+  // the house GoogleGenAI instance is deliberately not reachable from here, so
+  // a bug cannot silently bill us for what they think their key is paying for.
+  app.use(
+    "/api/byok",
+    paidLimiter,
+    createByokRouter(getPool, {
+      validateKey: async (apiKey) => {
+        try {
+          const probe = new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
+          // Cheapest call that proves the key is real and Gemini-enabled.
+          await probe.models.list();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      generateImage: async (apiKey, prompt, aspectRatio) => {
+        const client = new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
+        for (const model of IMAGE_MODELS) {
+          try {
+            const result: any = await client.models.generateContent({
+              model,
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio } },
+            });
+            const parts = result?.candidates?.[0]?.content?.parts || [];
+            for (const part of parts) {
+              const data = part?.inlineData?.data;
+              if (data) return `data:${part.inlineData.mimeType || "image/png"};base64,${data}`;
+            }
+          } catch {
+            // Fall through to the next model in the chain, same as the house
+            // generator. A key that fails every model surfaces as null.
+          }
+        }
+        return null;
+      },
+    }),
+  );
 
   app.use("/api/pawprints/purchase", createPawprintPurchaseRouter(getPool));
 

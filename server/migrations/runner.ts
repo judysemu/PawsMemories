@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 53;
+export const CURRENT_SCHEMA_VERSION = 54;
 
 export interface Migration {
   version: number;
@@ -2509,6 +2509,35 @@ export const MIGRATIONS: Migration[] = [
         notified_at TIMESTAMP NULL,
         UNIQUE KEY uniq_gate_optin (user_phone, gate),
         KEY idx_gate_pending (gate, notified_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 54,
+    name: "byok_user_api_keys",
+    statements: [
+      // Customer-supplied provider keys for the BYOK playground.
+      //
+      // The key is stored AES-256-GCM encrypted, never in plaintext, and is
+      // never returned to any client — only key_last4 is, so a customer can
+      // recognise which key is connected without the value being recoverable
+      // from an API response or a log.
+      //
+      // One row per (user, provider): reconnecting replaces rather than
+      // accumulates, so there is never ambiguity about which key is in use.
+      `CREATE TABLE IF NOT EXISTS user_api_keys (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        user_phone VARCHAR(32) NOT NULL,
+        provider VARCHAR(32) NOT NULL DEFAULT 'google',
+        ciphertext TEXT NOT NULL,
+        iv VARCHAR(32) NOT NULL,
+        auth_tag VARCHAR(32) NOT NULL,
+        key_last4 CHAR(4) NOT NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_used_at TIMESTAMP NULL,
+        UNIQUE KEY uniq_user_provider (user_phone, provider),
+        KEY idx_user_api_keys_status (user_phone, status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },
