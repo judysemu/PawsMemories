@@ -146,6 +146,8 @@ import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
 import { createFreeImageRouter } from "./server/free-image/routes";
 import { createByokRouter, isByokPlaygroundEnabled } from "./server/byok/routes";
+import { createPhotoEditRouter } from "./server/photo-edit/routes";
+import { createFalBirefnetProvider } from "./server/photo-edit/falBirefnet";
 import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
 import { referenceFromOrderPayload } from "./server/pawprint-purchase/cartPermalink";
 import { createPawprintPurchaseRouter, sweepPaidPawprintOrders, isPawprintPurchaseGateEnabled } from "./server/pawprint-purchase/routes";
@@ -4354,6 +4356,10 @@ async function startServer() {
       },
     }),
   );
+
+  // Background removal. BiRefNet via fal — MIT on code and weights, the only
+  // evaluated model with an explicit commercial grant on the weights.
+  app.use("/api/photo-edit", paidLimiter, createPhotoEditRouter(getPool, createFalBirefnetProvider()));
 
   app.use("/api/pawprints/purchase", createPawprintPurchaseRouter(getPool));
 
