@@ -73,10 +73,25 @@ async function main(): Promise<void> {
   console.log(`Provider: ${provider.id}\nImages:   ${files.length}\nOutput:   ${outputDir}\n`);
 
   const results: { name: string; ms: number; ok: boolean; note: string }[] = [];
+  const skipped: { name: string; reason: string }[] = [];
 
   for (const [index, name] of files.entries()) {
-    const source = fs.readFileSync(path.join(inputDir, name));
-    const meta = await sharp(source).metadata();
+    // Decoding sat outside the per-image try below, so a single unreadable file
+    // escaped the handler and aborted the whole run through main().catch —
+    // libheif's iref security limit on Pixel Motion Photos killed the harness at
+    // image 8 of 15 and cost every image after it, including the scores.csv that
+    // is only written at the end. A file we cannot decode is a per-image result,
+    // not a fatal error.
+    let loaded: { source: Buffer; meta: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>> };
+    try {
+      const source = fs.readFileSync(path.join(inputDir, name));
+      loaded = { source, meta: await sharp(source).metadata() };
+    } catch (err: any) {
+      console.log(`[${index + 1}/${files.length}] ${name} … SKIPPED (undecodable) ${err?.message || err}`);
+      skipped.push({ name, reason: String(err?.message || err) });
+      continue;
+    }
+    const { source, meta } = loaded;
     const mp = ((meta.width || 0) * (meta.height || 0)) / 1_000_000;
     process.stdout.write(`[${index + 1}/${files.length}] ${name} — ${meta.width}x${meta.height} (${mp.toFixed(1)} MP) … `);
 
@@ -133,6 +148,13 @@ async function main(): Promise<void> {
   const ok = results.filter((r) => r.ok);
   const avg = ok.length ? ok.reduce((s, r) => s + r.ms, 0) / ok.length / 1000 : 0;
   console.log(`\n${ok.length}/${results.length} succeeded, average ${avg.toFixed(1)}s per image.`);
+  if (skipped.length) {
+    // Say what was dropped. A run that silently omits inputs reads as full
+    // coverage, and these skips are the customer-facing formats we most need
+    // an answer on.
+    console.log(`\n${skipped.length} file(s) skipped as undecodable — NOT part of the scores above:`);
+    for (const s of skipped) console.log(`  ${s.name}: ${s.reason}`);
+  }
   console.log(`Review sheets in ${outputDir} — left: original · middle: cutout on checkerboard · right: cutout on white.\n`);
   console.log("Score each 1-5 on the fur edge specifically. The middle panel is the honest one:");
   console.log("a model that removed nothing looks fine on white and obviously wrong on the checkerboard.");
