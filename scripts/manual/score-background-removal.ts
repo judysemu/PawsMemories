@@ -57,7 +57,11 @@ async function checkerboard(width: number, height: number): Promise<Buffer> {
 
 async function main(): Promise<void> {
   const files = fs.readdirSync(inputDir)
-    .filter((name) => /\.(jpe?g|png|webp)$/i.test(name))
+    // HEIC/HEIF included: sharp has libheif compiled in, so the harness can
+    // read straight off a phone. Note the APP cannot — see the accept list in
+    // PhotoStep.tsx. Testing a format customers cannot upload is only useful
+    // for deciding whether to support it.
+    .filter((name) => /\.(jpe?g|png|webp|heic|heif)$/i.test(name))
     .sort();
   if (!files.length) {
     console.error(`No images found in ${inputDir}`);
@@ -78,7 +82,9 @@ async function main(): Promise<void> {
 
     const started = Date.now();
     try {
-      const mimeType = `image/${meta.format === "jpg" ? "jpeg" : meta.format}`;
+      // sharp reports heif for both .heic and .heif; fal wants a real MIME.
+      const fmt = meta.format === "jpg" ? "jpeg" : meta.format;
+      const mimeType = `image/${fmt === "heif" ? "heic" : fmt}`;
       const cutout = await provider.removeBackground({ base64: source.toString("base64"), mimeType });
       const ms = Date.now() - started;
       const cutoutBuf = Buffer.from(cutout.base64, "base64");

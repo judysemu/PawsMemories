@@ -3252,7 +3252,7 @@ async function startServer() {
       const customPrompt = String(req.body?.customPrompt || "").trim().slice(0, 600);
       const photoBase64List: string[] = Array.isArray(req.body?.photoBase64List) ? req.body.photoBase64List : [];
 
-      if (photoBase64List.length === 0 || !photoBase64List.every((img) => /^data:image\/(png|jpe?g|webp);base64,/i.test(img))) {
+      if (photoBase64List.length === 0 || !photoBase64List.every((img) => /^data:image\/(png|jpe?g|webp|avif|gif);base64,/i.test(img))) {
         return res.status(400).json({ error: "Choose the pet photo(s) to use." });
       }
 
@@ -3342,7 +3342,7 @@ async function startServer() {
       // art), so what the customer approved is what gets saved — no server-side
       // regeneration happens here.
       const renderedImage = String(req.body?.renderedImage || req.body?.renderedPng || "");
-      const renderedMatch = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
+      const renderedMatch = /^data:image\/(png|jpe?g|webp|avif|gif);base64,([A-Za-z0-9+/=]+)$/i.exec(renderedImage);
       if (!renderedMatch) {
         return res.status(400).json({ error: "Choose a finished Pawprint variation before saving." });
       }

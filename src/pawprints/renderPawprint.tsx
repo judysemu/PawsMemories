@@ -156,7 +156,15 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 }
 
 async function normalizePhoto(file: File): Promise<StudioPhoto> {
-  if (!file.type.match(/^image\/(png|jpe?g|webp)$/i)) throw new Error(`${file.name}: choose PNG, JPEG, or WebP.`);
+// Formats are limited to what the BROWSER can decode, because the pipeline runs
+// createImageBitmap() client-side before anything reaches the server.
+// HEIC/HEIF is deliberately absent: only Safari decodes it natively, so adding
+// it to the accept list would let Android and desktop Chrome users select a
+// file the app then fails on — worse than not offering it. sharp CAN read HEIF
+// server-side, so supporting it would mean uploading the original bytes and
+// converting before the client pipeline. That is a different design, not a
+// wider allowlist.
+  if (!file.type.match(/^image\/(png|jpe?g|webp|avif|gif)$/i)) throw new Error(`${file.name}: choose PNG, JPEG, WebP, AVIF, or GIF.`);
   if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name}: choose a photo smaller than 20 MB.`);
   const sourceUrl = URL.createObjectURL(file);
   try {
@@ -199,7 +207,7 @@ async function normalizePhoto(file: File): Promise<StudioPhoto> {
 }
 
 export async function preparePhoto(file: File): Promise<StudioPhoto> {
-  if (!file.type.match(/^image\/(png|jpe?g|webp)$/i)) throw new Error(`${file.name}: choose PNG, JPEG, or WebP.`);
+  if (!file.type.match(/^image\/(png|jpe?g|webp|avif|gif)$/i)) throw new Error(`${file.name}: choose PNG, JPEG, WebP, AVIF, or GIF.`);
   if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name}: choose a photo smaller than 20 MB.`);
   const mobile = window.matchMedia?.("(max-width: 760px), (pointer: coarse)").matches ?? false;
   if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined" && typeof createImageBitmap === "function") {

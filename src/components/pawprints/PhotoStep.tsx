@@ -71,7 +71,7 @@ export function PhotoStep({ photos, onPhotosChange, error, onError, onContinue, 
           <small className="text-on-surface-variant">PNG, JPEG, or WebP · up to 20 MB each · low-resolution images are allowed for digital use</small>
         </span>
       </button>
-      <input ref={photoInput} type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void choosePhotos(files); event.target.value = ""; }} />
+      <input ref={photoInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/avif,image/gif" className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void choosePhotos(files); event.target.value = ""; }} />
       {photos.length > 0 && (
         <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
           {photos.map((photo) => (

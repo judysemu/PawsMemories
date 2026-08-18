@@ -110,3 +110,30 @@ test("the feature is dark by default", () => {
   assert.match(routes, /PHOTO_EDIT_ENABLED === "true"/);
   assert.match(routes, /FEATURE_DISABLED/);
 });
+
+// ─── Upload format allowlist ────────────────────────────────────────────────
+
+const render = fs.readFileSync("src/pawprints/renderPawprint.tsx", "utf8");
+const photoStep = fs.readFileSync("src/components/pawprints/PhotoStep.tsx", "utf8");
+const finishStep = fs.readFileSync("src/components/pawprints/FinishStep.tsx", "utf8");
+const serverTs = fs.readFileSync("server.ts", "utf8");
+
+test("client and server accept the same formats — a client-only widening would 400", () => {
+  for (const source of [photoStep, finishStep]) {
+    assert.match(source, /accept="image\/png,image\/jpeg,image\/webp,image\/avif,image\/gif"/);
+  }
+  // Both client validation sites.
+  const clientChecks = render.match(/\^image\\\/\(png\|jpe\?g\|webp\|avif\|gif\)\$/g) || [];
+  assert.equal(clientChecks.length, 2, "both preparePhoto and normalizePhoto must agree");
+  // Both server data-URL gates.
+  assert.match(serverTs, /\^data:image\\\/\(png\|jpe\?g\|webp\|avif\|gif\);base64,\/i\.test\(img\)/);
+  assert.match(serverTs, /\^data:image\\\/\(png\|jpe\?g\|webp\|avif\|gif\);base64,\(\[A-Za-z0-9\+\/=\]\+\)\$/);
+});
+
+test("HEIC is deliberately excluded, with the reason recorded", () => {
+  // Only Safari decodes HEIC natively, and the pipeline runs createImageBitmap
+  // client-side — so accepting it would let most users pick a file that fails.
+  assert.doesNotMatch(photoStep, /image\/heic|image\/heif/);
+  assert.doesNotMatch(render, /\|heic\)/);
+  assert.match(render, /HEIC\/HEIF is deliberately absent/);
+});
