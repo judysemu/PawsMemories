@@ -480,6 +480,34 @@ export function summarizeProviderConfig(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
+// A short, non-reversible identifier for each credential, so a rotation can be
+// proven to have landed. Presence booleans cannot do this: a stale key and its
+// replacement both report `true`, which is exactly the ambiguity that makes a
+// silently-failed save look like a successful rotation. Compare the value here
+// against the fingerprint of the key you just issued.
+//
+// Truncated SHA-256 over a high-entropy secret is not invertible to the key.
+// It is a confirmation oracle for someone who already holds a candidate value,
+// which is the property that makes it useful and costs nothing to an attacker
+// who would already have the secret.
+export function fingerprintProviderConfig(env: NodeJS.ProcessEnv = process.env) {
+  const fingerprint = (name: string) => {
+    const value = String(env[name] ?? "").trim();
+    if (!value) return null;
+    return createHash("sha256").update(value).digest("hex").slice(0, 8);
+  };
+  return {
+    fal: fingerprint("FAL_KEY"),
+    gemini: fingerprint("GEMINI_API_KEY"),
+    resend: fingerprint("RESEND_API_KEY"),
+    stripe: fingerprint("STRIPE_SECRET_KEY"),
+    elevenlabs: fingerprint("ELEVENLABS_API_KEY"),
+    shopify: fingerprint("SHOPIFY_CLIENT_SECRET"),
+    mediaBucket: fingerprint("MEDIA_BUCKET_KEY"),
+    byokVault: fingerprint("KEY_ENCRYPTION_SECRET"),
+  };
+}
+
 export function formatReadinessResponse(database: { configured: boolean; healthy: boolean; latencyMs: number; error?: string }, buildInfo: any) {
   if (!database.healthy) {
     if (database.error) {
@@ -509,6 +537,7 @@ export function formatReadinessResponse(database: { configured: boolean; healthy
       },
       build: buildInfo,
       providers: summarizeProviderConfig(),
+      providerFingerprints: fingerprintProviderConfig(),
     },
   };
 }
@@ -554,10 +583,31 @@ async function startServer() {
   };
   const bootstrap = bootstrapGlobal.__PAWSOME_HOSTINGER_BOOTSTRAP__;
   let httpServer: HttpServer;
+  // Routes register across the remainder of this module, and initDb() below can
+  // take seconds while migrations run. Handing the socket straight to Express
+  // here opens a window where the app answers but most routes do not exist yet,
+  // so a request gets Express's 404 ("Cannot GET /readyz") instead of the
+  // bootstrap's honest 503 — which reads as a broken deploy rather than a
+  // starting one. Gate the socket until registration actually finishes.
+  let routesReady = false;
+  const markRoutesReady = () => { routesReady = true; };
+  const readinessGate = (req: IncomingMessage, res: ServerResponse) => {
+    if (routesReady) {
+      app(req as express.Request, res as express.Response);
+      return;
+    }
+    res.writeHead(503, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": "3",
+    });
+    res.end('{"status":"starting"}');
+  };
+
   if (bootstrap) {
     httpServer = bootstrap.server;
     httpServer.removeListener("request", bootstrap.handler);
-    httpServer.on("request", app);
+    httpServer.on("request", readinessGate);
     delete bootstrapGlobal.__PAWSOME_HOSTINGER_BOOTSTRAP__;
     console.log(`Server adopted Hostinger bootstrap listener on port ${PORT}`);
   } else {
@@ -7999,6 +8049,10 @@ async function startServer() {
     app.get("/", serveSpaShell);
     app.get("*", serveSpaShell);
   }
+
+  // Every route is registered. Open the gate installed above so the socket
+  // stops answering 503 and starts serving the real application.
+  markRoutesReady();
 
   let shuttingDown = false;
   async function shutdown(reason: string, exitCode: number) {

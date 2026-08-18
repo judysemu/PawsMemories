@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizeProviderConfig, formatReadinessResponse } from "../server.ts";
+import { summarizeProviderConfig, fingerprintProviderConfig as summarizeFingerprints, formatReadinessResponse } from "../server.ts";
 
 test("summarizeProviderConfig reports presence without exposing values", () => {
   const secret = "fal-live-abcdef0123456789";
@@ -56,4 +56,40 @@ test("readyz exposes providers when healthy and withholds them when not", () => 
   );
   assert.equal(unhealthy.statusCode, 503);
   assert.equal(unhealthy.body.providers, undefined);
+});
+
+test("fingerprints identify a credential without revealing it", async () => {
+  const { createHash } = await import("node:crypto");
+  const secret = "fal-live-abcdef0123456789";
+  const fp = summarizeFingerprints({ FAL_KEY: secret });
+
+  assert.equal(fp.fal, createHash("sha256").update(secret).digest("hex").slice(0, 8));
+  assert.equal(fp.fal.length, 8);
+  assert.ok(!JSON.stringify(fp).includes(secret));
+  assert.equal(fp.gemini, null);
+});
+
+test("rotating a credential changes its fingerprint", () => {
+  const before = summarizeFingerprints({ FAL_KEY: "old-leaked-key-value" });
+  const after = summarizeFingerprints({ FAL_KEY: "new-rotated-key-value" });
+
+  // The whole point: presence cannot distinguish these two states, so the
+  // fingerprint is what proves a rotation actually reached the process.
+  assert.equal(summarizeProviderConfig({ FAL_KEY: "old-leaked-key-value" }).fal, true);
+  assert.equal(summarizeProviderConfig({ FAL_KEY: "new-rotated-key-value" }).fal, true);
+  assert.notEqual(before.fal, after.fal);
+});
+
+test("readyz publishes fingerprints beside presence when healthy", () => {
+  const healthy = formatReadinessResponse(
+    { configured: true, healthy: true, latencyMs: 1 },
+    { version: "1.0.0", commit: "abc", schemaVersion: 55 }
+  );
+  assert.equal(typeof healthy.body.providerFingerprints, "object");
+
+  const unhealthy = formatReadinessResponse(
+    { configured: true, healthy: false, latencyMs: 0, error: "boom" },
+    { version: "1.0.0", commit: "abc", schemaVersion: 55 }
+  );
+  assert.equal(unhealthy.body.providerFingerprints, undefined);
 });

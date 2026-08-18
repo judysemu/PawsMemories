@@ -58,8 +58,30 @@ test("Hostinger starts listening before database initialization", () => {
   assert.match(deployScript, /bootstrapServer\.listen\(port, "0\.0\.0\.0"/);
   assert.match(deployScript, /globalThis\.__PAWSOME_HOSTINGER_BOOTSTRAP__/);
   assert.match(serverSource, /httpServer\.removeListener\("request", bootstrap\.handler\)/);
-  assert.match(serverSource, /httpServer\.on\("request", app\)/);
+  assert.match(serverSource, /httpServer\.on\("request", readinessGate\)/);
   assert.match(serverSource, /if \(isEntryPoint \|\| hasHostingerBootstrap\)/);
+});
+
+test("the adopted socket answers 503 until every route is registered", () => {
+  // Handing the socket straight to Express opened a window between adoption and
+  // the end of route registration — thousands of lines later, and after initDb's
+  // migrations — where a request hit a live app that had no such route yet and
+  // got Express's 404. In production that surfaced as an intermittent
+  // "Cannot GET /readyz" during restarts, which reads as a broken deploy rather
+  // than a starting one. The gate must open only after the last route exists.
+  const gateIndex = serverSource.indexOf("const readinessGate =");
+  const initDbIndex = serverSource.indexOf("await initDb();");
+  const spaCatchAllIndex = serverSource.indexOf('app.get("*", serveSpaShell)');
+  const readyIndex = serverSource.indexOf("markRoutesReady();");
+
+  assert.notEqual(gateIndex, -1, "the readiness gate is missing");
+  assert.notEqual(readyIndex, -1, "the gate is never opened");
+  assert.ok(gateIndex < initDbIndex, "the gate must be installed before migrations run");
+  assert.ok(
+    spaCatchAllIndex < readyIndex,
+    "the gate must open after the last route is registered, not before",
+  );
+  assert.match(serverSource, /res\.end\('\{"status":"starting"\}'\)/);
 });
 
 test("brand logo and product deep links remain part of the application shell", () => {
