@@ -50,15 +50,18 @@ assuming the removal failed.
    (`99997cee` -> `873bb54f`), then verified valid with a live call.
 3. Repository swept for credential exposure; clean (table above).
 
+## Blast radius
+
+Confined to fal.ai. The account in question was never associated with
+Hostinger, so the hosting panel — which renders credentials in cleartext — was
+never visible to them. Stripe, Resend, Shopify, Backblaze, Gemini, ElevenLabs
+and `JWT_SECRET` are therefore not implicated by this incident and do not need
+rotating on account of it.
+
 ## Still open
 
 - **Any other admin or member on fal**, and any key they created. Revoking a
   person does not revoke their keys.
-- **Every other credential that person could see.** The Hostinger panel renders
-  values in cleartext, so if they had panel access, treat Stripe, Resend,
-  Shopify, Backblaze, Gemini, ElevenLabs and `JWT_SECRET` as exposed. fal is
-  merely the one whose misuse appears on a readable usage log; a stolen
-  `JWT_SECRET` forges sessions silently and costs nothing.
 - **A hard spend cap on fal.** Small top-ups bound each incident but do not
   prevent a repeat.
 - GitHub collaborators are `judysemu` (admin), `robs46859-eng` (write),
