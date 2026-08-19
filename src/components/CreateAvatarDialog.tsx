@@ -27,6 +27,11 @@ interface CreateAvatarDialogProps {
 const MAX_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
 
+// Offered when a HEIC is rejected. Deliberately the bare URL: the address this
+// was taken from carried gclid, gbraid and four utm_* parameters from an ad
+// click, which would have routed our own users through that ad attribution.
+const HEIC_CONVERTER_URL = "https://www.freeconvert.com/heic-to-jpg";
+
 const PALETTES = [
   { id: "auto",       label: "Auto",       swatch: "linear-gradient(135deg,#a3a3a3,#e5e5e5)" },
   { id: "warm",       label: "Warm",       swatch: "linear-gradient(135deg,#f59e0b,#ef4444)" },
@@ -98,6 +103,9 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
   const [photos, setPhotos] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  // Shown only when a HEIC/HEIF was rejected, so the converter link appears
+  // where it helps and nowhere else.
+  const [showHeicHelp, setShowHeicHelp] = useState(false);
   
   // Text mode state
   const [subject, setSubject] = useState("");
@@ -110,8 +118,15 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const faceInputRef = useRef<HTMLInputElement>(null);
 
+  // iPhones default to HEIC, which the server cannot decode, so this is the most
+  // common rejection by far. A converter link turns a dead end into a next step.
+  const isHeic = (file: File) => /heic|heif/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+
   const validatePhoto = (file: File): string | null => {
-    if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type)) return "Choose JPG, PNG, WebP, HEIC, or HEIF images.";
+    // HEIC/HEIF are deliberately excluded: the bundled libheif cannot decode the
+    // tiled variant Apple cameras produce, so accepting them here only moves the
+    // failure to after the upload. Rejecting at pick time is the honest place.
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) return "Choose a JPG, PNG, or WebP image.";
     if (file.size > MAX_PHOTO_BYTES) return `${file.name} is larger than 15 MB.`;
     return null;
   };
@@ -127,10 +142,11 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
     const list = Array.from(files);
     for (const file of list) {
       const issue = validatePhoto(file);
-      if (issue) { setPhotoError(issue); return; }
+      if (issue) { setPhotoError(issue); setShowHeicHelp(isHeic(file)); return; }
     }
     const remaining = MAX_PHOTOS - photos.length;
     setPhotoError("");
+    setShowHeicHelp(false);
     try {
       const optimized = await Promise.all(list.slice(0, remaining).map(optimizeFile));
       setPhotos((previous) => [...previous, ...optimized].slice(0, MAX_PHOTOS));
@@ -143,8 +159,9 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
     const file = Array.from(files)[0];
     if (!file) return;
     const issue = validatePhoto(file);
-    if (issue) { setPhotoError(issue); return; }
+    if (issue) { setPhotoError(issue); setShowHeicHelp(isHeic(file)); return; }
     setPhotoError("");
+    setShowHeicHelp(false);
     try { setFacePhoto(await optimizeFile(file)); }
     catch (error: any) { setPhotoError(error.message || "The face photo could not be read."); }
   };
@@ -315,10 +332,10 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
                   <button type="button" onClick={() => faceInputRef.current?.click()} className="w-full min-h-56 rounded-2xl border-2 border-dashed border-primary/40 flex flex-col items-center justify-center gap-2 hover:bg-primary/5 transition-all">
                     <User size={32} className="text-primary" />
                     <span className="text-sm font-bold text-on-surface">Choose a clear face photo</span>
-                    <span className="text-xs text-on-surface-variant">JPG, PNG, WebP or HEIC · up to 15 MB</span>
+                    <span className="text-xs text-on-surface-variant">JPG, PNG or WebP · up to 15 MB</span>
                   </button>
                 )}
-                <input ref={faceInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.length && handleFaceFileSelect(e.target.files)} />
+                <input ref={faceInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.length && handleFaceFileSelect(e.target.files)} />
               </div>
             )}
 
@@ -358,8 +375,26 @@ export default function CreateAvatarDialog({ onClose, onSubmit, isDarkMode }: Cr
                   <span className="mt-1 text-xs text-on-surface-variant">Up to 5 images, 15 MB each</span>
                 </div>
               )}
-              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => e.target.files?.length && handleFilesSelect(e.target.files)} />
-              {photoError && <p role="alert" className="mt-2 text-xs font-bold text-error">{photoError}</p>}
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => e.target.files?.length && handleFilesSelect(e.target.files)} />
+              {photoError && (
+                <p role="alert" className="mt-2 text-xs font-bold text-error">
+                  {photoError}
+                  {showHeicHelp && (
+                    <>
+                      {" iPhone photos are usually HEIC. Change it in Settings \u203A Camera \u203A Formats \u203A Most Compatible, or "}
+                      <a
+                        href={HEIC_CONVERTER_URL}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="underline"
+                      >
+                        convert it to JPG
+                      </a>
+                      {" first."}
+                    </>
+                  )}
+                </p>
+              )}
             </div>
           </>
         ) : (
