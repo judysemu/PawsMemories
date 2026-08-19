@@ -52,9 +52,11 @@ const PRESET_TO_CLIPS: Record<string, string[]> = {
   jump: ["excited_jump"],
   frightened: ["surprised"],
   fold_arms: ["think"],
-  // `stretch` has no counterpart in the spec. It is kept out of the mapping
-  // deliberately: an unused clip in public/barkley would register as a clip
-  // featureFlag.ts cannot account for.
+  cast_a_spell: ["gesture_present"],
+  complain_01: ["gesture_shrug"],
+  // `stretch` and `bow` have no counterpart in the spec. They are kept out of
+  // the mapping deliberately: an unused clip in public/barkley would register
+  // as a clip featureFlag.ts cannot account for.
 };
 
 const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };

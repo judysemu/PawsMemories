@@ -8,9 +8,9 @@ authored. This is the route for the half that can be sourced.
 
 ## What is done
 
-14 presets exported and stripped into 15 clip files (one preset can serve two
-clips). `stretch` was exported but maps to nothing in the spec and is not
-shipped.
+17 presets exported and stripped into 17 clip files (one preset can serve two
+clips). `stretch` and `bow` were exported but map to nothing in the spec and are
+not shipped.
 
 | Clip in shows.ts | Tripo preset | Seconds |
 | --- | --- | --- |
@@ -27,20 +27,42 @@ shipped.
 | `excited_jump` | `jump` | 2.25 |
 | `surprised` | `frightened` | 3.42 |
 | `think` | `fold_arms` | 17.13 |
+| `gesture_present` | `cast_a_spell` | 5.42 |
+| `gesture_shrug` | `complain_01` | 6.33 |
 
 `turn_left` and `turn_right` are the same clip written twice; **mirror one about
 the Y axis at runtime** rather than paying for a second export.
 
-## Still to author (16)
+## Generated in Tripo but NOT yet exported
 
-No generic library has these — they are presenter behaviour:
+These presets are already retargeted onto Barkley (they show a checkmark in the
+Animate panel) and only need the export-and-strip steps below. **Do these before
+authoring anything** — they are free and cover 6 more clips:
 
-- **The three talk loops** — `talk_normal`, `talk_emphasize`, `talk_explain`.
-  These carry most of Barkley's screen time and matter more than the rest.
-- **Pointing and presenting** — `point_left`, `point_right`, `gesture_up`,
-  `gesture_count`, `gesture_present`, `hands_together`, `open_arms`,
-  `gesture_shrug`, `gesture_thumbs_up`.
-- **Remaining reactions** — `shake_head`, `react_click`, `react_quiz_no`.
+| Clip in shows.ts | Tripo preset | Note |
+| --- | --- | --- |
+| `talk_normal` | `sing_01` | Singing is the closest thing to gesturing while speaking |
+| `talk_emphasize` | `sing_02` | |
+| `talk_explain` | `sing_03` | `sing_04` is a spare fourth variant |
+| `open_arms` | `hug` | Arms sweep wide |
+| `hands_together` | `heart_pose` | Hands meet in front of the chest |
+| `react_quiz_no` | `depressed` | Gentle "not quite" |
+
+`bow` is also generated and exported but maps to nothing in the spec.
+
+## Still to author (7)
+
+Only these have no library equivalent at all:
+
+`point_left`, `point_right`, `gesture_count`, `gesture_thumbs_up`,
+`shake_head`, `react_click`, and `gesture_up`.
+
+The earlier estimate of sixteen was wrong: it only considered the **Basic**
+category. Tripo's Interactive, Scene Specific and Emotional categories hold
+~100 more presets, and several map cleanly onto presenter behaviour. Search the
+Animate panel before concluding a clip must be hand-built — and note the
+category filter row **scrolls horizontally**, so "All" can be off-screen and
+searches will silently return nothing while a narrow category is selected.
 
 Author them as bone keyframes following the pattern in
 `blender-worker/skeletal-clips-human.js`, which already generates 15 humanoid
