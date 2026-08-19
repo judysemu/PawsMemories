@@ -27,6 +27,14 @@ export interface StudioPhoto {
   originalWidth: number;
   originalHeight: number;
   lowResolution: boolean;
+  /**
+   * Set only while a background-removed cutout is in `dataUrl`, holding the
+   * photo exactly as it was prepared. Keeping the original rather than
+   * re-deriving it means undo is free and lossless, and a customer who dislikes
+   * the matte is never stuck with it — matting is an offer, not a conversion.
+   */
+  originalDataUrl?: string;
+  backgroundRemoved?: boolean;
 }
 
 export const FULL_PRINT_WIDTH = 2400;
