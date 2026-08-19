@@ -72,7 +72,21 @@ export async function removeBackground(imageDataUrl: string): Promise<Background
       return { removed: false, featureDisabled: true };
     }
     if (!response.ok) {
-      return { removed: false, reason: GENERIC_FAILURE };
+      // Distinct from the fail-open text below. These two arrive for entirely
+      // different reasons — a rejected request versus a provider outage — and
+      // wearing the same words made a live failure impossible to diagnose from
+      // the UI, which is exactly when diagnosis matters.
+      let detail = "";
+      try {
+        const body = await response.json();
+        detail = String(body?.error || "");
+      } catch {
+        // A non-JSON error body tells us nothing; the status still does.
+      }
+      return {
+        removed: false,
+        reason: detail || `That photo was rejected before matting (HTTP ${response.status}).`,
+      };
     }
     payload = await response.json();
   } catch {

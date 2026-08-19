@@ -114,3 +114,29 @@ test("unsupported input is rejected without spending a request", async () => {
     },
   );
 });
+
+test("a rejected request reports the server's reason, not the outage message", async () => {
+  // A 400 and a fail-open both leave the customer with their original photo, but
+  // they mean different things and need different fixes. Sharing one message
+  // made a live failure undiagnosable from the UI.
+  await withFetch(
+    async () => jsonResponse({ error: "That image is too large. Please use one under 15 MB." }, 400),
+    async () => {
+      const outcome = await removeBackground(PNG_DATA_URL);
+      assert.equal(outcome.removed, false);
+      assert.match(outcome.reason, /too large/i);
+      assert.doesNotMatch(outcome.reason, /couldn't separate/i);
+    },
+  );
+});
+
+test("a rejection with no usable body still names the status", async () => {
+  await withFetch(
+    async () => ({ ok: false, status: 413, json: async () => { throw new Error("not json"); } }),
+    async () => {
+      const outcome = await removeBackground(PNG_DATA_URL);
+      assert.equal(outcome.removed, false);
+      assert.match(outcome.reason, /413/);
+    },
+  );
+});
