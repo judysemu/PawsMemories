@@ -1,31 +1,167 @@
 {
-  "_comment": "retarget map for humanoid bake-lod. Renames Tripo/Mixamo humanoid bones to biped canonical names.",
+  "_comment": "retarget map for humanoid bake-lod. Renames Tripo/Mixamo humanoid bones to biped canonical names. Tripo's auto-rigger emits PascalCase side-prefixed names (L_Upperarm, R_Calf, Spine01); Mixamo emits mixamorig:*. Both are listed.",
   "confidenceThreshold": 0.85,
   "canonical": {
-    "hips": ["mixamorig:hips", "hips", "pelvis", "root"],
-    "spine": ["mixamorig:spine", "spine"],
-    "chest": ["mixamorig:spine2", "mixamorig:spine1", "mixamorig:chest", "chest", "spine1", "spine2"],
-    "neck": ["mixamorig:neck", "neck"],
-    "head": ["mixamorig:head", "head"],
-    "shoulder.L": ["mixamorig:leftshoulder", "leftshoulder", "shoulder.l", "shoulder_l"],
-    "shoulder.R": ["mixamorig:rightshoulder", "rightshoulder", "shoulder.r", "shoulder_r"],
-    "upperarm.L": ["mixamorig:leftarm", "leftarm", "upperarm.l", "upperarm_l", "leftupperarm"],
-    "upperarm.R": ["mixamorig:rightarm", "rightarm", "upperarm.r", "upperarm_r", "rightupperarm"],
-    "forearm.L": ["mixamorig:leftforearm", "leftforearm", "forearm.l", "forearm_l", "leftlowerarm", "leftarm_lower"],
-    "forearm.R": ["mixamorig:rightforearm", "rightforearm", "forearm.r", "forearm_r", "rightlowerarm", "rightarm_lower"],
-    "hand.L": ["mixamorig:lefthand", "lefthand", "hand.l", "hand_l"],
-    "hand.R": ["mixamorig:righthand", "righthand", "hand.r", "hand_r"],
-    "thigh.L": ["mixamorig:leftupleg", "leftupleg", "thigh.l", "thigh_l", "leftupperleg"],
-    "thigh.R": ["mixamorig:rightupleg", "rightupleg", "thigh.r", "thigh_r", "rightupperleg"],
-    "shin.L": ["mixamorig:leftleg", "leftleg", "shin.l", "shin_l", "leftlowerleg"],
-    "shin.R": ["mixamorig:rightleg", "rightleg", "shin.r", "shin_r", "rightlowerleg"],
-    "foot.L": ["mixamorig:leftfoot", "leftfoot", "foot.l", "foot_l"],
-    "foot.R": ["mixamorig:rightfoot", "rightfoot", "foot.r", "foot_r"]
+    "hips": [
+      "mixamorig:hips",
+      "hips",
+      "pelvis",
+      "root",
+      "hip"
+    ],
+    "spine": [
+      "mixamorig:spine",
+      "spine",
+      "waist",
+      "spine01"
+    ],
+    "chest": [
+      "mixamorig:spine2",
+      "mixamorig:spine1",
+      "mixamorig:chest",
+      "chest",
+      "spine1",
+      "spine2",
+      "spine02"
+    ],
+    "neck": [
+      "mixamorig:neck",
+      "neck",
+      "necktwist01"
+    ],
+    "head": [
+      "mixamorig:head",
+      "head"
+    ],
+    "shoulder.L": [
+      "mixamorig:leftshoulder",
+      "leftshoulder",
+      "shoulder.l",
+      "shoulder_l",
+      "l_clavicle"
+    ],
+    "shoulder.R": [
+      "mixamorig:rightshoulder",
+      "rightshoulder",
+      "shoulder.r",
+      "shoulder_r",
+      "r_clavicle"
+    ],
+    "upperarm.L": [
+      "mixamorig:leftarm",
+      "leftarm",
+      "upperarm.l",
+      "upperarm_l",
+      "leftupperarm",
+      "l_upperarm"
+    ],
+    "upperarm.R": [
+      "mixamorig:rightarm",
+      "rightarm",
+      "upperarm.r",
+      "upperarm_r",
+      "rightupperarm",
+      "r_upperarm"
+    ],
+    "forearm.L": [
+      "mixamorig:leftforearm",
+      "leftforearm",
+      "forearm.l",
+      "forearm_l",
+      "leftlowerarm",
+      "leftarm_lower",
+      "l_forearm"
+    ],
+    "forearm.R": [
+      "mixamorig:rightforearm",
+      "rightforearm",
+      "forearm.r",
+      "forearm_r",
+      "rightlowerarm",
+      "rightarm_lower",
+      "r_forearm"
+    ],
+    "hand.L": [
+      "mixamorig:lefthand",
+      "lefthand",
+      "hand.l",
+      "hand_l",
+      "l_hand"
+    ],
+    "hand.R": [
+      "mixamorig:righthand",
+      "righthand",
+      "hand.r",
+      "hand_r",
+      "r_hand"
+    ],
+    "thigh.L": [
+      "mixamorig:leftupleg",
+      "leftupleg",
+      "thigh.l",
+      "thigh_l",
+      "leftupperleg",
+      "l_thigh"
+    ],
+    "thigh.R": [
+      "mixamorig:rightupleg",
+      "rightupleg",
+      "thigh.r",
+      "thigh_r",
+      "rightupperleg",
+      "r_thigh"
+    ],
+    "shin.L": [
+      "mixamorig:leftleg",
+      "leftleg",
+      "shin.l",
+      "shin_l",
+      "leftlowerleg",
+      "l_calf"
+    ],
+    "shin.R": [
+      "mixamorig:rightleg",
+      "rightleg",
+      "shin.r",
+      "shin_r",
+      "rightlowerleg",
+      "r_calf"
+    ],
+    "foot.L": [
+      "mixamorig:leftfoot",
+      "leftfoot",
+      "foot.l",
+      "foot_l",
+      "l_foot"
+    ],
+    "foot.R": [
+      "mixamorig:rightfoot",
+      "rightfoot",
+      "foot.r",
+      "foot_r",
+      "r_foot"
+    ]
   },
   "legChains": [
-    ["thigh.L", "shin.L", "foot.L"],
-    ["thigh.R", "shin.R", "foot.R"],
-    ["upperarm.L", "forearm.L", "hand.L"],
-    ["upperarm.R", "forearm.R", "hand.R"]
+    [
+      "thigh.L",
+      "shin.L",
+      "foot.L"
+    ],
+    [
+      "thigh.R",
+      "shin.R",
+      "foot.R"
+    ],
+    [
+      "upperarm.L",
+      "forearm.L",
+      "hand.L"
+    ],
+    [
+      "upperarm.R",
+      "forearm.R",
+      "hand.R"
+    ]
   ]
 }
