@@ -71,8 +71,25 @@ export function createPhotoEditRouter(
       console.error("[photo-edit] cache read failed:", err?.message || err);
     }
 
+    // Matting and storage are separated deliberately. Once the provider returns,
+    // the compute-seconds are already billed, so a failure after this point is a
+    // different event with a different remedy — and collapsing both into
+    // PROVIDER_FAILED made a live outage undiagnosable: the message blamed the
+    // provider while the provider had in fact succeeded and been paid.
+    let cutout;
     try {
-      const cutout = await provider.removeBackground({ base64, mimeType });
+      cutout = await provider.removeBackground({ base64, mimeType });
+    } catch (err: any) {
+      const code = err instanceof BackgroundRemovalError ? err.code : "PROVIDER_FAILED";
+      console.error("[photo-edit/remove-background] provider", code, err?.message || err);
+      return res.json({
+        removed: false,
+        code,
+        reason: "We couldn't separate the background on this photo. Your original is unchanged.",
+      });
+    }
+
+    try {
       const cutoutBytes = Buffer.from(cutout.base64, "base64");
 
       // Cutouts are derived customer content, not storefront assets, so they go
@@ -97,13 +114,20 @@ export function createPhotoEditRouter(
         mimeType: cutout.mimeType, widthPx: cutout.widthPx, heightPx: cutout.heightPx,
       });
     } catch (err: any) {
-      // FAIL OPEN. The caller keeps the original photo and the order proceeds.
-      const code = err instanceof BackgroundRemovalError ? err.code : "PROVIDER_FAILED";
-      console.error("[photo-edit/remove-background]", code, err?.message || err);
+      // FAIL OPEN, but say what actually broke. The matte succeeded and was
+      // billed; the cutout simply could not be stored or signed. The usual cause
+      // is a Backblaze application key scoped to a single bucket, which reaches
+      // the public bucket and is refused by the private one — so the message
+      // names storage rather than implying the model failed.
+      console.error(
+        "[photo-edit/remove-background] storage STORAGE_FAILED",
+        `objectKey=photo-edit/${userPhone}/${sourceSha}.webp`,
+        err?.message || err,
+      );
       return res.json({
         removed: false,
-        code,
-        reason: "We couldn't separate the background on this photo. Your original is unchanged.",
+        code: "STORAGE_FAILED",
+        reason: "The cutout was created but could not be saved. Your original is unchanged.",
       });
     }
   });

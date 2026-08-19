@@ -476,6 +476,12 @@ export function summarizeProviderConfig(env: NodeJS.ProcessEnv = process.env) {
     elevenlabs: present("ELEVENLABS_API_KEY"),
     shopify: present("SHOPIFY_CLIENT_SECRET"),
     mediaBucket: present("MEDIA_BUCKET_KEY", "MEDIA_BUCKET_SECRET"),
+    // Reported separately because it is a genuinely different bucket with its
+    // own name, and "storage is configured" was previously answered from the
+    // public variables alone — which reads as healthy while every private write
+    // fails. Note this proves configuration, not reachability: a key scoped to
+    // one bucket satisfies this check and is still refused by the other.
+    mediaPrivateBucket: present("MEDIA_PRIVATE_BUCKET_NAME"),
     byokVault: present("KEY_ENCRYPTION_SECRET"),
   };
 }
@@ -504,6 +510,7 @@ export function fingerprintProviderConfig(env: NodeJS.ProcessEnv = process.env) 
     elevenlabs: fingerprint("ELEVENLABS_API_KEY"),
     shopify: fingerprint("SHOPIFY_CLIENT_SECRET"),
     mediaBucket: fingerprint("MEDIA_BUCKET_KEY"),
+    mediaPrivateBucket: fingerprint("MEDIA_PRIVATE_BUCKET_NAME"),
     byokVault: fingerprint("KEY_ENCRYPTION_SECRET"),
   };
 }
