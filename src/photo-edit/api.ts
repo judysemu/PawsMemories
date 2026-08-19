@@ -93,12 +93,23 @@ export async function removeBackground(imageDataUrl: string): Promise<Background
     return { removed: false, reason: GENERIC_FAILURE };
   }
 
-  if (!payload?.removed || typeof payload.url !== "string") {
+  if (!payload?.removed) {
     return { removed: false, reason: String(payload?.reason || GENERIC_FAILURE) };
   }
 
+  // Accept both a bare string and the { url, expiresAt } envelope that
+  // getPrivateSignedUrl returns. Insisting on a string discarded a matte that
+  // had already succeeded and been billed, and reported it to the customer as a
+  // provider failure — the most expensive way to be wrong about a response.
+  const signedUrl = typeof payload.url === "string"
+    ? payload.url
+    : typeof payload.url?.url === "string" ? payload.url.url : "";
+  if (!signedUrl) {
+    return { removed: false, reason: GENERIC_FAILURE };
+  }
+
   try {
-    return { removed: true, dataUrl: await inlineSignedUrl(payload.url), cached: Boolean(payload.cached) };
+    return { removed: true, dataUrl: await inlineSignedUrl(signedUrl), cached: Boolean(payload.cached) };
   } catch {
     // The matte succeeded but its bytes are unreachable. Same outcome for the
     // customer as a provider failure, so it is reported the same way.

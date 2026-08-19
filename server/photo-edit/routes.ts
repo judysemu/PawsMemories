@@ -59,9 +59,13 @@ export function createPhotoEditRouter(
         [sourceSha, provider.id],
       );
       if (cached.length) {
-        const url = await getPrivateSignedUrl(cached[0].object_key);
+        // getPrivateSignedUrl returns { url, expiresAt, ttlSeconds }. Passing the
+        // whole object through as `url` shipped a response whose `url` was not a
+        // string, which every caller reasonably read as a malformed success and
+        // reported as a failure — the matte had in fact worked and been billed.
+        const signed = await getPrivateSignedUrl(cached[0].object_key);
         return res.json({
-          removed: true, cached: true, url,
+          removed: true, cached: true, url: signed.url, expiresAt: signed.expiresAt,
           mimeType: cached[0].mime_type,
           widthPx: cached[0].width_px, heightPx: cached[0].height_px,
         });
@@ -108,9 +112,9 @@ export function createPhotoEditRouter(
         console.error("[photo-edit] cache write failed:", err?.message || err);
       });
 
-      const url = await getPrivateSignedUrl(objectKey);
+      const signed = await getPrivateSignedUrl(objectKey);
       return res.json({
-        removed: true, cached: false, url,
+        removed: true, cached: false, url: signed.url, expiresAt: signed.expiresAt,
         mimeType: cutout.mimeType, widthPx: cutout.widthPx, heightPx: cutout.heightPx,
       });
     } catch (err: any) {

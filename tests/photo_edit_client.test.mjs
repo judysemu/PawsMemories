@@ -140,3 +140,39 @@ test("a rejection with no usable body still names the status", async () => {
     },
   );
 });
+
+test("a signed-url envelope is accepted, not discarded as malformed", async () => {
+  // getPrivateSignedUrl returns { url, expiresAt, ttlSeconds }. Requiring a bare
+  // string threw away a cutout that had already succeeded and been billed, and
+  // told the customer the provider had failed.
+  await withFetch(
+    async (url) => {
+      if (String(url).includes("/api/photo-edit/")) {
+        return jsonResponse({ removed: true, url: { url: "https://private.example/signed", expiresAt: "2026-01-01T00:00:00Z" } });
+      }
+      return { ok: true, status: 200, blob: async () => ({ __bytes: Buffer.from("cutout") }) };
+    },
+    async () => {
+      globalThis.FileReader = class {
+        readAsDataURL(blob) {
+          this.result = `data:image/webp;base64,${blob.__bytes.toString("base64")}`;
+          this.onload?.();
+        }
+      };
+      const outcome = await removeBackground(PNG_DATA_URL);
+      assert.equal(outcome.removed, true, "an enveloped url must not be treated as a failure");
+      assert.match(outcome.dataUrl, /^data:image\/webp;base64,/);
+    },
+  );
+});
+
+test("a success carrying no usable url still degrades safely", async () => {
+  await withFetch(
+    async () => jsonResponse({ removed: true, url: { expiresAt: "2026-01-01T00:00:00Z" } }),
+    async () => {
+      const outcome = await removeBackground(PNG_DATA_URL);
+      assert.equal(outcome.removed, false);
+      assert.ok(outcome.reason);
+    },
+  );
+});
