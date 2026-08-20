@@ -6,7 +6,6 @@ import {
 } from "../../tripo";
 import type { GeneratedViewPayload, ProviderGenerationResult, ViewKind } from "./types";
 import { ORDERED_VIEW_KINDS } from "./types";
-import { isInHouseOnly } from "../externalGenerativePolicy";
 
 export const MIN_REFERENCE_DIMENSION_PX = 256;
 export const CANONICAL_REFERENCE_DIMENSION_PX = 1024;
@@ -107,11 +106,13 @@ async function canonicalFrontImage(photoBuffer: Buffer): Promise<GeneratedViewPa
 }
 
 /**
- * Internal reference preparation for single-image TRELLIS builds.
+ * Internal reference preparation for single-image, front-only builds.
  *
  * The customer's upload is decoded, orientation-corrected, padded, and encoded
  * as one immutable front reference. No side/rear views are inferred or copied,
  * so the resulting manifest remains truthful about the evidence supplied.
+ * Retained for historical front-only attempts and for an explicit
+ * PAWS_REFERENCE_PROVIDER="uploaded_front" selection.
  */
 export class UploadedFrontReferenceImageProvider implements ReferenceImageProvider {
   readonly name = "uploaded_front";
@@ -198,31 +199,19 @@ export class ReferenceProviderConfigurationError extends Error {
   }
 }
 
-function configuredExternalReferenceProviders(env: NodeJS.ProcessEnv): Set<string> {
-  return new Set([
-    "tripo",
-    ...String(env.PAWS_REFERENCE_EXTERNAL_PROVIDER_IDS || "")
-      .split(",")
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean),
-  ]);
-}
-
-/** Select a reference-preparation implementation without constructing it. */
+/**
+ * Select a reference-preparation implementation without constructing it.
+ *
+ * Tripo is the default. The paid-provider kill switch is not applied here: it
+ * lives at the network boundary in tripo.ts, so a blocked call fails there
+ * rather than being silently rerouted to a different reference contract.
+ */
 export function selectedReferenceImageProvider(env: NodeJS.ProcessEnv = process.env): string {
-  const strictInHouse = isInHouseOnly(env);
-  const fallback = strictInHouse ? "uploaded_front" : "tripo";
-  const selected = String(env.PAWS_REFERENCE_PROVIDER || fallback).trim().toLowerCase();
+  const selected = String(env.PAWS_REFERENCE_PROVIDER || "tripo").trim().toLowerCase();
   if (!/^[a-z][a-z0-9_-]{1,39}$/.test(selected)) {
     throw new ReferenceProviderConfigurationError(
       "Configured reference provider id is invalid",
       "REFERENCE_PROVIDER_CONFIG_INVALID",
-    );
-  }
-  if (strictInHouse && configuredExternalReferenceProviders(env).has(selected)) {
-    throw new ReferenceProviderConfigurationError(
-      "In-house-only mode rejects the selected external reference provider",
-      "INHOUSE_REFERENCE_PROVIDER_REQUIRED",
     );
   }
   return selected;

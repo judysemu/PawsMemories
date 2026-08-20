@@ -24,87 +24,46 @@ const BASE_CONFIGURATION = {
   styleDirection: null,
 };
 
-const TRELLIS_ENV = {
-  PAWS_3D_PROVIDER: "trellis2",
-  PAWS_3D_INHOUSE_ONLY: "true",
-  PAWS_3D_EXTERNAL_PROVIDER_IDS: "tripo,fal",
-};
-
 const TRIPO_ENV = {
   PAWS_3D_PROVIDER: "tripo",
 };
 
-test("TRELLIS publishes PBR in base with no separately priced texture product", () => {
-  const capabilities = petGlbProductCapabilities(TRELLIS_ENV);
-  assert.equal(capabilities.providerId, "trellis2");
-  assert.deepEqual(capabilities.subjectProfiles.map(({ id }) => id), ["pet"]);
-  assert.equal(capabilities.texture.includedInBase, true);
-  assert.equal(capabilities.texture.separateStageAvailable, false);
-  assert.equal(capabilities.texture.defaultSelected, false);
-  assert.equal(capabilities.texture.priceCredits, 0);
-  assert.equal(capabilities.texture.styleDirectionAvailable, false);
-  assert.equal(stagePrice("texture", TRELLIS_ENV), 0);
-  assert.deepEqual(productQuote({ ...BASE_CONFIGURATION, includeTexture: true }, TRELLIS_ENV), {
-    base: PET_GLB_STAGE_PRICES.BASE,
-    texture: 0,
-    rig: PET_GLB_STAGE_PRICES.RIG,
-    total: PET_GLB_STAGE_PRICES.BASE + PET_GLB_STAGE_PRICES.RIG,
-  });
-});
+// Tripo is the only provider the model generator supports. The in-house
+// TRELLIS provider and its capability fork were removed on 2026-08-20 after
+// its Azure GPU VMs were deleted; anything else must fail closed.
+const UNKNOWN_PROVIDER_ENV = {
+  PAWS_3D_PROVIDER: "trellis2",
+};
 
-test("TRELLIS rejects separate texture, styling, and humanoid before persistence", () => {
-  for (const [configuration, code] of [
-    [{ ...BASE_CONFIGURATION, includeTexture: true }, "TEXTURE_INCLUDED_IN_BASE"],
-    [{ ...BASE_CONFIGURATION, styleDirection: "toy finish" }, "STYLE_DIRECTION_UNAVAILABLE"],
-    [{ ...BASE_CONFIGURATION, subjectProfile: "humanoid" }, "SUBJECT_PROFILE_UNSUPPORTED"],
+test("an unsupported provider publishes no paid product and fails closed", () => {
+  assert.throws(
+    () => petGlbProductCapabilities(UNKNOWN_PROVIDER_ENV),
+    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
+  );
+  for (const call of [
+    () => assertPetGlbConfigurationSupported(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
+    () => normalizeHistoricalConfiguration(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
+    () => nextPetGlbStage(BASE_CONFIGURATION, "base", UNKNOWN_PROVIDER_ENV),
+    () => stagePrice("texture", UNKNOWN_PROVIDER_ENV),
+    () => productQuote(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
   ]) {
-    assert.throws(
-      () => assertPetGlbConfigurationSupported(configuration, TRELLIS_ENV),
-      (error) => error instanceof PetGenerationError && error.code === code,
-    );
+    assert.throws(call, (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER");
   }
 });
 
-test("TRELLIS skips texture for historical orders while preserving rig progression", () => {
-  const historical = {
-    ...BASE_CONFIGURATION,
-    includeTexture: true,
-    textureQuality: "detailed",
-    styleDirection: "legacy style",
-  };
-  assert.equal(nextPetGlbStage(historical, "base", TRELLIS_ENV), "rig_check");
-  assert.equal(nextPetGlbStage({ ...historical, includeRig: false }, "base", TRELLIS_ENV), null);
-  assert.deepEqual(normalizeHistoricalConfiguration(historical, TRELLIS_ENV), {
-    ...historical,
-    includeTexture: false,
-    textureQuality: "standard",
-    styleDirection: null,
-  });
-});
-
-test("pet product endpoint and manifest contract advertise exact TRELLIS front-only input", async (t) => {
-  const previous = {
-    provider: process.env.PAWS_3D_PROVIDER,
-    inHouseOnly: process.env.PAWS_3D_INHOUSE_ONLY,
-    externalIds: process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS,
-  };
-  process.env.PAWS_3D_PROVIDER = "trellis2";
-  process.env.PAWS_3D_INHOUSE_ONLY = "true";
-  process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS = "tripo,fal";
+test("pet product endpoint advertises the Tripo four-view contract", async (t) => {
+  const previous = process.env.PAWS_3D_PROVIDER;
+  process.env.PAWS_3D_PROVIDER = "tripo";
   t.after(() => {
-    if (previous.provider === undefined) delete process.env.PAWS_3D_PROVIDER;
-    else process.env.PAWS_3D_PROVIDER = previous.provider;
-    if (previous.inHouseOnly === undefined) delete process.env.PAWS_3D_INHOUSE_ONLY;
-    else process.env.PAWS_3D_INHOUSE_ONLY = previous.inHouseOnly;
-    if (previous.externalIds === undefined) delete process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS;
-    else process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS = previous.externalIds;
+    if (previous === undefined) delete process.env.PAWS_3D_PROVIDER;
+    else process.env.PAWS_3D_PROVIDER = previous;
   });
 
   const frontOnly = {
     references: { frontUrl: "https://private.test/front.png" },
     referenceSessionUuid: "00000000-0000-4000-8000-000000000000",
   };
-  assert.equal(ReferenceSubmissionSchema.safeParse(frontOnly).success, true);
+  assert.equal(ReferenceSubmissionSchema.safeParse(frontOnly).success, false);
 
   const app = express();
   app.use("/api/pet-glb", createPetGenerationRouter({
@@ -120,14 +79,14 @@ test("pet product endpoint and manifest contract advertise exact TRELLIS front-o
   const response = await fetch(`http://127.0.0.1:${address.port}/api/pet-glb/product`);
   assert.equal(response.status, 200);
   const product = await response.json();
-  assert.equal(product.providerId, "trellis2");
-  assert.equal(product.prices.texture, 0);
-  assert.equal(product.textureGeneration.includedInBase, true);
-  assert.equal(product.textureGeneration.separateStageAvailable, false);
-  assert.deepEqual(product.subjectProfiles.map(({ id }) => id), ["pet"]);
-  assert.deepEqual(product.referenceRequirements.requiredViewKinds, ["front"]);
-  assert.deepEqual(product.referenceRequirements.generatedForApproval, []);
-  assert.equal(product.referenceRequirements.canRegenerate, false);
+  assert.equal(product.providerId, "tripo");
+  assert.equal(product.prices.texture, PET_GLB_STAGE_PRICES.TEXTURE);
+  assert.equal(product.textureGeneration.includedInBase, false);
+  assert.equal(product.textureGeneration.separateStageAvailable, true);
+  assert.deepEqual(product.subjectProfiles.map(({ id }) => id), ["pet", "humanoid"]);
+  assert.deepEqual(product.referenceRequirements.requiredViewKinds, ["front", "left", "right", "rear"]);
+  assert.deepEqual(product.referenceRequirements.generatedForApproval, ["left", "right", "rear"]);
+  assert.equal(product.referenceRequirements.canRegenerate, true);
 });
 
 test("Tripo manifest contract still requires all four approved views", () => {
@@ -171,22 +130,12 @@ test("Tripo paid texture and humanoid behavior remains unchanged", () => {
   });
 });
 
-test("service rejects unsupported TRELLIS configuration before touching the database", async (t) => {
-  const previous = {
-    provider: process.env.PAWS_3D_PROVIDER,
-    inHouseOnly: process.env.PAWS_3D_INHOUSE_ONLY,
-    externalIds: process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS,
-  };
+test("service rejects an unsupported provider before touching the database", async (t) => {
+  const previous = process.env.PAWS_3D_PROVIDER;
   process.env.PAWS_3D_PROVIDER = "trellis2";
-  process.env.PAWS_3D_INHOUSE_ONLY = "true";
-  process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS = "tripo,fal";
   t.after(() => {
-    if (previous.provider === undefined) delete process.env.PAWS_3D_PROVIDER;
-    else process.env.PAWS_3D_PROVIDER = previous.provider;
-    if (previous.inHouseOnly === undefined) delete process.env.PAWS_3D_INHOUSE_ONLY;
-    else process.env.PAWS_3D_INHOUSE_ONLY = previous.inHouseOnly;
-    if (previous.externalIds === undefined) delete process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS;
-    else process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS = previous.externalIds;
+    if (previous === undefined) delete process.env.PAWS_3D_PROVIDER;
+    else process.env.PAWS_3D_PROVIDER = previous;
   });
 
   let poolCalls = 0;
@@ -202,19 +151,22 @@ test("service rejects unsupported TRELLIS configuration before touching the data
 
   await assert.rejects(
     service.createConfiguredOrder("+15555550123", { ...BASE_CONFIGURATION, includeTexture: true }),
-    (error) => error instanceof PetGenerationError && error.code === "TEXTURE_INCLUDED_IN_BASE",
+    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
   );
   await assert.rejects(
     service.createConfiguredOrder("+15555550123", { ...BASE_CONFIGURATION, subjectProfile: "humanoid" }),
-    (error) => error instanceof PetGenerationError && error.code === "SUBJECT_PROFILE_UNSUPPORTED",
+    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
   );
   assert.equal(poolCalls, 0);
 });
 
-test("model studio defaults TRELLIS texture off and hides unavailable styling", () => {
+test("model studio defaults texture off, gates styling, and carries no in-house copy", () => {
   const source = fs.readFileSync("src/components/PetModelStudio.tsx", "utf8");
   assert.match(source, /useState\(false\).*includeTexture|\[includeTexture, setIncludeTexture\] = useState\(false\)/s);
   assert.match(source, /product\.textureGeneration\.separateStageAvailable/);
   assert.match(source, /includeTexture && product\.textureGeneration\.styleDirectionAvailable/);
-  assert.match(source, /Lifelike PBR color included/);
+  // The PBR-included panel existed only for the removed in-house capability
+  // shape; under Tripo separateStageAvailable is always true.
+  assert.doesNotMatch(source, /Lifelike PBR color included/);
+  assert.doesNotMatch(source, /in-house/i);
 });

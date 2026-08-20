@@ -17,7 +17,7 @@ export function isInHouseOnly(env: NodeJS.ProcessEnv = process.env): boolean {
  *
  * Provider selection guards protect the current preferred path; this boundary
  * also protects legacy routes, retry workers, and direct adapter imports. It is
- * intentionally independent of any TRELLIS or Azure implementation.
+ * intentionally independent of any particular provider implementation.
  */
 export function assertExternalGenerativeProviderAllowed(
   providerId: string,

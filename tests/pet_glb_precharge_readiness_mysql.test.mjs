@@ -26,7 +26,6 @@ const BASE_CONFIGURATION = {
   textureQuality: "standard",
   styleDirection: null,
 };
-const TRELLIS_REFERENCE = { frontUrl: "https://references.test/front.png" };
 const TRIPO_REFERENCE = {
   frontUrl: "https://references.test/front.png",
   leftUrl: "https://references.test/left.png",
@@ -79,19 +78,13 @@ after(async () => {
 function selectProduct(t, providerId, rigEnabled = false) {
   const prior = {
     provider: process.env.PAWS_3D_PROVIDER,
-    inHouseOnly: process.env.PAWS_3D_INHOUSE_ONLY,
-    external: process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS,
     rig: process.env.PET_GLB_BODY_RIG_ENABLED,
   };
   process.env.PAWS_3D_PROVIDER = providerId;
-  process.env.PAWS_3D_INHOUSE_ONLY = providerId === "trellis2" ? "true" : "false";
-  process.env.PAWS_3D_EXTERNAL_PROVIDER_IDS = "tripo,fal";
   process.env.PET_GLB_BODY_RIG_ENABLED = rigEnabled ? "true" : "false";
   t.after(() => {
     for (const [key, value] of Object.entries({
       PAWS_3D_PROVIDER: prior.provider,
-      PAWS_3D_INHOUSE_ONLY: prior.inHouseOnly,
-      PAWS_3D_EXTERNAL_PROVIDER_IDS: prior.external,
       PET_GLB_BODY_RIG_ENABLED: prior.rig,
     })) {
       if (value === undefined) delete process.env[key];
@@ -159,7 +152,7 @@ async function createUser(phone, credits = 200) {
   await pool.query("INSERT INTO users (phone, credits) VALUES (?, ?)", [phone, credits]);
 }
 
-async function createReferenceApproval(service, phone, manifest = TRELLIS_REFERENCE, configuration = BASE_CONFIGURATION) {
+async function createReferenceApproval(service, phone, manifest = TRIPO_REFERENCE, configuration = BASE_CONFIGURATION) {
   const created = await service.createConfiguredOrder(phone, configuration);
   const submitted = await service.submitReferenceManifest(created.order.orderUuid, phone, manifest);
   const current = submitted.currentStage;
@@ -195,10 +188,10 @@ async function moneyAndAttempts(phone, orderId) {
   };
 }
 
-test("real MySQL: TRELLIS or Blender preflight failure leaves approval entirely uncharged", async (t) => {
+test("real MySQL: provider or Blender preflight failure leaves approval entirely uncharged", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2");
-  for (const [index, code] of ["TRELLIS_WORKER_NOT_READY", "BLENDER_WORKER_NOT_READY"].entries()) {
+  selectProduct(t, "tripo");
+  for (const [index, code] of ["PROVIDER_WORKER_NOT_READY", "BLENDER_WORKER_NOT_READY"].entries()) {
     const phone = `+1555111000${index}`;
     await createUser(phone);
     const harness = providerHarness({ failPreflight: code });
@@ -225,7 +218,7 @@ test("real MySQL: TRELLIS or Blender preflight failure leaves approval entirely 
 
 test("real MySQL: retry readiness failure creates no retry attempt and no debit", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2");
+  selectProduct(t, "tripo");
   const phone = "+15551110100";
   await createUser(phone);
   const order = await orders.createConfigured(phone, "CUSTOM_RIGGED_PET_GLB_V1", BASE_CONFIGURATION);
@@ -258,7 +251,7 @@ test("real MySQL: retry readiness failure creates no retry attempt and no debit"
 
 test("real MySQL: automatic rig purchase cannot debit when aggregate readiness fails", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2", true);
+  selectProduct(t, "tripo", true);
   const phone = "+15551110200";
   await createUser(phone);
   const order = await orders.createConfigured(phone, "CUSTOM_RIGGED_PET_GLB_V1", {
@@ -306,7 +299,7 @@ test("real MySQL: automatic rig purchase cannot debit when aggregate readiness f
 
 test("real MySQL: a post-debit readiness race is refunded before any submission", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2");
+  selectProduct(t, "tripo");
   const phone = "+15551110300";
   await createUser(phone);
   let checks = 0;
@@ -339,7 +332,7 @@ test("real MySQL: a post-debit readiness race is refunded before any submission"
 
 test("real MySQL: zero-credit rig capability submission still fails closed on fresh readiness", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2", true);
+  selectProduct(t, "tripo", true);
   const phone = "+15551110350";
   await createUser(phone);
   const order = await orders.createConfigured(phone, "CUSTOM_RIGGED_PET_GLB_V1", {
@@ -350,8 +343,8 @@ test("real MySQL: zero-credit rig capability submission still fails closed on fr
   await pool.query(
     `INSERT INTO provider_generation_jobs
        (job_id, provider_id, provider_version, provider_task_handle, model, config_hash, cancelled)
-     VALUES (?, 'trellis2', 'test', ?, 'test', ?, 0)`,
-    [sourceJobId, `trellis2:${sourceJobId}`, HASH],
+     VALUES (?, 'tripo', 'test', ?, 'test', ?, 0)`,
+    [sourceJobId, `tripo:${sourceJobId}`, HASH],
   );
   const attemptUuid = crypto.randomUUID();
   const [base] = await pool.query(
@@ -427,7 +420,7 @@ test("real MySQL: Tripo retains its normal charged submission behavior", async (
 
 test("real MySQL: provider submission remains bound to the persisted asset version", async (t) => {
   if (!available) return t.skip("MySQL not available");
-  selectProduct(t, "trellis2");
+  selectProduct(t, "tripo");
   const phone = "+15551110500";
   await createUser(phone);
   const sessionUuid = crypto.randomUUID();
@@ -451,8 +444,8 @@ test("real MySQL: provider submission remains bound to the persisted asset versi
     await pool.query(
       `INSERT INTO provider_generation_jobs
          (job_id, provider_id, provider_version, provider_task_handle, model, config_hash, cancelled)
-       VALUES (?, 'trellis2', 'test', ?, 'test', ?, 0)`,
-      [jobId, `trellis2:${jobId}`, HASH],
+       VALUES (?, 'tripo', 'test', ?, 'test', ?, 0)`,
+      [jobId, `tripo:${jobId}`, HASH],
     );
     return { id: jobId, status: "pending" };
   };

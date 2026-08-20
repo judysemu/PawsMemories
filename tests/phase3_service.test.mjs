@@ -15,9 +15,11 @@ const MYSQL_PASSWORD = process.env.MYSQL_TEST_PASSWORD || "";
 const TEST_DB = "paws_phase3_service_test_db";
 const FAST_DURABILITY_RUNTIME = { sleep: async () => {}, random: () => 0 };
 
+// Provider-agnostic: preflight honours whatever view set the injected provider
+// declares. Named for the contract, not for a specific vendor.
 class FrontOnlyFakeModelBuildProvider extends FakeModelBuildProvider {
-  providerId = "trellis2";
-  modelId = "test-trellis2";
+  providerId = "fake_front_only";
+  modelId = "test-front-only";
   requiredReferenceViewKinds = ["front"];
 }
 
@@ -230,7 +232,7 @@ describe("Phase 3 ModelBuildService Integration Test Suite", {
     assert.equal(quote.preflightErrors.length, 0);
   });
 
-  it("should accept a truthful front-only manifest for a front-only in-house provider", async () => {
+  it("should accept a truthful front-only manifest for a front-only provider", async () => {
     const owner = "+15553011";
     const { sessionUuid } = await createApprovedReferenceSession(owner, { frontOnly: true });
     const frontOnlyService = new ModelBuildService(

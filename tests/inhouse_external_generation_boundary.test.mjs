@@ -79,33 +79,32 @@ test("in-house-only mode blocks fal authoring before key or queue access", async
   assert.equal(queueCalls, 0);
 });
 
-// Retargeted 2026-08-20. This previously pinned the example config to
-// PAWS_3D_PROVIDER="trellis2" / PAWS_3D_INHOUSE_ONLY="true", written when the
-// in-house TRELLIS build was the target. That plan was dropped and its Azure
-// GPU VMs were deleted on 2026-08-17, so those values named a provider with no
-// infrastructure while simultaneously blocking Tripo — the only working one —
-// leaving no path that completes a build.
+// Retargeted 2026-08-20. This previously pinned the example config to the
+// in-house TRELLIS provider and its worker/model revision variables. That plan
+// was dropped, its Azure GPU VMs were deleted on 2026-08-17, and the provider
+// was removed from the model generator, so those keys no longer exist.
 //
 // The in-house BOUNDARY itself is unchanged and still covered by every other
 // test in this file: setting PAWS_3D_INHOUSE_ONLY=true still blocks external
-// providers before any fetch. Only the documented default moved to Tripo.
+// providers before any fetch, and that switch remains live in code even though
+// the example config no longer documents it.
 // What this test protects is unchanged: the example config is deliberate, the
-// paid cutover stays closed, and no dead render host reappears.
+// paid cutover stays closed, and no dead render host or dead provider reappears.
 test("example production configuration points at Tripo and keeps cutover closed", () => {
   const example = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8");
   assert.match(example, /^PAWS_3D_PROVIDER="tripo"$/m);
-  assert.match(example, /^PAWS_3D_INHOUSE_ONLY="false"$/m);
-  assert.match(example, /^PAWS_3D_EXTERNAL_PROVIDER_IDS="tripo,fal"$/m);
   assert.match(example, /^PET_GLB_ENABLED="false"$/m);
-  assert.match(example, /^TRELLIS_WORKER_URL=""$/m);
-  assert.match(example, /^TRELLIS_WORKER_SHARED_SECRET=""$/m);
-  assert.match(example, /^TRELLIS_SOURCE_REVISION="75fbf0183001ed9876c8dbb35de6b68552ee08bd"$/m);
   assert.match(example, /^BLENDER_VERSION="5\.1\.2"$/m);
   assert.match(example, /^BLENDER_WORKER_REVISION=""$/m);
   assert.match(example, /^BLENDER_WORKER_URL=""$/m);
   assert.match(example, /^WORKER_SHARED_SECRET=""$/m);
   assert.doesNotMatch(example, /pawsmemories\.onrender\.com\/render/);
   assert.match(example, /^TRIPO_API_KEY=""$/m);
+  // The retired in-house 3D provider must not creep back into the documented
+  // configuration.
+  assert.doesNotMatch(example, /TRELLIS/i);
+  assert.doesNotMatch(example, /^PAWS_3D_INHOUSE_ONLY=/m);
+  assert.doesNotMatch(example, /^PAWS_3D_EXTERNAL_PROVIDER_IDS=/m);
 });
 
 test("legacy route middleware rejects before the route handler in strict mode", (t) => {

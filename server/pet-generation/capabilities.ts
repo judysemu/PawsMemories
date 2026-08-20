@@ -38,30 +38,9 @@ export function petGlbProductCapabilities(
   env: NodeJS.ProcessEnv = process.env,
 ): PetGlbProductCapabilities {
   const providerId = selectedPaws3dProvider(env);
-  if (providerId === "trellis2") {
-    return {
-      providerId,
-      texture: {
-        includedInBase: true,
-        separateStageAvailable: false,
-        defaultSelected: false,
-        priceCredits: 0,
-        styleDirectionAvailable: false,
-        reason: "PBR color and materials are included in the TRELLIS base model.",
-      },
-      subjectProfiles: [
-        { id: "pet", label: "Pet / animal", rigType: "quadruped" },
-      ],
-      reference: {
-        requiredViewKinds: ["front"],
-        generatedForApproval: [],
-        canRegenerate: false,
-      },
-    };
-  }
 
-  // Preserve the existing Tripo product contract exactly. Unknown providers
-  // fail closed rather than inheriting either provider's paid capabilities.
+  // Tripo is the only provider the model generator supports. Unknown providers
+  // fail closed rather than inheriting Tripo's paid capabilities.
   if (providerId === "tripo") {
     return {
       providerId,

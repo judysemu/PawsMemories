@@ -545,9 +545,7 @@ export default function PetModelStudio() {
       }) as OrderView;
       setReferences(generatedManifest as Record<string, string>);
       applyView(awaitingApproval);
-      setGenerationMessage(product.referenceRequirements.canRegenerate
-        ? "Review the views, then approve them or request one free remake."
-        : "Review and approve your prepared front photo to start the private model build.");
+      setGenerationMessage("Review the views, then approve them or request one free remake.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not prepare the model reference.");
       setGenerationMessage(null);
@@ -620,10 +618,6 @@ export default function PetModelStudio() {
   const regenerateReferenceStage = async () => {
     const stage = view?.currentStage;
     if (!view || !stage || stage.stage !== "reference" || stage.state !== "awaiting_customer_approval") return;
-    if (!view.referenceSession?.canRegenerate) {
-      setError("This in-house build uses your approved front photo directly. Start a new build to choose a different photo.");
-      return;
-    }
     if (!referenceSessionUuid) {
       setError("This older reference set cannot be remade in place. Start a new pet build with the source photo.");
       return;
@@ -848,16 +842,11 @@ export default function PetModelStudio() {
                 </button>
               ))}
             </div>
-            {product.textureGeneration.separateStageAvailable ? (
+            {product.textureGeneration.separateStageAvailable && (
               <label className="mt-3 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-3 text-xs">
                 <input type="checkbox" checked={includeTexture} disabled={Boolean(view)} onChange={(event) => setIncludeTexture(event.target.checked)} />
                 <span><strong className="block">Add lifelike color</strong><span className="text-on-surface-variant">Uses your pet's markings and coat colors.</span></span>
               </label>
-            ) : (
-              <div className="mt-3 rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
-                <strong className="block">Lifelike PBR color included</strong>
-                <span className="text-on-surface-variant">{product.textureGeneration.reason}</span>
-              </div>
             )}
             <label className="mt-2 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-3 text-xs">
               <input type="checkbox" checked={includeRig} disabled={Boolean(view) || !product.rigGeneration.available} onChange={(event) => setIncludeRig(event.target.checked)} />
@@ -1011,9 +1000,9 @@ export default function PetModelStudio() {
               <button type="button" onClick={approveCustomerStage} disabled={busy || !canApprove} title={approvalBlockedReason || undefined} className="w-full rounded-xl bg-primary px-3 py-2 font-black text-on-primary disabled:opacity-40">
                 {stage?.stage === "reference" ? `Approve reference & build · ${view?.quote.base || 0} PupCoins` : "Approve this model and continue"}
               </button>
-              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !view.referenceSession?.canRegenerate)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
+              <button type="button" onClick={rejectCustomerStage} disabled={busy || (stage?.stage === "reference" && !view.referenceSession)} className="w-full rounded-xl border border-outline-variant/40 px-3 py-2 font-black disabled:opacity-40">
                 {stage?.stage === "reference"
-                  ? !view.referenceSession?.canRegenerate ? "Start a new build to change photo" : "Remake these views"
+                  ? !view.referenceSession ? "Start a new build to change photo" : "Remake these views"
                   : "This needs a remake"}
               </button>
             </section>
