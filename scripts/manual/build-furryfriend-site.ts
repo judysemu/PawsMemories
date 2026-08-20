@@ -631,14 +631,16 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
         <p class="small">Built on the AR paths phones already support, so your pet appears at real
         scale on the floor in front of you rather than in a window on a screen.</p></div>
     </div>
-    <figure style="margin:22px 0">
-      <img src="/img/ar-futures.jpg" alt="A phone camera view showing a 3D dog and a wooden doghouse placed on a real grass field"
-           loading="lazy" width="760" height="1362"
-           style="width:100%;max-width:340px;border-radius:var(--radius);border:1px solid var(--line);display:block">
-      <figcaption class="small" style="margin-top:8px">Concept image showing the idea: your pet and
-      objects placed into the real space in front of you. Futures is not playable yet, so this is
-      how it is intended to look rather than captured gameplay.</figcaption>
-    </figure>
+    <h3 style="margin-top:26px">Running today</h3>
+    <p class="sub">This is an actual capture from the build as it stands — a pet model and scene
+    objects placed onto real ground through the camera. Rough, and real.</p>
+    <div class="ba">
+      <figure><img src="/img/ar-now.jpg" alt="Camera view of a 3D dog and a doghouse model placed on a real grass field" loading="lazy" width="700" height="869"><figcaption>Today</figcaption></figure>
+      <figure><img src="/img/ar-target.jpg" alt="A more finished rendering of the same scene, showing the intended visual quality" loading="lazy" width="700" height="1254"><figcaption>Where it's heading</figcaption></figure>
+    </div>
+    <p class="small">Left is the current build. Right is the target — better lighting, shadows that
+    sit properly on the ground, and materials that hold up at close range. The gap between those two
+    pictures is most of what we're working on.</p>
     <p class="note"><span class="tag tag-dev">Honest status</span><br>
     Futures is <strong>in active development and not playable yet</strong>. We don't have a release
     date, and we're not taking money for it. We're mentioning it because it's the reason the 3D side
