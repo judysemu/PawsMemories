@@ -579,6 +579,17 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
         download later. <strong>Use it for:</strong> viewing your pet in 3D, and — soon — playing as
         them. See Futures below.</p></div>
     </div>
+    <h2>Photo in, 3D model out</h2>
+    <p class="sub">The same pipeline that makes the art also builds a 3D version of your pet. This
+    is a real one — the photo on the left, the model the studio generated from it on the right.</p>
+    <div class="ba">
+      <figure><img src="/img/3d-before-shiba.jpg" alt="Studio photograph of a white Shiba-type dog standing on a grey background" loading="lazy" width="800" height="800"><figcaption>The photo</figcaption></figure>
+      <figure><img src="/img/3d-after-shiba.jpg" alt="A 3D model of the same white dog, rendered from a different angle" loading="lazy" width="800" height="450"><figcaption>The 3D model</figcaption></figure>
+    </div>
+    <p class="small">Notice the model is shown from an angle the photo never saw — that far side is
+    reconstructed rather than observed, which is exactly what the
+    <a href="/photo-to-animated-3d-video.html">guide on single-photo 3D</a> gets into.</p>
+
     <h2>A few made in the studio</h2>
     <div class="grid g3">
       <figure class="card"><div class="shot"><img src="/img/pp-christmas.jpg" alt="A dog rendered into a festive Christmas scene" loading="lazy" width="700" height="700"></div></figure>
@@ -620,6 +631,14 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
         <p class="small">Built on the AR paths phones already support, so your pet appears at real
         scale on the floor in front of you rather than in a window on a screen.</p></div>
     </div>
+    <figure style="margin:22px 0">
+      <img src="/img/ar-futures.jpg" alt="A phone camera view showing a 3D dog and a wooden doghouse placed on a real grass field"
+           loading="lazy" width="760" height="1362"
+           style="width:100%;max-width:340px;border-radius:var(--radius);border:1px solid var(--line);display:block">
+      <figcaption class="small" style="margin-top:8px">Concept image showing the idea: your pet and
+      objects placed into the real space in front of you. Futures is not playable yet, so this is
+      how it is intended to look rather than captured gameplay.</figcaption>
+    </figure>
     <p class="note"><span class="tag tag-dev">Honest status</span><br>
     Futures is <strong>in active development and not playable yet</strong>. We don't have a release
     date, and we're not taking money for it. We're mentioning it because it's the reason the 3D side
