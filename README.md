@@ -137,6 +137,60 @@ Current release risks, decisions, and production acceptance evidence are tracked
 in `docs/current/FULL_CODEBASE_AUDIT_2026-07-31.md` and
 `docs/current/PRODUCTION_DEPLOYMENT_REVIEW_2026-07-31.md`.
 
+## Barkley Presenter
+
+Barkley is a 3D presenter that walks a viewer through a scripted "show" of
+beats — dialogue, camera moves, quizzes and reveals — driven by
+`src/barkley/shows.ts` and rendered by `src/components/BarkleyScreen.tsx`.
+Gated behind `BARKLEY_PRESENTER`, which is off unless explicitly set to
+`true`/`1`.
+
+**The runtime loads exactly one asset: `public/barkley/barkley.glb`.** It keys
+its clip map off `gltf.animations` by name. The other 30 files in
+`public/barkley/` are build inputs, not runtime assets — if the merged file is
+absent the loader's `onError` branch fires and the stage falls back to a
+placeholder figure, with no error surfaced.
+
+The rig is Tripo's auto-rig: 41 joints ending at `L_Hand`/`R_Hand` with **no
+finger bones**. Clips needing finger articulation cannot be authored against
+it at any keyframe. `gesture_count` and `gesture_thumbs_up` are therefore
+served by substitute motions (a two-arm sweep and a bow); their descriptions in
+`shows.ts` say what actually plays.
+
+Build pipeline, in order:
+
+```bash
+# 1. author a clip on the Azure Blender worker (no local Blender needed)
+npx tsx scripts/manual/author-barkley-clip.ts point_right --out /tmp/clips
+node scripts/manual/render-clip-frames.mjs 0 24 34   # eyeball it; --head for a closeup
+
+# 2. reduce whole-model exports to animation-only clip GLBs
+npx tsx scripts/manual/strip-barkley-clips.ts /Users/robert/barkley-clips --out public/barkley
+
+# 3. merge the clip GLBs into the single file the runtime loads
+npx tsx scripts/manual/build-barkley-glb.ts
+```
+
+Step 3 is a node remap, not a retarget: every clip came off the same rig, so
+animation channels rebind to the base model's node indices by bone name. It is
+done at the glTF level rather than in Blender because the stripped clips have
+no skins, and Blender's importer would rebuild them as Empties whose actions
+can no longer bind to the armature.
+
+Rotation signs on this rig were measured rather than assumed, and the results
+are counterintuitive enough to be worth recording: `+72` on Z **lowers** the
+right upper arm while `-72` lowers the left, `X+` swings **both** arms forward,
+`Z=0` is the T-pose with the hand at shoulder height, and `Head` Y is the yaw
+axis. See the comments in `author-barkley-clip.ts`.
+
+> **Source clips live outside this repo.** `public/barkley/barkley.glb` is built
+> from ~51 MB of Tripo whole-model exports in `/Users/robert/barkley-clips`,
+> which is not version-controlled. The repo cannot rebuild the avatar from its
+> own contents, so the merged GLB is committed deliberately rather than treated
+> as build output. Back the source directory up with
+> `npx tsx scripts/manual/backup-barkley-clips.ts` (writes to
+> `backups/barkley-clips/` in the private B2 bucket).
+
 ## Project structure
 
 ```
@@ -150,6 +204,8 @@ src/               React frontend (App, components, api client, types)
 blender-worker/    Standalone Express + Docker microservice for running Blender scripts (+ bake_lod.py)
 x-dm-service/      X DM conversation refinement service (Node 20 + Express + TypeScript)
 scripts/           build-deploy-zip.sh (verified dist → Hostinger deploy zip)
+  manual/          One-off operator tools: Barkley clip authoring/merge, catalog pulls
+public/barkley/    barkley.glb (the only file the runtime loads) + 30 clip GLB inputs
 dist/              Build output (vite assets + server.cjs)
 .env.example       Documented environment variables
 docs/AUTOMATIONS.md  Index of scheduled routines (agents) this repo depends
@@ -196,6 +252,7 @@ Set these in Hostinger (Website → Environment variables) for production, or in
 | `RHUBARB_BIN` | Optional absolute path to the Rhubarb Linux executable; enables Tier B visemes and falls back to Tier A when absent |
 | `BLENDER_WORKER_URL` | URL of the Azure Container Apps blender microservice (e.g. `https://pawsome3d-blender-worker.<env>.eastus.azurecontainerapps.io`) |
 | `WORKER_SHARED_SECRET` | Secret key for blender-worker auth |
+| `BARKLEY_PRESENTER` | Enables the Barkley presenter API and stage; off unless set to `true`/`1`. Requires `public/barkley/barkley.glb` in the deployed archive — with the flag on and the asset missing, the stage silently renders a placeholder. |
 | `MODEL_BUILD_V3_ENABLED` / `RIG_PIPELINE_V4_ENABLED` | Default-off durable model and measured rig rollout flags |
 | `FUR_BIN_V5_ENABLED` / `VITE_FUR_BIN_V5_ENABLED` | Fur Bin API and build-time UI flags; enabled for generated GLB delivery |
 | `PET_GLB_BODY_RIG_ENABLED` | Emergency rollback switch for the paid Pet GLB body-rig stage; defaults on and is independent of legacy `PETSIM_RIG_*` caps |
