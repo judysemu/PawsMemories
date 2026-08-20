@@ -2492,6 +2492,17 @@ export async function getRunningJobs(): Promise<JobRow[]> {
   return rows as unknown as JobRow[];
 }
 
+/** Reads back a creation's video URL, scoped to its owner. Used when a second
+ *  poller loses the finalize race: the work is already done and attached, so the
+ *  loser should still be able to hand the client something to play. */
+export async function getCreationVideoUrl(creationId: number, phone: string): Promise<string | null> {
+  const [rows] = await getPool().query(
+    "SELECT video_url FROM creations WHERE id = ? AND user_phone = ? LIMIT 1",
+    [creationId, phone],
+  ) as any;
+  return rows.length ? (rows[0].video_url || null) : null;
+}
+
 export async function setCreationVideoUrl(creationId: number, phone: string, videoUrl: string): Promise<boolean> {
   const [result] = await getPool().query(
     `UPDATE creations SET video_url = ?, media_type = 'video' WHERE id = ? AND user_phone = ?`,
