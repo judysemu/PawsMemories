@@ -54,9 +54,36 @@ const PRESET_TO_CLIPS: Record<string, string[]> = {
   fold_arms: ["think"],
   cast_a_spell: ["gesture_present"],
   complain_01: ["gesture_shrug"],
-  // `stretch` and `bow` have no counterpart in the spec. They are kept out of
-  // the mapping deliberately: an unused clip in public/barkley would register
-  // as a clip featureFlag.ts cannot account for.
+
+  // Tripo presets retargeted onto the spec's dialogue and emotional beats.
+  // The sing presets are long, articulated upper-body loops, which is exactly
+  // what a talking presenter needs; nothing about them reads as singing once
+  // the audio is Barkley's dialogue.
+  sing_01: ["talk_normal"],
+  sing_02: ["talk_emphasize"],
+  sing_03: ["talk_explain"],
+  hug: ["open_arms"],
+  heart_pose: ["hands_together"],
+  depressed: ["react_quiz_no"],
+
+  // Hand-authored on the Blender worker — see author-barkley-clip.ts.
+  point_right: ["point_right"],
+  point_left: ["point_left"],
+  gesture_up: ["gesture_up"],
+  shake_head: ["shake_head"],
+  react_click: ["react_click"],
+
+  // Substitutions for the two clips the rig cannot express. Barkley's Tripo
+  // auto-rig ends at L_Hand/R_Hand with no finger bones, so counting on
+  // fingers and a thumbs-up are not authorable at any keyframe. Rather than
+  // ship the beats empty, they borrow presets that were already in the
+  // library and previously unused:
+  //   stretch -> a broad two-arm gesture that reads as laying out points
+  //   bow     -> a genuine deep bow, which suits both success and goodbye
+  // The descriptions in shows.ts are updated to match what actually plays.
+  stretch: ["gesture_count"],
+  bow: ["gesture_thumbs_up"],
+  // `sing_04` stays unmapped: a fourth talk loop the spec has no slot for.
 };
 
 const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
@@ -192,7 +219,9 @@ let bytesBefore = 0;
 let bytesAfter = 0;
 
 for (const file of files) {
-  const preset = path.basename(file, ".glb").replace(/^barkley-/, "");
+  // Exports are named barkley-<preset>.glb, but a few arrived as
+  // barkley_<preset>.glb; accept either separator.
+  const preset = path.basename(file, ".glb").replace(/^barkley[-_]/, "");
   const clips = PRESET_TO_CLIPS[preset];
   if (!clips) {
     console.log(`  ${preset.padEnd(20)} SKIPPED — no clip in shows.ts maps to this preset`);

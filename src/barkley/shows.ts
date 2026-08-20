@@ -6,8 +6,12 @@ import { BarkleyClipSpec, BarkleyShow, BarkleyBeat } from "./types";
  * All clips use the `biped` skeleton. They are organized by category:
  * locomotion, gestures, presenter-actions, emotes, and interactive-reactions.
  *
- * Each clip is an 8–10 second loop-ready animation exported from Blender at 30 fps.
- * Render pipeline: `blender-worker/render_barkley.py --clip <name> --output public/barkley/`
+ * Clips run from 1.5s to 17s at 30 fps. Most are retargeted Tripo presets;
+ * the rest are hand-authored on the Blender worker. Build pipeline:
+ *   scripts/manual/author-barkley-clip.ts   author a clip on the worker
+ *   scripts/manual/strip-barkley-clips.ts   whole-model export -> clip GLB
+ *   scripts/manual/build-barkley-glb.ts     clip GLBs -> public/barkley/barkley.glb
+ * The runtime loads only the merged barkley.glb; the per-clip files are inputs.
  */
 export const BARKLEY_CLIPS: BarkleyClipSpec[] = [
   // ── Locomotion (4 clips) ──────────────────────────────────────
@@ -126,15 +130,15 @@ export const BARKLEY_CLIPS: BarkleyClipSpec[] = [
     loops: false,
   },
   {
+    // Substituted. Barkley's rig has no finger bones (41 joints ending at
+    // L_Hand/R_Hand), so counting on fingers cannot be expressed at any
+    // keyframe. This plays a broad two-arm gesture that reads as laying out
+    // points in turn.
     clipName: "gesture_count",
-    description: "Holds up fingers counting 1, 2, 3.",
+    description: "Sweeps both arms outward in turn, marking off points.",
     usedBy: ["three-phases"],
     frameRange: [0, 120],
-    keyPoses: [
-      { frame: 0, bone: "right_hand", rotation: [0, 0, 0] },
-      { frame: 40, bone: "right_hand", rotation: [0, 0, -30] },
-      { frame: 80, bone: "right_hand", rotation: [0, 0, -30] },
-    ],
+    keyPoses: [],
     loops: false,
   },
   {
@@ -149,14 +153,14 @@ export const BARKLEY_CLIPS: BarkleyClipSpec[] = [
     loops: false,
   },
   {
+    // Substituted for the same reason as gesture_count: a thumbs-up needs a
+    // thumb. A full bow carries the same "we did it" beat and suits both the
+    // success and goodbye moments it is used for.
     clipName: "gesture_thumbs_up",
-    description: "Gives enthusiastic double thumbs-up.",
+    description: "Takes a full bow, hands to the sides.",
     usedBy: ["success", "goodbye"],
     frameRange: [0, 60],
-    keyPoses: [
-      { frame: 30, bone: "right_hand", rotation: [90, 0, 0] },
-      { frame: 30, bone: "left_hand", rotation: [90, 0, 0] },
-    ],
+    keyPoses: [],
     loops: false,
   },
   {
