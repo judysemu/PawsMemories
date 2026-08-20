@@ -79,10 +79,22 @@ test("in-house-only mode blocks fal authoring before key or queue access", async
   assert.equal(queueCalls, 0);
 });
 
-test("example production configuration points at in-house generation and keeps cutover closed", () => {
+// Retargeted 2026-08-20. This previously pinned the example config to
+// PAWS_3D_PROVIDER="trellis2" / PAWS_3D_INHOUSE_ONLY="true", written when the
+// in-house TRELLIS build was the target. That plan was dropped and its Azure
+// GPU VMs were deleted on 2026-08-17, so those values named a provider with no
+// infrastructure while simultaneously blocking Tripo — the only working one —
+// leaving no path that completes a build.
+//
+// The in-house BOUNDARY itself is unchanged and still covered by every other
+// test in this file: setting PAWS_3D_INHOUSE_ONLY=true still blocks external
+// providers before any fetch. Only the documented default moved to Tripo.
+// What this test protects is unchanged: the example config is deliberate, the
+// paid cutover stays closed, and no dead render host reappears.
+test("example production configuration points at Tripo and keeps cutover closed", () => {
   const example = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8");
-  assert.match(example, /^PAWS_3D_PROVIDER="trellis2"$/m);
-  assert.match(example, /^PAWS_3D_INHOUSE_ONLY="true"$/m);
+  assert.match(example, /^PAWS_3D_PROVIDER="tripo"$/m);
+  assert.match(example, /^PAWS_3D_INHOUSE_ONLY="false"$/m);
   assert.match(example, /^PAWS_3D_EXTERNAL_PROVIDER_IDS="tripo,fal"$/m);
   assert.match(example, /^PET_GLB_ENABLED="false"$/m);
   assert.match(example, /^TRELLIS_WORKER_URL=""$/m);
