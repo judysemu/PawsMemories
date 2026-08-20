@@ -210,13 +210,34 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     });
   });
 
+  /**
+   * Zod issue paths for a rejected body — field names and codes only, never
+   * values. A bare error code tells the operator a request was refused but not
+   * which field was wrong, which turns a one-line client bug into an
+   * afternoon of guessing at the server.
+   */
+  const invalidFields = (...results: Array<{ success: boolean; error?: any }>): string[] => {
+    const out: string[] = [];
+    for (const r of results) {
+      if (r.success) continue;
+      for (const issue of r.error?.issues ?? []) {
+        const at = (issue.path ?? []).join(".") || "(body)";
+        out.push(`${at}: ${issue.code}`);
+      }
+    }
+    return out;
+  };
+
   router.post("/orders/:orderUuid/stages/:stage/approve", writeLimiter, async (req, res) => {
     const phone = phoneOf(req);
     if (!phone) return res.status(401).json({ error: "UNAUTHORIZED" });
     const stage = StageKindSchema.safeParse(req.params.stage);
     const parsed = StageApprovalSchema.safeParse(req.body);
     if (!stage.success || !parsed.success) {
-      return res.status(400).json({ error: "INVALID_STAGE_APPROVAL" });
+      return res.status(400).json({
+        error: "INVALID_STAGE_APPROVAL",
+        fields: invalidFields(stage, parsed),
+      });
     }
     try {
       const view = await service.getOrderView(req.params.orderUuid, phone);
@@ -241,7 +262,10 @@ export function createPetGenerationRouter(deps: PetGlbServiceDeps): Router {
     const stage = StageKindSchema.safeParse(req.params.stage);
     const parsed = StageRejectionSchema.safeParse(req.body);
     if (!stage.success || !parsed.success) {
-      return res.status(400).json({ error: "INVALID_STAGE_REJECTION" });
+      return res.status(400).json({
+        error: "INVALID_STAGE_REJECTION",
+        fields: invalidFields(stage, parsed),
+      });
     }
     try {
       const view = await service.getOrderView(req.params.orderUuid, phone);
