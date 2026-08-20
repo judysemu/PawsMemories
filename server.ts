@@ -17,7 +17,7 @@ import fs from "fs";
 import sharp from "sharp";
 import { sendSms } from "./server/sms";
 import { sendMail } from "./server/mail";
-import { installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
+import { getRuntimeLogDiagnostics, installRuntimeLogger, readRuntimeLog } from "./server/runtimeLog";
 import rateLimit from "express-rate-limit";
 import { initDb, findUserByPhone, findUserByEmail, createUserByEmail, EmailTakenError, completeUserProfile, toPublicUser, reserveCredits, refundReservedCredits, addCredits, getCreditBalance, getCreditHistory, grantPurchasedCredits, getCommunityMemories, addCommunityMemory, setProfilePhoto, addUserPhoto, getUserPhotos, deleteUserPhoto, saveCreation, getCreations, getAllCreations, updateCreation, createJob, updateJobStatus, getJob, getRunningJobs, setCreationModelUrl, getDailyVideoCount, isUserAdmin, addPet, getPets, updatePet, deletePet, createAlbum, getAlbums, createAvatar, updateAvatarModel, updateAvatarGenerationStatus, getAvatarById, getAvatars, deleteAvatar, hideAvatar, unhideAvatar, getHiddenAvatars, feedAvatar, waterAvatar, giveTreatToAvatar, getAvatarNeeds, saveAvatarNeeds, getPlacedObjects, addPlacedObject, deletePlacedObject, updateAvatarMultiview, parseMultiview, getPool, claimDailyStreak, claimFreeAvatar, releaseFreeAvatar, claimAchievement, getPetProfileByAvatar, getPetProfileById, upsertPetProfile, savePetState, savePetRigUrls, getSemanticScan, saveSemanticScan, getPetCommands, addPetCommand, getPetButtons, addPetButton, incrementTrainerScore, updatePetSettings, bumpDailyUsage, getSceneActors, addSceneActor, updateSceneActor, deleteSceneActor, getStorageUsage, recordStorageAddHot, recordStorageRemoveHot, purchaseColdStorage, updateUserProfile, checkAndGrantProfileBonus, verifyUserEmail, generateReferralCode, recordReferral, creditReferralIfComplete, getCachedSubjectArt, getOwnedSubjectArt, getOwnedPawprintAsset, saveCachedSubjectArt, findPawprintShopifyOrderByReference, updatePawprintShopifyOrderStatus, listPawprintShopifyOrders, acceptTermsVersion, createVoiceCloneAsset, listVoiceCloneAssets, createPasswordReset, resetPasswordWithToken, createEmailVerification, consumeEmailVerification, secondsSinceLastEmailVerification, claimFreeImage, releaseFreeImage, FREE_AVATAR_GATE, isFreeAvatarGateOpen, setAppSetting, addGateNotifyOptin, listPendingGateNotifications, markGateNotified, resetGateNotifications, insertBimBuild, listBimBuilds, checkDatabaseHealth, closePool } from "./db";
 import { isEndpointEnabled, dailyCapFor, withinDailyCap, type PaidEndpoint } from "./server/paidApiGuards";
@@ -1043,7 +1043,10 @@ async function startServer() {
       return res.status(400).json({ error: "date must be YYYY-MM-DD." });
     }
     const content = readRuntimeLog(date);
-    res.json({ date, content: content ?? "" });
+    // Diagnostics ride along so an empty `content` can be told apart from a
+    // logger that never managed to write. Returning "" for both meant a live
+    // outage looked exactly like a quiet day, and cost an afternoon.
+    res.json({ date, content: content ?? "", logger: getRuntimeLogDiagnostics() });
   });
 
   // Content Security Policy — strict but permits what the app needs
