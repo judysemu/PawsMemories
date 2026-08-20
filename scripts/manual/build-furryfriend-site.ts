@@ -40,70 +40,130 @@ const esc = (s: string) => String(s ?? "")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 const STYLE = `
-  :root{--ink:#1f1a17;--muted:#6b615a;--line:#e7e0d9;--bg:#fffdfb;--panel:#fff;
-        --accent:#c2410c;--accent-soft:#fff2ea;--radius:16px}
-  @media (prefers-color-scheme:dark){:root{--ink:#f2ede9;--muted:#a99f97;--line:#332c27;--bg:#141110;
-        --panel:#1c1817;--accent:#fb923c;--accent-soft:#2a1b12}}
+  /* Palette and type are lifted from Pawsome3D's Material 3 theme so the two
+     properties read as one brand: warm brown primary on a cream surface, Plus
+     Jakarta Sans for text, Space Grotesk for display. Dark mode follows the
+     system here — this is a static site with no theme toggle to persist. */
+  :root{
+    --primary:#442a22; --on-primary:#fff; --primary-container:#5d4037;
+    --primary-fixed:#ffdbd0; --tint:#77574d;
+    --secondary:#4c616c; --secondary-container:#cfe6f2;
+    --surface:#faf9f5; --surface-low:#f4f4f0; --surface-c:#eeeeea; --surface-high:#e8e8e4;
+    --on-surface:#1a1c1a; --on-surface-var:#504441;
+    --outline:#827470; --outline-var:#d4c3be;
+    --radius:20px; --radius-sm:14px;
+    --shadow:0 1px 2px rgba(26,28,26,.05),0 8px 24px -12px rgba(68,42,34,.18);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --primary:#e7bdb1; --on-primary:#442a22; --primary-container:#5d4037;
+    --primary-fixed:#ffdbd0; --tint:#e7bdb1;
+    --secondary:#b4cad6; --secondary-container:#354a53;
+    --surface:#17120f; --surface-low:#201a17; --surface-c:#251e1b; --surface-high:#2f2724;
+    --on-surface:#f1e0da; --on-surface-var:#d4c3be;
+    --outline:#a08c86; --outline-var:#504441;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.6);
+  }}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
-  .narrow{max-width:720px}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--surface);color:var(--on-surface);
+       font:400 16px/1.65 "Plus Jakarta Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  .narrow{max-width:700px}
   a{color:inherit}
-  header{border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:10}
-  .bar{display:flex;align-items:center;gap:18px;padding:14px 0;flex-wrap:wrap}
-  .brand{font-weight:800;font-size:18px;text-decoration:none;margin-right:auto}
-  nav{display:flex;gap:16px;flex-wrap:wrap}
-  nav a{text-decoration:none;color:var(--muted);font-weight:600;font-size:14px}
-  nav a:hover{color:var(--accent)}
-  .btn{display:inline-block;padding:11px 18px;border-radius:999px;text-decoration:none;font-weight:700;font-size:15px;border:0;cursor:pointer}
-  .btn-primary{background:var(--accent);color:#fff}
-  .btn-ghost{border:1px solid var(--line);color:var(--ink);background:transparent}
-  h1{font-size:clamp(30px,5vw,46px);line-height:1.12;letter-spacing:-.02em;margin:0 0 14px}
-  h2{font-size:clamp(21px,3vw,29px);line-height:1.22;letter-spacing:-.01em;margin:34px 0 10px}
-  h3{font-size:17px;margin:0 0 6px;line-height:1.35}
-  p{margin:0 0 14px}
-  ul{margin:0 0 16px;padding-left:20px}li{margin-bottom:7px}
-  .lede{font-size:19px;color:var(--muted);max-width:62ch}
-  section{padding:52px 0;border-bottom:1px solid var(--line)}
-  .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
-  .sub{color:var(--muted);max-width:66ch;margin:0 0 24px}
-  .grid{display:grid;gap:16px}
-  .g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-  .g3{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-  .g4{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;text-decoration:none;display:block}
-  .card:hover{border-color:var(--accent)}
-  .card-body{padding:15px}
-  .shot{aspect-ratio:1;background:var(--accent-soft);overflow:hidden}
-  .shot img{width:100%;height:100%;object-fit:cover;display:block}
-  .price{font-weight:800;margin:6px 0 0}
-  .tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;border-radius:999px;margin-bottom:8px}
-  .tag-personal,.tag-cat{background:var(--accent-soft);color:var(--accent)}
-  .tag-dev{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
-  .feature{padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
-  .ico{font-size:26px;line-height:1;margin-bottom:10px}
-  .note{background:var(--accent-soft);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
-  .cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
-  details{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--panel);margin-bottom:10px}
-  summary{font-weight:700;cursor:pointer}
-  details p{margin:10px 0 0;color:var(--muted)}
-  footer{padding:34px 0;color:var(--muted);font-size:14px}
-  .small{font-size:13px;color:var(--muted)}
-  figure{margin:0}
-  .ba{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-  .ba img{width:100%;height:auto;border-radius:var(--radius);display:block;border:1px solid var(--line)}
-  .ba figcaption{font-size:12px;color:var(--muted);margin-top:6px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-  .signup{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
-  .signup input{flex:1 1 240px;padding:12px 14px;border-radius:999px;border:1px solid var(--line);
-                background:var(--panel);color:var(--ink);font-size:15px}
-  article img.hero{width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);margin-bottom:22px}
-  /* Explicit width/height attributes are kept on every <img> to reserve layout
-     space and avoid content shift while loading. Without height:auto the
-     attribute wins over the fluid width and the picture stretches. */
   img{max-width:100%}
-  .meta{color:var(--muted);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+
+  /* Header */
+  header{border-bottom:1px solid var(--outline-var);position:sticky;top:0;z-index:20;
+         background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(12px)}
+  .bar{display:flex;align-items:center;gap:22px;padding:14px 0}
+  .brand{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:19px;text-decoration:none;
+         letter-spacing:-.02em;margin-right:auto;display:flex;align-items:center;gap:8px}
+  nav{display:flex;gap:22px}
+  nav a{text-decoration:none;color:var(--on-surface-var);font-weight:500;font-size:14.5px;
+        padding:4px 0;border-bottom:2px solid transparent;transition:.15s}
+  nav a:hover{color:var(--primary);border-bottom-color:var(--primary)}
+  @media(max-width:860px){nav{display:none}}
+
+  /* Type */
+  h1,h2,h3,.display{font-family:"Space Grotesk",sans-serif;letter-spacing:-.025em}
+  h1{font-size:clamp(34px,5.4vw,56px);line-height:1.06;font-weight:700;margin:0 0 18px}
+  h2{font-size:clamp(24px,3.2vw,34px);line-height:1.15;font-weight:700;margin:0 0 12px}
+  h3{font-size:18px;line-height:1.3;font-weight:600;margin:0 0 7px}
+  p{margin:0 0 15px}
+  ul,ol{margin:0 0 18px;padding-left:22px}li{margin-bottom:8px}
+  .lede{font-size:clamp(17px,2vw,20px);line-height:1.55;color:var(--on-surface-var);max-width:60ch}
+  .sub{color:var(--on-surface-var);max-width:64ch;margin:0 0 30px}
+  .small{font-size:13.5px;color:var(--on-surface-var);line-height:1.6}
+
+  /* Rhythm: alternate surface tones so sections separate without hard rules */
+  section{padding:76px 0}
+  section.alt{background:var(--surface-low)}
+  .eyebrow{font-family:"Space Grotesk",sans-serif;font-size:12px;font-weight:600;letter-spacing:.14em;
+           text-transform:uppercase;color:var(--tint);margin:0 0 12px}
+
+  /* Buttons */
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:13px 24px;border-radius:999px;
+       text-decoration:none;font-weight:600;font-size:15px;border:0;cursor:pointer;transition:.18s;
+       font-family:"Plus Jakarta Sans",sans-serif}
+  .btn-primary{background:var(--primary);color:var(--on-primary);box-shadow:var(--shadow)}
+  .btn-primary:hover{transform:translateY(-1px);filter:brightness(1.07)}
+  .btn-ghost{border:1px solid var(--outline);color:var(--on-surface)}
+  .btn-ghost:hover{border-color:var(--primary);color:var(--primary)}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+
+  /* Cards */
+  .grid{display:grid;gap:18px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fill,minmax(215px,1fr))}
+  .card{background:var(--surface);border:1px solid var(--outline-var);border-radius:var(--radius);
+        overflow:hidden;text-decoration:none;display:block;transition:.2s}
+  .card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--primary)}
+  section.alt .card{background:var(--surface)}
+  .card-body{padding:16px 17px 18px}
+  .shot{aspect-ratio:1;background:var(--surface-c);overflow:hidden}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  .price{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:16px;margin:8px 0 0}
+  .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+       padding:4px 10px;border-radius:999px;margin-bottom:9px;font-family:"Space Grotesk",sans-serif}
+  .tag-personal,.tag-cat{background:var(--primary-fixed);color:var(--primary-container)}
+  @media (prefers-color-scheme:dark){.tag-personal,.tag-cat{background:var(--secondary-container);color:var(--on-surface)}}
+  .tag-dev{background:transparent;color:var(--tint);border:1px dashed var(--outline)}
+
+  .feature{padding:24px;border:1px solid var(--outline-var);border-radius:var(--radius);
+           background:var(--surface);transition:.2s}
+  .feature:hover{border-color:var(--primary)}
+  .ico{font-size:28px;line-height:1;margin-bottom:12px}
+  .note{background:var(--secondary-container);border-radius:var(--radius);padding:22px 24px;
+        color:var(--on-surface)}
+  @media (prefers-color-scheme:dark){.note{background:var(--surface-c);border:1px solid var(--outline-var)}}
+
+  /* Before / after pairs */
+  figure{margin:0}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  @media(max-width:640px){.ba{grid-template-columns:1fr}}
+  .ba img{width:100%;height:auto;border-radius:var(--radius);display:block;
+          border:1px solid var(--outline-var);box-shadow:var(--shadow)}
+  .ba figcaption{font-family:"Space Grotesk",sans-serif;font-size:12px;color:var(--on-surface-var);
+                 margin-top:9px;font-weight:600;text-transform:uppercase;letter-spacing:.09em}
+
+  details{border:1px solid var(--outline-var);border-radius:var(--radius-sm);padding:16px 18px;
+          background:var(--surface);margin-bottom:10px}
+  summary{font-weight:600;cursor:pointer;font-family:"Space Grotesk",sans-serif}
+  details p{margin:11px 0 0;color:var(--on-surface-var)}
+
+  article img.hero{width:100%;height:auto;border-radius:var(--radius);
+                   border:1px solid var(--outline-var);margin-bottom:26px;box-shadow:var(--shadow)}
+  article h2{margin-top:38px}
+  .meta{font-family:"Space Grotesk",sans-serif;color:var(--tint);font-size:12px;font-weight:600;
+        text-transform:uppercase;letter-spacing:.11em;margin-bottom:12px}
+
+  footer{padding:44px 0;border-top:1px solid var(--outline-var);color:var(--on-surface-var);font-size:14px}
+  footer a{color:var(--on-surface);text-decoration:none;font-weight:500}
+  footer a:hover{color:var(--primary)}
 `;
+
 
 function head(title: string, description: string, canonical: string, extraJsonLd = ""): string {
   return `<!doctype html>
@@ -119,6 +179,9 @@ function head(title: string, description: string, canonical: string, extraJsonLd
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="${esc(canonical)}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 ${extraJsonLd}
 <style>${STYLE}</style>
 </head>
@@ -544,7 +607,7 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
   </div>
 </section>
 
-<section id="shop">
+<section id="shop" class="alt">
   <div class="wrap">
     <p class="eyebrow">Shop</p>
     <h2>Keepsakes you can order right now</h2>
@@ -593,19 +656,17 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
     <a href="/photo-to-animated-3d-video.html">guide on single-photo 3D</a> gets into.</p>
 
     <h2>A few made in the studio</h2>
-    <div class="grid g3">
+    <div class="grid g4">
       <figure class="card"><div class="shot"><img src="/img/pp-christmas.jpg" alt="A dog rendered into a festive Christmas scene" loading="lazy" width="700" height="700"></div></figure>
       <figure class="card"><div class="shot"><img src="/img/pp-queen.jpg" alt="A pet rendered as a regal historical portrait" loading="lazy" width="700" height="700"></div></figure>
       <figure class="card"><div class="shot"><img src="/img/pp-sports.jpg" alt="A pet rendered in a sports-themed portrait" loading="lazy" width="700" height="700"></div></figure>
-      <figure class="card"><div class="shot"><img src="/img/pp-ghost.jpg" alt="A dog rendered as a ghostly figure" loading="lazy" width="700" height="700"></div></figure>
       <figure class="card"><div class="shot"><img src="/img/pp-chef.jpg" alt="A dog rendered as a chef" loading="lazy" width="700" height="700"></div></figure>
-      <figure class="card"><div class="shot"><img src="/img/pp-holiday.jpg" alt="A pet rendered in a holiday scene" loading="lazy" width="700" height="700"></div></figure>
     </div>
     <div class="cta-row"><a class="btn btn-primary" href="${APP}" target="_blank" rel="noopener">Start free on Pawsome3D ↗</a></div>
   </div>
 </section>
 
-<section id="read">
+<section id="read" class="alt">
   <div class="wrap">
     <p class="eyebrow">Guides</p>
     <h2>Helpful first. Product fit second.</h2>
@@ -651,7 +712,7 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
   </div>
 </section>
 
-<section id="roadmap">
+<section id="roadmap" class="alt">
   <div class="wrap">
     <p class="eyebrow">On the roadmap</p>
     <h2>Where we're heading next</h2>
@@ -696,16 +757,6 @@ function indexPage(products: Product[], personalizable: number, lowest: string):
   </div>
 </section>
 
-<section>
-  <div class="wrap">
-    <h2>Two ways in</h2>
-    <p class="sub">Browse something to keep, or make something first — either is a fine place to start.</p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="${STORE}" target="_blank" rel="noopener">Shop keepsakes ↗</a>
-      <a class="btn btn-ghost" href="${APP}" target="_blank" rel="noopener">Create free on Pawsome3D ↗</a>
-    </div>
-  </div>
-</section>
 ${footer()}`;
 }
 
