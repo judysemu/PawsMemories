@@ -92,12 +92,16 @@ const STYLE = `
   .small{font-size:13px;color:var(--muted)}
   figure{margin:0}
   .ba{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-  .ba img{width:100%;border-radius:var(--radius);display:block;border:1px solid var(--line)}
+  .ba img{width:100%;height:auto;border-radius:var(--radius);display:block;border:1px solid var(--line)}
   .ba figcaption{font-size:12px;color:var(--muted);margin-top:6px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
   .signup{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
   .signup input{flex:1 1 240px;padding:12px 14px;border-radius:999px;border:1px solid var(--line);
                 background:var(--panel);color:var(--ink);font-size:15px}
-  article img.hero{width:100%;border-radius:var(--radius);border:1px solid var(--line);margin-bottom:22px}
+  article img.hero{width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);margin-bottom:22px}
+  /* Explicit width/height attributes are kept on every <img> to reserve layout
+     space and avoid content shift while loading. Without height:auto the
+     attribute wins over the fluid width and the picture stretches. */
+  img{max-width:100%}
   .meta{color:var(--muted);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
 `;
 
@@ -135,17 +139,15 @@ ${extraJsonLd}
 const SIGNUP = `
   <div class="note" id="keep-in-touch">
     <h3>Get told when Futures opens</h3>
-    <p class="small">We're building in the open. Leave an email and we'll write when the AR game is
-    playable and when the health tools are ready to try — no more than that.</p>
-    <form class="signup" action="${STORE}/contact#contact_form" method="post" accept-charset="UTF-8" target="_blank">
-      <input type="hidden" name="form_type" value="customer">
-      <input type="hidden" name="utf8" value="✓">
-      <input type="hidden" name="contact[tags]" value="newsletter,furryfriend">
-      <label class="small" for="nl-email" style="position:absolute;left:-9999px">Email address</label>
-      <input id="nl-email" type="email" name="contact[email]" placeholder="you@example.com" required>
-      <button class="btn btn-primary" type="submit">Keep me posted</button>
-    </form>
+    <p class="small">We're building in the open. Ask to be kept posted and we'll write when the AR
+    game is playable and when the health tools are ready to try — no more than that.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="${STORE}/pages/contact" target="_blank" rel="noopener">Keep me posted ↗</a>
+    </div>
+    <p class="small" style="margin-top:10px">Opens our shop's contact form. Say "keep me posted" and
+    leave your email — that's all we need.</p>
   </div>`;
+
 
 function footer(): string {
   return `<footer><div class="wrap">
