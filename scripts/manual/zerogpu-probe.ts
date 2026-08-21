@@ -108,14 +108,20 @@ let failures = 0;
 
   // 4. Optional: spend real GPU time.
   if (CALL) {
-    console.log(`\nCalling ${CALL} — this consumes daily GPU quota.`);
+    // Only @spaces.GPU-decorated endpoints allocate a GPU; a plain Gradio
+    // function costs nothing. The probe cannot tell which is which from the
+    // API surface, so it warns rather than asserting.
+    console.log(`\nCalling ${CALL} — spends daily GPU quota if the endpoint is GPU-decorated.`);
     const { callZeroGpu } = await import("../../server/labs/zerogpu.ts");
     try {
       const data = ARG ? [JSON.parse(ARG)] : [];
       const { result, elapsedMs } = await callZeroGpu(CALL, data, process.env);
       ok(`call succeeded in ${(elapsedMs / 1000).toFixed(1)}s`);
       console.log(`         result: ${JSON.stringify(result).slice(0, 300)}`);
-      console.log(`         at this duration a 40 min/day allowance is about ${Math.floor(2400 / Math.max(elapsedMs / 1000, 1))} calls`);
+      const seconds = Math.max(elapsedMs / 1000, 0.1);
+      console.log(seconds < 5
+        ? "         under 5s round trip — likely a CPU endpoint, so little or no quota was spent"
+        : `         at this duration a 40 min/day allowance is about ${Math.floor(2400 / seconds)} calls`);
     } catch (err: any) {
       bad(`${err?.code || "call failed"}: ${err?.message || err}`);
       if (err?.consumedGpu) warn("this failure still consumed GPU quota");
