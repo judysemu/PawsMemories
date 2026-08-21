@@ -40,12 +40,82 @@ export function isAuthenticated(): boolean {
   return !!getToken();
 }
 
-/** fetch() wrapper that adds the Authorization header for protected endpoints. */
+/** Requests with no side effect, so replaying one cannot double-charge. */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Status codes worth another attempt. These are the shapes a host emits while
+ * it is restarting rather than a considered answer about the request; a 4xx is
+ * never retried because the server has already decided.
+ */
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+/** Inactivity budget for a single attempt. Uploads pass their own signal. */
+const DEFAULT_TIMEOUT_MS = 60_000;
+const RETRY_BACKOFF_MS = [400, 1_200];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Combines the caller's abort signal with our per-attempt timeout. */
+function attemptSignal(caller: AbortSignal | null | undefined, timeoutMs: number): AbortSignal | undefined {
+  const timeout = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(timeoutMs)
+    : undefined;
+  if (!caller) return timeout;
+  if (!timeout) return caller;
+  // AbortSignal.any is not in every browser this app targets; without it the
+  // caller's own signal wins, which is the safer of the two to honour.
+  if (typeof (AbortSignal as any).any === "function") return (AbortSignal as any).any([caller, timeout]);
+  return caller;
+}
+
+/**
+ * fetch() wrapper that adds the Authorization header for protected endpoints.
+ *
+ * It also bounds and retries the call. Every Hostinger environment-variable
+ * edit triggers a full redeploy, so there is a window on each one where the
+ * app answers 502/503 — previously that surfaced to the customer as a failed
+ * action mid-flow. Bare fetch() also has no timeout, so a stalled request left
+ * the UI spinning on a `busy` flag that never cleared.
+ *
+ * Only safe methods are replayed. Retrying a POST here would risk charging a
+ * customer twice for one paid stage: several of those routes are idempotent by
+ * key, but not all of them are, and this wrapper cannot tell which is which.
+ */
 export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init.headers || {});
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+
+  const method = (init.method || "GET").toUpperCase();
+  const canRetry = SAFE_METHODS.has(method) && init.body == null;
+  const attempts = canRetry ? RETRY_BACKOFF_MS.length + 1 : 1;
+  const timeoutMs = (init as { timeoutMs?: number }).timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(input, {
+        ...init,
+        headers,
+        signal: attemptSignal(init.signal, timeoutMs),
+      });
+      if (attempt < attempts - 1 && RETRYABLE_STATUS.has(response.status)) {
+        await sleep(RETRY_BACKOFF_MS[attempt]);
+        continue;
+      }
+      return response;
+    } catch (cause) {
+      // A caller-initiated abort is a decision, not a transient fault.
+      if (init.signal?.aborted) throw cause;
+      lastError = cause;
+      if (attempt >= attempts - 1) break;
+      await sleep(RETRY_BACKOFF_MS[attempt]);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("The request could not be completed. Check your connection and try again.");
 }
 
 export async function importIfc(ifcBase64: string): Promise<any> {

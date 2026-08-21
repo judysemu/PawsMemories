@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
+import { storageHttpClientOptions } from "./storage.http";
 
 /**
  * Object Storage Utility for Backblaze B2 / S3-compatible storage.
@@ -23,6 +24,7 @@ const s3Client = new S3Client({
     secretAccessKey: secretAccessKey || "",
   },
   forcePathStyle: true, // Required for Backblaze B2 and some S3-compatible endpoints
+  ...storageHttpClientOptions(),
 });
 
 export function getPublicObjectUrl(objectKey: string, env: NodeJS.ProcessEnv = process.env): string {
