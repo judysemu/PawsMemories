@@ -4,17 +4,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { resolveClipDir, getMissingClips } = await import("../server/barkley/featureFlag.ts");
+const { resolveClipDir, getMissingClips, REQUIRED_CLIPS } = await import("../server/barkley/featureFlag.ts");
 
-const REQUIRED = [
-  "idle", "walk_forward", "turn_left", "turn_right",
-  "point_right", "point_left", "open_arms", "hands_together", "think", "gesture_up",
-  "gesture_count", "gesture_shrug", "gesture_thumbs_up", "gesture_present",
-  "talk_normal", "talk_emphasize", "talk_explain", "laugh", "nod_yes", "shake_head",
-  "wave_hello", "wave_bye",
-  "excited_jump", "curious_lean", "surprised", "clap",
-  "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
-];
+const REQUIRED = REQUIRED_CLIPS;
 
 /** Builds a fake deployment root and runs a body with cwd pointed at it. */
 function withCwd(layout, body) {

@@ -20,6 +20,7 @@ import {
   deleteBarkleySession,
   getMissingClips,
   resolveClipDir,
+  REQUIRED_CLIPS,
   validateClipExists,
 } from "./featureFlag";
 
@@ -44,7 +45,7 @@ export function barkleyRoutes(): any {
   router.get("/status", (_req: Request, res: Response) => {
     const enabled = isBarkleyPresenterEnabled();
     const missing = enabled ? getMissingClips() : [];
-    const totalClips = 30;
+    const totalClips = REQUIRED_CLIPS.length;
     const readyClips = totalClips - missing.length;
 
     res.json({

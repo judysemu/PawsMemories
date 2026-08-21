@@ -171,32 +171,28 @@ export function deleteBarkleySession(sessionId: string): void {
 // Clip validation
 // ──────────────────────────────────────────────────────────────────
 
+/**
+ * The clips a complete show needs, named as they appear in barkley.glb.
+ *
+ * One definition on purpose. This list previously existed twice here and its
+ * length a third time as a literal 30 in the status route, so adding a clip
+ * meant updating three places or reporting a wrong ready count.
+ */
+export const REQUIRED_CLIPS: readonly string[] = [
+  "idle", "walk_forward", "turn_left", "turn_right",
+  "point_right", "point_left", "open_arms", "hands_together", "think", "gesture_up",
+  "gesture_count", "gesture_shrug", "gesture_thumbs_up", "gesture_present",
+  "talk_normal", "talk_emphasize", "talk_explain", "laugh", "nod_yes", "shake_head",
+  "wave_hello", "wave_bye",
+  "excited_jump", "curious_lean", "surprised", "clap",
+  "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
+];
+
 export function validateClipExists(clipName: string): boolean {
-  // Import from client-side manifest at build time
-  // In production, this would check the public/barkley/ directory
-  const requiredClips = [
-    "idle", "walk_forward", "turn_left", "turn_right",
-    "point_right", "point_left", "open_arms", "hands_together", "think", "gesture_up",
-    "gesture_count", "gesture_shrug", "gesture_thumbs_up", "gesture_present",
-    "talk_normal", "talk_emphasize", "talk_explain", "laugh", "nod_yes", "shake_head",
-    "wave_hello", "wave_bye",
-    "excited_jump", "curious_lean", "surprised", "clap",
-    "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
-  ];
-  return requiredClips.includes(clipName);
+  return REQUIRED_CLIPS.includes(clipName);
 }
 
 export function getMissingClips(): string[] {
-  const requiredClips = [
-    "idle", "walk_forward", "turn_left", "turn_right",
-    "point_right", "point_left", "open_arms", "hands_together", "think", "gesture_up",
-    "gesture_count", "gesture_shrug", "gesture_thumbs_up", "gesture_present",
-    "talk_normal", "talk_emphasize", "talk_explain", "laugh", "nod_yes", "shake_head",
-    "wave_hello", "wave_bye",
-    "excited_jump", "curious_lean", "surprised", "clap",
-    "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
-  ];
-
   const clipDir = resolveClipDir();
   const availableClips = fs.existsSync(clipDir)
     ? fs.readdirSync(clipDir)
@@ -204,5 +200,5 @@ export function getMissingClips(): string[] {
         .map((f: string) => f.replace(".glb", ""))
     : [];
 
-  return requiredClips.filter((clip: string) => !availableClips.includes(clip));
+  return REQUIRED_CLIPS.filter((clip: string) => !availableClips.includes(clip));
 }
