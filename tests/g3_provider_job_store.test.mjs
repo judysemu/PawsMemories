@@ -26,12 +26,17 @@ function makeFakePool() {
       const s = sql.toUpperCase();
 
       if (s.includes("INSERT INTO PROVIDER_GENERATION_JOBS")) {
+        // Positional, so it must track the real INSERT. base_model_task_handle
+        // was added after provider_task_handle in migration 56; destructuring
+        // without it silently shifted every later value by one and made a
+        // cancelled job read as uncancelled.
         const [job_id, order_id, provider_id, provider_version, provider_task_handle,
+               base_model_task_handle,
                model, config_hash, cancelled, glb_url, stage] = params;
-        // ON DUPLICATE KEY UPDATE job_id = job_id  => existing row untouched
         if (!rows.has(job_id)) {
           rows.set(job_id, {
             job_id, order_id, provider_id, provider_version, provider_task_handle,
+            base_model_task_handle,
             model, config_hash, cancelled, glb_url, stage, created_ms: Date.now(),
           });
         }

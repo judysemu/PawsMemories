@@ -57,5 +57,16 @@ export function storageHttpClientOptions(env: NodeJS.ProcessEnv = process.env) {
       connectionTimeout: tuning.connectionTimeout,
       requestTimeout: tuning.requestTimeout,
     },
+    // Backblaze is S3-compatible, not S3. Recent AWS SDK versions default both
+    // of these to WHEN_SUPPORTED, which appends x-amz-checksum-mode=ENABLED to
+    // GetObject and adds flexible-checksum headers to PutObject. B2 does not
+    // implement those, and because the parameter participates in the signature
+    // a presigned download comes back 403 rather than a clear "unsupported"
+    // error -- which reads as an expired or malformed URL.
+    //
+    // WHEN_REQUIRED keeps checksums for the operations that genuinely need
+    // them and stops the SDK volunteering them everywhere else.
+    requestChecksumCalculation: "WHEN_REQUIRED" as const,
+    responseChecksumValidation: "WHEN_REQUIRED" as const,
   };
 }

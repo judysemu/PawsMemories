@@ -2563,6 +2563,33 @@ export const MIGRATIONS: Migration[] = [
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },
+  {
+    version: 56,
+    name: "provider_generation_jobs_base_model_task_handle",
+    statements: [
+      // Tripo's rig endpoints take the task id of a 3D GENERATION task. After a
+      // texture stage the chained record's own handle is a `texture_model`
+      // handle, which Tripo rejects, so the adapter carries the originating
+      // base handle down the chain (MG-11).
+      //
+      // That carry was implemented in the adapter but never given anywhere to
+      // live: the column did not exist, the INSERT did not write it and the
+      // SELECT did not read it, so the value was computed and silently
+      // discarded on every chained job. rig_check therefore failed at
+      // rigSourceHandle() for every order that purchased a texture, surfacing
+      // as PROVIDER_START_FAILED with no detail.
+      `ALTER TABLE provider_generation_jobs
+         ADD COLUMN base_model_task_handle VARCHAR(191) NULL AFTER provider_task_handle`,
+      // Backfill what can be recovered. A base job is its own base handle, so
+      // existing rows become self-consistent and any future chain from them
+      // resolves. Chained rows written before this migration cannot be
+      // recovered here -- their originating handle was never persisted -- and
+      // are left NULL to fail loudly rather than rig from the wrong task.
+      `UPDATE provider_generation_jobs
+          SET base_model_task_handle = provider_task_handle
+        WHERE stage = 'base' AND base_model_task_handle IS NULL`,
+    ],
+  },
 ];
 
 export async function ensureMigrationTable(conn: mysql.PoolConnection | mysql.Pool): Promise<void> {

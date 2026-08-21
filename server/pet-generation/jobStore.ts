@@ -26,8 +26,9 @@ export class MySqlProviderJobStore implements ProviderJobStore {
     await pool.query(
       `INSERT INTO provider_generation_jobs
          (job_id, order_id, provider_id, provider_version, provider_task_handle,
+          base_model_task_handle,
           model, config_hash, cancelled, glb_url, stage, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
        ON DUPLICATE KEY UPDATE job_id = job_id`,
       [
         record.jobId,
@@ -35,6 +36,10 @@ export class MySqlProviderJobStore implements ProviderJobStore {
         record.providerId,
         record.providerVersion,
         record.providerTaskHandle,
+        // The originating generation task, carried down the chain so a rig
+        // stage after a texture stage submits the base handle rather than a
+        // texture_model handle Tripo will reject.
+        record.baseModelTaskHandle ?? null,
         record.model,
         record.configHash,
         record.cancelled ? 1 : 0,
@@ -48,6 +53,7 @@ export class MySqlProviderJobStore implements ProviderJobStore {
     const pool = this.getPool();
     const [rows] = await pool.query(
       `SELECT job_id, order_id, provider_id, provider_version, provider_task_handle,
+              base_model_task_handle,
               model, config_hash, cancelled, glb_url,
               stage, rig_task_handle, idle_task_handle, walk_task_handle, idle_glb_url, walk_glb_url,
               UNIX_TIMESTAMP(created_at) * 1000 AS created_ms
@@ -65,6 +71,7 @@ export class MySqlProviderJobStore implements ProviderJobStore {
       providerId: r.provider_id,
       providerVersion: r.provider_version,
       providerTaskHandle: r.provider_task_handle,
+      baseModelTaskHandle: r.base_model_task_handle ?? undefined,
       model: r.model,
       configHash: r.config_hash,
       cancelled: r.cancelled === 1,
