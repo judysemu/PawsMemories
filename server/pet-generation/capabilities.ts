@@ -1,4 +1,4 @@
-import { selectedPaws3dProvider } from "../model-builds/configuredProvider";
+import { PAWS_3D_PROVIDER_ID } from "../model-builds/configuredProvider";
 import { PET_GLB_STAGE_PRICES } from "../../src/pricing";
 import { PetGenerationError } from "./provider";
 import type {
@@ -30,20 +30,23 @@ export interface PetGlbProductCapabilities {
 }
 
 /**
- * Customer-facing capabilities are selected without constructing a provider.
- * GET /product therefore stays safe while a private worker is intentionally
- * off, and the quote/order contract reflects the provider actually selected.
+ * Customer-facing capabilities, published without constructing a provider.
+ * GET /product therefore stays safe while credentials are intentionally blank.
+ *
+ * This is the Tripo contract unconditionally. It used to branch on a provider
+ * resolved from the environment, which meant the contract a customer was
+ * quoted could disagree with the adapter that would actually run the build if
+ * the two were configured inconsistently. With one provider bound at the
+ * module level that disagreement is no longer expressible.
+ *
+ * `env` is retained for the TRIPO_MODEL_VERSION lookups in callers and for the
+ * existing signature; nothing here selects on it.
  */
 export function petGlbProductCapabilities(
-  env: NodeJS.ProcessEnv = process.env,
+  _env: NodeJS.ProcessEnv = process.env,
 ): PetGlbProductCapabilities {
-  const providerId = selectedPaws3dProvider(env);
-
-  // Tripo is the only provider the model generator supports. Unknown providers
-  // fail closed rather than inheriting Tripo's paid capabilities.
-  if (providerId === "tripo") {
-    return {
-      providerId,
+  return {
+      providerId: PAWS_3D_PROVIDER_ID,
       texture: {
         includedInBase: false,
         separateStageAvailable: true,
@@ -61,13 +64,7 @@ export function petGlbProductCapabilities(
         generatedForApproval: ["left", "right", "rear"],
         canRegenerate: true,
       },
-    };
-  }
-
-  throw new PetGenerationError(
-    "UNSUPPORTED_PROVIDER",
-    `Provider '${providerId}' does not publish paid pet-product capabilities`,
-  );
+  };
 }
 
 export function assertPetGlbConfigurationSupported(

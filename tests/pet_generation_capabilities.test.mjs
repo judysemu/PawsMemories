@@ -28,26 +28,52 @@ const TRIPO_ENV = {
   PAWS_3D_PROVIDER: "tripo",
 };
 
-// Tripo is the only provider the model generator supports. The in-house
-// TRELLIS provider and its capability fork were removed on 2026-08-20 after
-// its Azure GPU VMs were deleted; anything else must fail closed.
-const UNKNOWN_PROVIDER_ENV = {
+// Tripo is bound at the module level as of 2026-08-21; PAWS_3D_PROVIDER is no
+// longer read. A stale value in the environment must therefore be inert rather
+// than able to change what a customer is quoted.
+const STALE_PROVIDER_ENV = {
   PAWS_3D_PROVIDER: "trellis2",
 };
 
-test("an unsupported provider publishes no paid product and fails closed", () => {
-  assert.throws(
-    () => petGlbProductCapabilities(UNKNOWN_PROVIDER_ENV),
-    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
-  );
+test("a stale PAWS_3D_PROVIDER cannot change the published product", () => {
+  // Provider selection previously lived in the environment, so a leftover
+  // value could make GET /product disagree with the adapter that would
+  // actually run the build. Binding the id removes that possibility: every
+  // capability call returns the Tripo contract regardless of what is set.
+  const stale = petGlbProductCapabilities(STALE_PROVIDER_ENV);
+  const clean = petGlbProductCapabilities({});
+  assert.equal(stale.providerId, "tripo");
+  assert.deepEqual(stale, clean);
+
   for (const call of [
-    () => assertPetGlbConfigurationSupported(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
-    () => normalizeHistoricalConfiguration(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
-    () => nextPetGlbStage(BASE_CONFIGURATION, "base", UNKNOWN_PROVIDER_ENV),
-    () => stagePrice("texture", UNKNOWN_PROVIDER_ENV),
-    () => productQuote(BASE_CONFIGURATION, UNKNOWN_PROVIDER_ENV),
+    () => assertPetGlbConfigurationSupported(BASE_CONFIGURATION, STALE_PROVIDER_ENV),
+    () => normalizeHistoricalConfiguration(BASE_CONFIGURATION, STALE_PROVIDER_ENV),
+    () => nextPetGlbStage(BASE_CONFIGURATION, "base", STALE_PROVIDER_ENV),
+    () => stagePrice("texture", STALE_PROVIDER_ENV),
+    () => productQuote(BASE_CONFIGURATION, STALE_PROVIDER_ENV),
   ]) {
-    assert.throws(call, (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER");
+    assert.doesNotThrow(call);
+  }
+});
+
+test("an unregistered SKU still fails closed at the factory", async () => {
+  // Fail-closed did not disappear with provider selection -- it moved. The
+  // factory is now the only place a bad binding can be rejected, so that
+  // guarantee is asserted here rather than through the environment.
+  const { createProviderForSku, resetProviderFactoryForTests } =
+    await import("../server/pet-generation/factory.ts");
+  const previous = process.env.PET_GLB_ENABLED;
+  process.env.PET_GLB_ENABLED = "true";
+  resetProviderFactoryForTests();
+  try {
+    assert.throws(
+      () => createProviderForSku("NO_SUCH_SKU"),
+      (error) => error instanceof PetGenerationError,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PET_GLB_ENABLED;
+    else process.env.PET_GLB_ENABLED = previous;
+    resetProviderFactoryForTests();
   }
 });
 
@@ -130,14 +156,10 @@ test("Tripo paid texture and humanoid behavior remains unchanged", () => {
   });
 });
 
-test("service rejects an unsupported provider before touching the database", async (t) => {
-  const previous = process.env.PAWS_3D_PROVIDER;
-  process.env.PAWS_3D_PROVIDER = "trellis2";
-  t.after(() => {
-    if (previous === undefined) delete process.env.PAWS_3D_PROVIDER;
-    else process.env.PAWS_3D_PROVIDER = previous;
-  });
-
+test("service rejects an unsupported configuration before touching the database", async () => {
+  // The rejection that matters is now about the configuration, not the
+  // provider: an unsupported subject profile must be refused before any
+  // connection is taken, so a bad request cannot consume a pool slot.
   let poolCalls = 0;
   const service = new PetGlbService({
     getPool() {
@@ -150,14 +172,10 @@ test("service rejects an unsupported provider before touching the database", asy
   });
 
   await assert.rejects(
-    service.createConfiguredOrder("+15555550123", { ...BASE_CONFIGURATION, includeTexture: true }),
-    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
+    service.createConfiguredOrder("+15555550123", { ...BASE_CONFIGURATION, subjectProfile: "spaceship" }),
+    (error) => error instanceof PetGenerationError && error.code === "SUBJECT_PROFILE_UNSUPPORTED",
   );
-  await assert.rejects(
-    service.createConfiguredOrder("+15555550123", { ...BASE_CONFIGURATION, subjectProfile: "humanoid" }),
-    (error) => error instanceof PetGenerationError && error.code === "UNSUPPORTED_PROVIDER",
-  );
-  assert.equal(poolCalls, 0);
+  assert.equal(poolCalls, 0, "an unsupported configuration must not reach the database");
 });
 
 test("model studio defaults texture off, gates styling, and carries no in-house copy", () => {

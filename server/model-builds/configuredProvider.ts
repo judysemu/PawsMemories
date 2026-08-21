@@ -1,5 +1,4 @@
 import {
-  ModelBuildProviderError,
   TripoModelBuildAdapter,
   type ModelBuildProvider,
   type ModelBuildProviderInput,
@@ -8,32 +7,27 @@ import {
   type ModelBuildReferenceViewKind,
 } from "./provider";
 
-export type ModelBuildProviderFactory = () => ModelBuildProvider;
+/**
+ * The one provider the model generator builds against.
+ *
+ * This was previously resolved at runtime from PAWS_3D_PROVIDER through a
+ * factory map, which existed to let TRELLIS be selected instead. TRELLIS was
+ * removed on 2026-08-20 and the map has had a single entry since, so the
+ * indirection only created ways to be misconfigured: an unset or mistyped
+ * variable could reach a lookup miss deep inside a paid flow rather than
+ * failing at boot, and the same variable had to agree with the SKU registry
+ * and the capability contract independently.
+ *
+ * Binding the id here removes that class of failure entirely. Adding a second
+ * provider later means reintroducing selection deliberately, with the registry
+ * and capabilities updated in the same change.
+ */
+export const PAWS_3D_PROVIDER_ID = "tripo" as const;
 
-export function selectedPaws3dProvider(env: NodeJS.ProcessEnv = process.env): string {
-  const selected = String(env.PAWS_3D_PROVIDER || "tripo").trim().toLowerCase();
-  if (!/^[a-z][a-z0-9_-]{1,39}$/.test(selected)) {
-    throw new ModelBuildProviderError("Configured 3D provider id is invalid", "PROVIDER_CONFIG_INVALID", false);
-  }
-  return selected;
-}
-
-export function createConfiguredModelBuildProvider(
-  env: NodeJS.ProcessEnv = process.env,
-  factories: ReadonlyMap<string, ModelBuildProviderFactory> = new Map<string, ModelBuildProviderFactory>([
-    ["tripo", () => new TripoModelBuildAdapter()],
-  ]),
-): ModelBuildProvider {
-  const selected = selectedPaws3dProvider(env);
-  const factory = factories.get(selected);
-  if (!factory) {
-    throw new ModelBuildProviderError("Configured 3D provider is unavailable", "PROVIDER_CONFIG_UNAVAILABLE", false);
-  }
-  return factory();
-}
+export type Paws3dProviderId = typeof PAWS_3D_PROVIDER_ID;
 
 /**
- * Defers provider credential validation until the enabled pipeline performs an
+ * Defers Tripo credential validation until the enabled pipeline performs an
  * operation. Importing the server with MODEL_BUILD_V3_ENABLED=false therefore
  * remains safe even when the documented connection values are blank.
  */
@@ -42,28 +36,23 @@ export class LazyConfiguredModelBuildProvider implements ModelBuildProvider {
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
-    private readonly factories: ReadonlyMap<string, ModelBuildProviderFactory> = new Map<string, ModelBuildProviderFactory>([
-      ["tripo", () => new TripoModelBuildAdapter()],
-    ]),
+    private readonly createProvider: () => ModelBuildProvider = () => new TripoModelBuildAdapter(),
   ) {}
 
   get providerId(): string {
-    return selectedPaws3dProvider(this.env);
+    return PAWS_3D_PROVIDER_ID;
   }
 
   get modelId(): string {
-    if (this.providerId === "tripo") return this.env.TRIPO_MODEL_VERSION || "default";
-    return this.resolve().modelId || "configured";
+    return this.env.TRIPO_MODEL_VERSION || "default";
   }
 
   get requiredReferenceViewKinds(): readonly ModelBuildReferenceViewKind[] {
-    if (this.providerId === "tripo") return ["front", "left", "right", "rear"] as const;
-    return this.resolve().requiredReferenceViewKinds || ["front", "left", "right", "rear"] as const;
+    return ["front", "left", "right", "rear"] as const;
   }
 
   async preflightForCharge(): Promise<void> {
-    const provider = this.resolve();
-    await provider.preflightForCharge?.();
+    await this.resolve().preflightForCharge?.();
   }
 
   start(input: ModelBuildProviderInput, configHash: string): Promise<ModelBuildProviderResult> {
@@ -79,21 +68,14 @@ export class LazyConfiguredModelBuildProvider implements ModelBuildProvider {
   }
 
   private resolve(): ModelBuildProvider {
-    if (!this.resolvedProvider) {
-      const selected = selectedPaws3dProvider(this.env);
-      const factory = this.factories.get(selected);
-      if (!factory) {
-        throw new ModelBuildProviderError("Configured 3D provider is unavailable", "PROVIDER_CONFIG_UNAVAILABLE", false);
-      }
-      this.resolvedProvider = factory();
-    }
+    if (!this.resolvedProvider) this.resolvedProvider = this.createProvider();
     return this.resolvedProvider;
   }
 }
 
 export function createLazyConfiguredModelBuildProvider(
   env: NodeJS.ProcessEnv = process.env,
-  factories?: ReadonlyMap<string, ModelBuildProviderFactory>,
+  createProvider?: () => ModelBuildProvider,
 ): ModelBuildProvider {
-  return new LazyConfiguredModelBuildProvider(env, factories);
+  return new LazyConfiguredModelBuildProvider(env, createProvider);
 }

@@ -92,7 +92,10 @@ test("in-house-only mode blocks fal authoring before key or queue access", async
 // paid cutover stays closed, and no dead render host or dead provider reappears.
 test("example production configuration points at Tripo and keeps cutover closed", () => {
   const example = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8");
-  assert.match(example, /^PAWS_3D_PROVIDER="tripo"$/m);
+  // PAWS_3D_PROVIDER was removed on 2026-08-21 -- Tripo is bound in code, so a
+  // documented provider variable would now be inert and misleading. Its
+  // absence is the assertion.
+  assert.doesNotMatch(example, /^PAWS_3D_PROVIDER=/m);
   assert.match(example, /^PET_GLB_ENABLED="false"$/m);
   assert.match(example, /^BLENDER_VERSION="5\.1\.2"$/m);
   assert.match(example, /^BLENDER_WORKER_REVISION=""$/m);
