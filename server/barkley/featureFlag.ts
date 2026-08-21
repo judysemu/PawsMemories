@@ -8,10 +8,39 @@ import { z } from "zod";
 
 // Resolved from the working directory, not the module path. The server ships
 // as a CJS esbuild bundle where import.meta.url is undefined and __dirname
-// points into dist/, so neither locates public/barkley. Every other runtime
-// asset lookup in this app (e.g. blender-worker/profiles) is cwd-relative for
-// the same reason.
-const CLIP_DIR = path.join(process.cwd(), "public", "barkley");
+// points into dist/, so neither locates the clips. Every other runtime asset
+// lookup in this app (e.g. blender-worker/profiles) is cwd-relative for the
+// same reason.
+//
+// Two layouts have to work. In development the clips are read from public/,
+// which is also where the build pipeline writes them. In production the
+// deployed archive contains only the build output, and server.ts serves static
+// assets from <cwd>/dist — so the clips the browser fetches at /barkley/*.glb
+// live at <cwd>/dist/barkley. Checking public/ alone reported all 30 clips
+// missing in production while the browser was loading them successfully, and
+// GET /api/barkley/show 503'd on a feature whose assets were actually present.
+//
+// dist/ is checked first so a stale public/ copy can never mask what is really
+// being served.
+/**
+ * The directory the running server actually serves clips from.
+ *
+ * cwd is read per call rather than captured at module load: the value is only
+ * meaningful at the moment it is used, and binding it at import time makes the
+ * two layouts impossible to cover in a test.
+ */
+export function resolveClipDir(): string {
+  const candidates = [
+    path.join(process.cwd(), "dist", "barkley"),
+    path.join(process.cwd(), "public", "barkley"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  // Nothing exists yet: report the layout this process would serve, so the
+  // diagnostic names a real path rather than an empty string.
+  return candidates[candidates.length - 1];
+}
 
 export type BarkleyState =
   | "idle" | "loading" | "playing" | "paused" | "interacting" | "speaking" | "complete" | "error";
@@ -168,7 +197,7 @@ export function getMissingClips(): string[] {
     "react_click", "react_drag", "react_quiz_yes", "react_quiz_no",
   ];
 
-  const clipDir = CLIP_DIR;
+  const clipDir = resolveClipDir();
   const availableClips = fs.existsSync(clipDir)
     ? fs.readdirSync(clipDir)
         .filter((f: string) => f.endsWith(".glb"))

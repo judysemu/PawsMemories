@@ -19,6 +19,7 @@ import {
   getBarkleySession,
   deleteBarkleySession,
   getMissingClips,
+  resolveClipDir,
   validateClipExists,
 } from "./featureFlag";
 
@@ -53,6 +54,10 @@ export function barkleyRoutes(): any {
         ready: readyClips,
         missing: missing,
         allReady: missing.length === 0,
+        // Name the directory that was actually searched. Without it, "all 30
+        // missing" is indistinguishable from "looking in the wrong place",
+        // which is exactly how a path bug survived a deploy.
+        directory: resolveClipDir(),
       },
       show: {
         id: BARKLEY_SHOW.id,
