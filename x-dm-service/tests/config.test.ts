@@ -75,11 +75,14 @@ describe('loadConfig', () => {
 
   it('should strip path from BLENDER_WORKER_URL', async () => {
     vi.resetModules();
-    process.env.BLENDER_WORKER_URL = 'https://pawsmemories.onrender.com/render/jobs';
+    process.env.BLENDER_WORKER_URL =
+      'https://pawsome3d-blender-worker.ambitiousforest-08789dd3.eastus.azurecontainerapps.io/execute';
 
     const { loadConfig } = await import('../src/config.js');
     const config = loadConfig();
-    expect(config.BLENDER_WORKER_URL).toBe('https://pawsmemories.onrender.com');
+    expect(config.BLENDER_WORKER_URL).toBe(
+      'https://pawsome3d-blender-worker.ambitiousforest-08789dd3.eastus.azurecontainerapps.io',
+    );
   });
 
   it('should use defaults for optional vars', async () => {

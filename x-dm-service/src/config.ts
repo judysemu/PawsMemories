@@ -170,7 +170,7 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 
 /**
  * Strip the path component from a URL, keeping only the origin.
- * e.g. "https://pawsmemories.onrender.com/render" → "https://pawsmemories.onrender.com"
+ * e.g. ".../azurecontainerapps.io/execute" → ".../azurecontainerapps.io"
  */
 function stripPath(url: string): string {
   try {
