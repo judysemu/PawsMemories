@@ -13,6 +13,12 @@
  * Spec: X_DM_REFINEMENT_SPEC.md
  */
 
+// Must precede every other import: config validates on first read, so a .env
+// loaded afterwards arrives too late and the process exits complaining about
+// variables the file actually contains. dotenv was already a dependency but
+// was never imported, so a local .env silently did nothing.
+import 'dotenv/config';
+
 import express from 'express';
 import { getConfig } from './config.js';
 import { createWebhookRouter } from './routes/webhooks.js';

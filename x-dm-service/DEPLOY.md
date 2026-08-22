@@ -53,6 +53,51 @@ npm run migrate
 Applies `007_x_posts` and `008_x_oauth_scope` if they have not run. Both are
 already applied against the production database as of 2026-08-21.
 
+## Authorising before deployment (do this now)
+
+The bot can be authorised from your laptop — deployment is not required.
+
+`http://localhost:3001/oauth/callback` is already registered in the X app, the
+service defaults to port 3001, and the token is written to the **production**
+database. So a token minted locally is the same token the deployed service
+will read.
+
+Create `x-dm-service/.env`:
+
+```
+X_CLIENT_ID=...
+X_CLIENT_SECRET=...
+X_CONSUMER_SECRET=...
+X_BOT_USER_ID=...
+DB_HOST=srv1544.hstgr.io
+DB_PORT=3306
+DB_NAME=...
+DB_USER=...
+DB_PASSWORD=...
+X_WEBHOOK_URL=http://localhost:3001/webhooks/x
+X_POSTING_ENABLED=true
+X_POST_SCHEDULER_SECRET=<openssl rand -hex 32>
+```
+
+`X_WEBHOOK_URL` is load-bearing here and easy to miss: the OAuth redirect is
+derived from it by swapping `/webhooks/x` for `/oauth/callback`. Point it at
+localhost and the redirect matches the registered callback; point it anywhere
+else and X rejects the round-trip with a redirect_uri mismatch.
+
+Then:
+
+```bash
+cd x-dm-service
+npm install
+npm run dev
+```
+
+Open `http://localhost:3001/oauth` and consent as **@stelarbabyOS**.
+
+When the service later deploys, set `X_WEBHOOK_URL` to
+`https://x.pawsome3d.com/webhooks/x` so the production redirect matches the
+other registered callback.
+
 ## 4. Authorise the bot account
 
 Visit `https://x.pawsome3d.com/oauth` and complete consent as **@stelarbabyOS**.
