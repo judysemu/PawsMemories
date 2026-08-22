@@ -28,7 +28,13 @@ describe('migrations', () => {
         .filter((f) => f.endsWith('.sql'))
         .sort();
       expect(files[0]).toMatch(/^001_/);
-      expect(files[files.length - 1]).toMatch(/^006_/);
+      // Assert the ordering property, not the current count. Pinning the last
+      // filename makes every new migration fail this test for no reason, which
+      // trains the next person to edit the assertion rather than read it.
+      const numbers = files.map((f) => Number(f.slice(0, 3)));
+      expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+      expect(new Set(numbers).size).toBe(numbers.length);
+      expect(numbers[0]).toBe(1);
     });
 
     it('should use fileURLToPath(import.meta.url) — not process.cwd() — for resolution', () => {
