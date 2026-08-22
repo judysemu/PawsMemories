@@ -1,40 +1,70 @@
 /**
  * Barkley Presenter — 3D interactive stage component.
  *
- * Renders Barkley (biped presenter) on a production-quality 3D stage with:
+ * Renders Barkley (biped presenter) on an interactive 3D stage with:
+ * - Pawsome3D TerraPaw Material 3 warm design language (brown, cream, peach, glass)
  * - Smooth camera choreography per beat
- * - Lip-sync driven dialogue
+ * - Full light & dark theme reactivity
+ * - Mobile-first responsive layout (375px, 768px, 1440px)
+ * - Accessible keyboard navigation & screen-reader live regions
+ * - Respect for prefers-reduced-motion
  * - Interactive quiz and reveal overlays
- * - Progress bar and beat navigation
- * - Educational callout cards
- *
- * Asset blocker: 30 rendered biped clips in public/barkley/*.glb
- * Falls back to a placeholder figure when clips are not yet available.
+ * - Educational callout cards with pipeline takeaways
+ * - Fallback geometric figure if barkley.glb is not found
  */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import * as THREE from "three";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, Environment, ContactShadows, useGLTF, Center } from "@react-three/drei";
 import {
-  Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, RefreshCw,
-  MessageCircle, Sparkles, ChevronRight, ChevronLeft, Award, Lightbulb,
-  Mic, GraduationCap, X
+  OrbitControls,
+  Environment,
+  ContactShadows,
+} from "@react-three/drei";
+import {
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  ChevronRight,
+  ChevronLeft,
+  Award,
+  Lightbulb,
+  GraduationCap,
+  X,
+  Compass,
+  CheckCircle2,
+  ArrowRight,
+  RotateCcw,
+  Check,
 } from "lucide-react";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
-import { ANIMATOR_DEFAULTS } from "../animator/defaults";
 import {
   fetchBarkleyShow,
   createBarkleySession,
   advanceBeat,
   submitInteraction,
+  replayBeat,
   endSession,
   fetchBarkleyStatus,
 } from "../barkley/api";
+import { BARKLEY_SHOW as CANONICAL_SHOW } from "../barkley/shows";
 import type {
-  BarkleyBeat, BarkleyShow, BarkleyState, BarkleyCameraFrame,
-  BarkleyInteraction, BarkleyInteractionType, BarkleyEduMeta,
+  BarkleyBeat,
+  BarkleyShow,
+  BarkleyState,
+  BarkleyCameraFrame,
+  BarkleyInteraction,
+  BarkleyEduMeta,
+  BarkleyInteractionResult,
 } from "../barkley/types";
 
 // ──────────────────────────────────────────────────────────────────
@@ -51,15 +81,18 @@ const QUIZ_TIMEOUT_MS = 15000;
 // ──────────────────────────────────────────────────────────────────
 
 /**
- * Barkley character — loads the biped model and plays animation clips.
- * Falls back to a styled placeholder when the model is not yet available.
+ * Barkley character — loads the biped model from /barkley/barkley.glb
+ * and plays animation clips addressed by name from gltf.animations.
+ * Falls back gracefully to a styled puppy figurine if the model 404s.
  */
 function BarkleyCharacter({
   clip,
   state,
+  isDark,
 }: {
   clip: string;
   state: BarkleyState;
+  isDark: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -76,12 +109,10 @@ function BarkleyCharacter({
       const clipData = clipMapRef.current.get(name);
       if (!clipData) return;
 
-      // Fade out previous
       if (actionRef.current) {
         actionRef.current.fadeOut(0.3);
       }
 
-      // Play new clip
       const action = mixerRef.current.clipAction(clipData);
       action.reset();
       action.setLoop(THREE.LoopRepeat, Infinity);
@@ -97,27 +128,36 @@ function BarkleyCharacter({
         const cloned = SkeletonUtils.clone(gltf.scene) as THREE.Group;
         cloned.position.set(0, 0, 0);
         cloned.scale.setScalar(1);
+
+        // Ensure all meshes cast/receive soft shadows
+        cloned.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
         if (groupRef.current) {
+          groupRef.current.clear();
           groupRef.current.add(cloned);
         }
 
-        // Build animation clip map
         const clipMap = new Map<string, THREE.AnimationClip>();
         for (const clipData of gltf.animations) {
           clipMap.set(clipData.name, clipData);
         }
         clipMapRef.current = clipMap;
 
-        // Create animation mixer
         mixerRef.current = new THREE.AnimationMixer(cloned);
-
         setLoaded(true);
         playClip(clip);
       },
       undefined,
       () => {
-        // Model not found — placeholder mode
-        setLoaded(false);
+        // Model not found — fallback placeholder mode
+        if (!disposed) {
+          setLoaded(false);
+        }
       }
     );
 
@@ -145,70 +185,101 @@ function BarkleyCharacter({
     }
   }, [clip]);
 
-  // Update mixer each frame
+  // Update mixer on every frame
   useFrame((_state, delta) => {
     mixerRef.current?.update(delta);
   });
 
   if (loaded) return <group ref={groupRef} />;
 
-  // ── Placeholder figure (rendered until clips arrive) ───────────
+  // ── Warm fallback puppy figure (rendered if model GLB is missing) ─
+  const bodyColor = isDark ? "#c4824d" : "#a86438";
+  const chestColor = isDark ? "#fbe3d5" : "#fff1e6";
+  const earColor = isDark ? "#8d4f29" : "#783c1c";
+  const noseColor = "#2c160e";
+
   return (
     <group ref={groupRef} position={[0, 0, 0]}>
-      {/* Body */}
-      <mesh castShadow position={[0, 1.0, 0]}>
-        <capsuleGeometry args={[0.15, 0.6, 8, 16]} />
-        <meshStandardMaterial
-          color="#6B8F71"
-          roughness={0.6}
-          metalness={0.1}
-        />
+      {/* Torso */}
+      <mesh castShadow receiveShadow position={[0, 0.95, 0]}>
+        <capsuleGeometry args={[0.18, 0.55, 12, 24]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.5} metalness={0.05} />
+      </mesh>
+      {/* Chest patch */}
+      <mesh position={[0, 0.95, 0.12]} rotation={[0, 0, 0]}>
+        <sphereGeometry args={[0.12, 16, 16]} />
+        <meshStandardMaterial color={chestColor} roughness={0.6} />
       </mesh>
       {/* Head */}
-      <mesh castShadow position={[0, 1.5, 0]}>
-        <sphereGeometry args={[0.18, 16, 16]} />
-        <meshStandardMaterial
-          color="#7DA57B"
-          roughness={0.5}
-          metalness={0.1}
-        />
+      <mesh castShadow receiveShadow position={[0, 1.48, 0.05]}>
+        <sphereGeometry args={[0.22, 24, 24]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.5} metalness={0.05} />
       </mesh>
-      {/* Left arm */}
-      <mesh castShadow position={[-0.22, 1.05, 0]}>
-        <capsuleGeometry args={[0.06, 0.35, 6, 8]} />
-        <meshStandardMaterial color="#6B8F71" roughness={0.6} />
-      </mesh>
-      {/* Right arm */}
-      <mesh castShadow position={[0.22, 1.05, 0]}>
-        <capsuleGeometry args={[0.06, 0.35, 6, 8]} />
-        <meshStandardMaterial color="#6B8F71" roughness={0.6} />
-      </mesh>
-      {/* Left leg */}
-      <mesh castShadow position={[-0.1, 0.3, 0]}>
-        <capsuleGeometry args={[0.07, 0.4, 6, 8]} />
-        <meshStandardMaterial color="#5A7A5E" roughness={0.7} />
-      </mesh>
-      {/* Right leg */}
-      <mesh castShadow position={[0.1, 0.3, 0]}>
-        <capsuleGeometry args={[0.07, 0.4, 6, 8]} />
-        <meshStandardMaterial color="#5A7A5E" roughness={0.7} />
-      </mesh>
-      {/* Eyes */}
-      <mesh position={[-0.07, 1.53, 0.14]}>
-        <sphereGeometry args={[0.025, 8, 8]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.3} />
-      </mesh>
-      <mesh position={[0.07, 1.53, 0.14]}>
-        <sphereGeometry args={[0.025, 8, 8]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.3} />
+      {/* Snout / Muzzle */}
+      <mesh castShadow position={[0, 1.42, 0.22]}>
+        <sphereGeometry args={[0.11, 16, 16]} />
+        <meshStandardMaterial color={chestColor} roughness={0.5} />
       </mesh>
       {/* Nose */}
-      <mesh position={[0, 1.48, 0.17]}>
-        <sphereGeometry args={[0.03, 8, 8]} />
-        <meshStandardMaterial color="#2D2D2D" roughness={0.4} />
+      <mesh position={[0, 1.46, 0.32]}>
+        <sphereGeometry args={[0.035, 12, 12]} />
+        <meshStandardMaterial color={noseColor} roughness={0.3} metalness={0.2} />
       </mesh>
-      {/* Label */}
-      <BillboardText text="🐾 Barkley" position={[0, 1.85, 0]} color="#e8e0d4" size={0.25} />
+      {/* Left Ear */}
+      <mesh castShadow position={[-0.18, 1.56, -0.02]} rotation={[0.2, 0, -0.4]}>
+        <capsuleGeometry args={[0.06, 0.22, 8, 12]} />
+        <meshStandardMaterial color={earColor} roughness={0.6} />
+      </mesh>
+      {/* Right Ear */}
+      <mesh castShadow position={[0.18, 1.56, -0.02]} rotation={[0.2, 0, 0.4]}>
+        <capsuleGeometry args={[0.06, 0.22, 8, 12]} />
+        <meshStandardMaterial color={earColor} roughness={0.6} />
+      </mesh>
+      {/* Eyes */}
+      <mesh position={[-0.08, 1.53, 0.22]}>
+        <sphereGeometry args={[0.028, 12, 12]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.1} />
+      </mesh>
+      <mesh position={[0.08, 1.53, 0.22]}>
+        <sphereGeometry args={[0.028, 12, 12]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.1} />
+      </mesh>
+      {/* Left Arm */}
+      <mesh castShadow position={[-0.24, 0.98, 0]} rotation={[0, 0, 0.2]}>
+        <capsuleGeometry args={[0.065, 0.38, 8, 12]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.6} />
+      </mesh>
+      {/* Right Arm */}
+      <mesh castShadow position={[0.24, 0.98, 0]} rotation={[0, 0, -0.2]}>
+        <capsuleGeometry args={[0.065, 0.38, 8, 12]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.6} />
+      </mesh>
+      {/* Left Leg */}
+      <mesh castShadow position={[-0.12, 0.32, 0]}>
+        <capsuleGeometry args={[0.075, 0.42, 8, 12]} />
+        <meshStandardMaterial color={earColor} roughness={0.7} />
+      </mesh>
+      {/* Right Leg */}
+      <mesh castShadow position={[0.12, 0.32, 0]}>
+        <capsuleGeometry args={[0.075, 0.42, 8, 12]} />
+        <meshStandardMaterial color={earColor} roughness={0.7} />
+      </mesh>
+      {/* Collar with Gold Tag */}
+      <mesh position={[0, 1.28, 0.03]} rotation={[-0.1, 0, 0]}>
+        <torusGeometry args={[0.16, 0.028, 12, 24]} />
+        <meshStandardMaterial color="#ba1a1a" roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 1.22, 0.18]}>
+        <cylinderGeometry args={[0.03, 0.03, 0.008, 16]} />
+        <meshStandardMaterial color="#f2c960" metalness={0.8} roughness={0.2} />
+      </mesh>
+      {/* Billboard label */}
+      <BillboardText
+        text="🐾 Barkley"
+        position={[0, 1.9, 0]}
+        color={isDark ? "#ffdbd0" : "#442a22"}
+        size={0.25}
+      />
     </group>
   );
 }
@@ -217,7 +288,10 @@ function BarkleyCharacter({
  * Billboard text that always faces the camera.
  */
 function BillboardText({
-  text, position, color, size,
+  text,
+  position,
+  color,
+  size = 0.25,
 }: {
   text: string;
   position: [number, number, number];
@@ -228,30 +302,30 @@ function BillboardText({
   useFrame(({ camera }) => {
     if (ref.current) ref.current.lookAt(camera.position);
   });
+
+  const texture = useMemo(() => {
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    canvas.width = 512;
+    canvas.height = 128;
+    ctx.clearRect(0, 0, 512, 128);
+    ctx.font = "bold 48px 'Plus Jakarta Sans', system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = color || "#442a22";
+    ctx.fillText(text, 256, 75);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, [text, color]);
+
+  if (!texture) return null;
+
   return (
-    <group ref={ref} position={position}>
-      {/* Using sprite for billboard effect */}
+    <group ref={ref} position={position} scale={[size * 4, size, 1]}>
       <sprite position={[0, 0, 0]}>
-        <spriteMaterial
-          attach="material"
-          map={useMemo(() => {
-            const canvas = document.createElement("canvas");
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return null;
-            canvas.width = 512;
-            canvas.height = 128;
-            ctx.clearRect(0, 0, 512, 128);
-            ctx.font = "bold 52px system-ui, -apple-system, sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillStyle = color || "#ffffff";
-            ctx.fillText(text, 256, 80);
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.needsUpdate = true;
-            return tex;
-          }, [text, color])}
-          transparent
-          depthWrite={false}
-        />
+        <spriteMaterial attach="material" map={texture} transparent depthWrite={false} />
       </sprite>
     </group>
   );
@@ -259,13 +333,16 @@ function BillboardText({
 
 /**
  * Camera rig that smoothly transitions between beat camera positions.
+ * Respects prefers-reduced-motion by snapping instantly when reduced motion is preferred.
  */
 function BarkleyCamera({
   cameraFrame,
   isTransitioning,
+  reducedMotion,
 }: {
   cameraFrame: BarkleyCameraFrame;
   isTransitioning: boolean;
+  reducedMotion: boolean;
 }) {
   const { camera } = useThree();
   const prevPos = useRef(new THREE.Vector3(...cameraFrame.position));
@@ -275,26 +352,35 @@ function BarkleyCamera({
   const transitionStart = useRef<number | null>(null);
   const transitionDuration = useRef(cameraFrame.transitionSeconds ?? 0.8);
 
-  // Update target when camera frame changes
   useEffect(() => {
+    if (reducedMotion) {
+      camera.position.set(...cameraFrame.position);
+      camera.lookAt(...cameraFrame.target);
+      prevPos.current.set(...cameraFrame.position);
+      prevTarget.current.set(...cameraFrame.target);
+      transitionStart.current = null;
+      return;
+    }
+
+    prevPos.current.copy(camera.position);
     targetPos.current.set(...cameraFrame.position);
     targetTarget.current.set(...cameraFrame.target);
     transitionDuration.current = cameraFrame.transitionSeconds ?? 0.8;
-    if (cameraFrame.position[0] !== prevPos.current.x ||
-        cameraFrame.position[1] !== prevPos.current.y ||
-        cameraFrame.position[2] !== prevPos.current.z) {
-      transitionStart.current = performance.now();
-    }
-  }, [cameraFrame]);
+    transitionStart.current = performance.now();
+  }, [cameraFrame, camera, reducedMotion]);
 
   useFrame(() => {
-    // Set FOV
     if ((camera as THREE.PerspectiveCamera).fov !== cameraFrame.fov) {
       (camera as THREE.PerspectiveCamera).fov = cameraFrame.fov;
       camera.updateProjectionMatrix();
     }
 
-    // Smooth camera transition
+    if (reducedMotion) {
+      camera.position.set(...cameraFrame.position);
+      camera.lookAt(...cameraFrame.target);
+      return;
+    }
+
     if (transitionStart.current !== null) {
       const elapsed = (performance.now() - transitionStart.current) / 1000;
       const t = Math.min(elapsed / transitionDuration.current, 1);
@@ -302,14 +388,19 @@ function BarkleyCamera({
       const eased = 1 - Math.pow(1 - t, 3);
 
       camera.position.lerpVectors(prevPos.current, targetPos.current, eased);
-      // We need to track camera's look target — OrbitControls handles this
-      // For simplicity, we use lookAt on a moving target
-    } else {
-      camera.position.set(...cameraFrame.position);
-    }
+      const currentLook = new THREE.Vector3().lerpVectors(
+        prevTarget.current,
+        targetTarget.current,
+        eased
+      );
+      camera.lookAt(currentLook);
 
-    // Keep camera looking at target
-    if (!isTransitioning) {
+      if (t >= 1) {
+        transitionStart.current = null;
+        prevPos.current.set(...cameraFrame.position);
+        prevTarget.current.set(...cameraFrame.target);
+      }
+    } else if (!isTransitioning) {
       camera.lookAt(...cameraFrame.target);
     }
   });
@@ -318,66 +409,111 @@ function BarkleyCamera({
 }
 
 /**
- * Stage floor with subtle grid and spotlight.
+ * Stage floor with warm TerraPaw Material 3 aesthetics for both light and dark mode.
  */
-function BarkleyStage() {
+function BarkleyStage({ isDark }: { isDark: boolean }) {
+  // Light mode: warm cream stone podium; Dark mode: rich roasted espresso wood
+  const floorColor = isDark ? "#201a17" : "#ebe4da";
+  const ringColor = isDark ? "#e7bdb1" : "#77574d";
+  const gridPrimary = isDark ? "#352b27" : "#dfd5c8";
+  const gridSecondary = isDark ? "#28201c" : "#e8dfd2";
+  const spotLightColor = isDark ? "#ffeedd" : "#fff8f0";
+  const fillLightColor = isDark ? "#e7bdb1" : "#fbf4ec";
+
   return (
     <>
-      {/* Floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <circleGeometry args={[3, 64]} />
-        <meshStandardMaterial
-          color="#1a1a2e"
-          roughness={0.85}
-          metalness={0.1}
-        />
+      {/* Elevated circular podium */}
+      <mesh position={[0, -0.02, 0]} receiveShadow>
+        <cylinderGeometry args={[2.4, 2.6, 0.04, 64]} />
+        <meshStandardMaterial color={floorColor} roughness={0.7} metalness={0.05} />
       </mesh>
-      {/* Subtle ring */}
+
+      {/* Decorative accent ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]}>
-        <ringGeometry args={[1.2, 1.25, 64]} />
+        <ringGeometry args={[1.35, 1.4, 64]} />
         <meshStandardMaterial
-          color="#3D5A80"
-          emissive="#3D5A80"
-          emissiveIntensity={0.3}
-          roughness={0.5}
+          color={ringColor}
+          emissive={ringColor}
+          emissiveIntensity={isDark ? 0.25 : 0.15}
+          roughness={0.4}
         />
       </mesh>
-      {/* Grid overlay */}
-      <gridHelper args={[6, 12, "#2a2a3e", "#1e1e30"]} position={[0, 0.01, 0]} />
-      {/* Spotlight on Barkley */}
-      <spotLight
-        position={[0, 5, 2]}
-        angle={0.3}
-        penumbra={0.8}
-        intensity={2}
-        castShadow
-        color="#f0e6d3"
+
+      {/* Subtle concentric guide ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}>
+        <ringGeometry args={[2.1, 2.12, 64]} />
+        <meshStandardMaterial color={gridPrimary} roughness={0.8} opacity={0.6} transparent />
+      </mesh>
+
+      {/* Subtle grid on the stage */}
+      <gridHelper
+        args={[5, 10, gridPrimary, gridSecondary]}
+        position={[0, 0.006, 0]}
       />
-      {/* Fill light */}
-      <pointLight position={[-2, 3, 1]} intensity={0.5} color="#8aa0b5" />
-      {/* Rim light */}
-      <pointLight position={[2, 2, -1]} intensity={0.3} color="#e8a87c" />
-      {/* Ambient */}
-      <ambientLight intensity={0.25} />
-      {/* Fog for depth */}
-      <fogExp2 attach="fog" color="#0d0d1a" density={0.06} />
+
+      {/* Key spotlight on Barkley */}
+      <spotLight
+        position={[0, 4.5, 2.5]}
+        angle={0.38}
+        penumbra={0.7}
+        intensity={isDark ? 2.8 : 2.2}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.0001}
+        color={spotLightColor}
+      />
+
+      {/* Warm fill light */}
+      <pointLight position={[-2.5, 2.8, 1.5]} intensity={0.6} color={fillLightColor} />
+
+      {/* Warm peach rim light */}
+      <pointLight position={[2, 2.2, -1.8]} intensity={0.45} color="#ffd9ce" />
+
+      {/* Soft ambient */}
+      <ambientLight intensity={isDark ? 0.45 : 0.75} />
     </>
   );
 }
 
 // ──────────────────────────────────────────────────────────────────
-// UI Overlay Components
+// UI Overlay Components (Warm TerraPaw Design Tokens)
 // ──────────────────────────────────────────────────────────────────
 
 /**
- * Dialogue subtitle display — cinematic subtitle treatment.
+ * Dialogue caption display — warm, legible speech card anchored near the bottom.
  */
-function DialogueSubtitle({ dialogue }: { dialogue?: string }) {
+function DialogueSubtitle({
+  dialogue,
+  beatTitle,
+}: {
+  dialogue?: string;
+  beatTitle?: string;
+}) {
   if (!dialogue) return null;
+
   return (
-    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 w-full max-w-2xl px-8 pointer-events-none">
-      <div className="bg-black/60 backdrop-blur-sm rounded-xl px-6 py-4 border border-white/10">
-        <p className="text-white/95 text-base md:text-lg leading-relaxed text-center font-light tracking-wide">
+    <div
+      role="region"
+      aria-live="polite"
+      aria-label="Barkley's dialogue"
+      className="w-full max-w-2xl px-4 sm:px-6 pointer-events-auto"
+    >
+      <div className="glass-card rounded-2xl p-4 sm:p-5 border border-primary/20 shadow-xl relative overflow-hidden transition-all duration-300">
+        {/* Subtle warm accent bar on left */}
+        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-primary via-primary-fixed to-primary" />
+
+        <div className="flex items-center gap-2 mb-1.5 pl-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 dark:bg-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary dark:text-primary-fixed-dim">
+            <span className="text-xs">🐾</span> Barkley
+          </span>
+          {beatTitle && (
+            <span className="text-[11px] font-medium text-on-surface-variant/80 truncate">
+              • {beatTitle}
+            </span>
+          )}
+        </div>
+
+        <p className="text-on-surface text-sm sm:text-base leading-relaxed pl-2 font-medium">
           {dialogue}
         </p>
       </div>
@@ -386,37 +522,82 @@ function DialogueSubtitle({ dialogue }: { dialogue?: string }) {
 }
 
 /**
- * Educational callout card — appears beside the dialogue.
+ * Educational callout card — presents pro-tips & pipeline concepts.
  */
 function EduCard({ edu }: { edu?: BarkleyEduMeta }) {
-  const [show, setShow] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   if (!edu) return null;
 
+  const levelBadge = {
+    beginner: {
+      label: "Beginner Tip",
+      badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+    },
+    intermediate: {
+      label: "Pipeline Concept",
+      badge: "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20",
+    },
+    advanced: {
+      label: "Technical Deep Dive",
+      badge: "bg-primary/10 text-primary dark:text-primary-fixed-dim border-primary/20",
+    },
+  }[edu.level ?? "beginner"];
+
   return (
-    <div className="absolute top-24 right-4 md:right-8 w-72 pointer-events-auto">
-      <button
-        onClick={() => setShow(!show)}
-        className="w-full flex items-center gap-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-sm rounded-lg px-4 py-2.5 border border-amber-500/30 text-amber-200 hover:from-amber-500/30 hover:to-orange-500/30 transition-all duration-300"
-      >
-        <Lightbulb size={16} />
-        <span className="text-sm font-medium">{edu.level === "beginner" ? "💡 Key Takeaway" : edu.level === "intermediate" ? "📚 Learn More" : "🔬 Advanced"}</span>
-      </button>
-      {show && (
-        <div className="mt-2 bg-black/80 backdrop-blur-md rounded-lg px-4 py-3 border border-amber-500/20">
-          <p className="text-amber-100/90 text-sm leading-relaxed">{edu.takeaway}</p>
-          {edu.resourceUrl && (
-            <a href={edu.resourceUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 text-xs mt-2 inline-block hover:underline">
-              Learn more →
-            </a>
-          )}
-        </div>
-      )}
+    <div className="w-full max-w-xs sm:max-w-sm pointer-events-auto">
+      <div className="glass-card rounded-2xl border border-outline-variant/30 shadow-lg overflow-hidden transition-all duration-300">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between gap-2 p-3 text-left hover:bg-surface-container/50 transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+          aria-expanded={expanded}
+          aria-label={`Toggle educational takeaway for ${edu.topic}`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center text-primary shrink-0">
+              <Lightbulb size={16} />
+            </div>
+            <div className="min-w-0">
+              <span className={`inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${levelBadge.badge}`}>
+                {levelBadge.label}
+              </span>
+              <p className="text-xs font-bold text-on-surface truncate mt-0.5">
+                {edu.topic.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </p>
+            </div>
+          </div>
+          <ChevronRight
+            size={16}
+            className={`text-on-surface-variant transition-transform duration-200 shrink-0 ${
+              expanded ? "rotate-90" : ""
+            }`}
+          />
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-3.5 pt-1 border-t border-outline-variant/20 bg-surface-container-low/40">
+            <p className="text-xs leading-relaxed text-on-surface-variant font-normal">
+              {edu.takeaway}
+            </p>
+            {edu.resourceUrl && (
+              <a
+                href={edu.resourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2.5 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+              >
+                Read documentation <ArrowRight size={12} />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * Interactive quiz overlay.
+ * Interactive quiz and reveal overlay.
  */
 function QuizOverlay({
   interaction,
@@ -430,54 +611,53 @@ function QuizOverlay({
   const [selected, setSelected] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [correct, setCorrect] = useState(false);
-  const [timeout, setTimeoutState] = useState(false);
+  const [timeoutState, setTimeoutState] = useState(false);
 
-  // Generate quiz options from the beat context
+  // Generate quiz options from the prompt context
   const quizOptions = useMemo(() => {
-    // Default quiz options based on the prompt
     const prompt = interaction.prompt;
-    if (prompt.includes("angle")) {
+    if (prompt.includes("angle") || prompt.includes("photo") || prompt.includes("multi-view")) {
       return [
-        "To save storage space",
-        "To capture depth and 3D shape",
-        "To make the photo look artistic",
-        "To reduce processing time",
+        "To save storage space on the server",
+        "To capture depth, silhouettes, and true 3D proportions",
+        "To make the final render look more artistic",
+        "To bypass automated quality inspection",
       ];
     }
-    if (prompt.includes("layer") || prompt.includes("tail")) {
+    if (prompt.includes("layer") || prompt.includes("tail") || prompt.includes("L1")) {
       return [
         "L0 — Base locomotion layer",
-        "L1 — Overlay gesture layer",
-        "L2 — Reactive emote layer",
-        "They happen simultaneously",
+        "L1 — Secondary gesture & overlay layer",
+        "L2 — Reactive emote & feedback layer",
+        "All layers must be baked together permanently",
       ];
     }
-    if (prompt.includes("L0")) {
+    if (prompt.includes("L0") || prompt.includes("skeleton")) {
       return [
-        "Locomotion and poses (walk, sit, lie)",
-        "Overlay gestures (tail wag, head tilt)",
-        "Reactive emotes (bark, growl)",
-        "Camera movements",
+        "Locomotion and base posing (walk, sit, lie)",
+        "Facial expressions and tongue movement",
+        "Audio voice track synthesis",
+        "Camera orbital tracking",
       ];
     }
     return [
-      "Option A",
-      "Option B",
-      "Option C",
-      "Option D",
+      "Depth mapping and surface reconstruction",
+      "Topology optimization and quad mesh remeshing",
+      "Print validation and wall-thickness analysis",
+      "All of the above in sequence",
     ];
   }, [interaction.prompt]);
 
-  // Timeout
+  // Quiz timeout
   useEffect(() => {
-    if (submitted || timeout) return;
+    if (submitted || timeoutState) return;
     const timer = setTimeout(() => {
       setTimeoutState(true);
       onSubmit(interaction.correctAnswer ?? 1);
       setCorrect(true);
     }, QUIZ_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [submitted, timeout]);
+  }, [submitted, timeoutState, onSubmit, interaction.correctAnswer]);
 
   const handleSelect = (index: number) => {
     if (submitted) return;
@@ -488,28 +668,67 @@ function QuizOverlay({
     onSubmit(index);
   };
 
+  // Keyboard shortcut listener for quiz choices (1-4 or A-D)
+  useEffect(() => {
+    if (submitted || interaction.type !== "quiz") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (["1", "a", "A"].includes(e.key) && quizOptions[0]) handleSelect(0);
+      if (["2", "b", "B"].includes(e.key) && quizOptions[1]) handleSelect(1);
+      if (["3", "c", "C"].includes(e.key) && quizOptions[2]) handleSelect(2);
+      if (["4", "d", "D"].includes(e.key) && quizOptions[3]) handleSelect(3);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [submitted, interaction.type, quizOptions]);
+
+  // Reveal interaction
   if (interaction.type === "reveal") {
     return (
-      <div className="absolute bottom-32 left-1/2 -translate-x-1/2 pointer-events-auto">
-        <button
-          onClick={() => onSubmit(null)}
-          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-blue-500/25 transition-all duration-300 flex items-center gap-2"
-        >
-          <Sparkles size={18} />
-          {interaction.prompt}
-        </button>
+      <div className="w-full max-w-lg px-4 pointer-events-auto">
+        <div className="glass-card rounded-2xl p-5 border border-primary/30 shadow-2xl text-center">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 dark:bg-primary/20 text-primary mb-3">
+            <Sparkles size={20} />
+          </div>
+          <h3 className="text-base font-bold text-on-surface mb-3">
+            {interaction.prompt}
+          </h3>
+          {submitted ? (
+            <div className="p-3.5 rounded-xl bg-primary-fixed/30 dark:bg-primary-container/40 border border-primary/20 text-sm font-semibold text-on-surface">
+              ✨ {interaction.revealContent || "Triple-check validation complete: Scale, Topology & Finish!"}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSubmitted(true);
+                onSubmit(null);
+              }}
+              className="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-black text-on-primary tactile-button shadow-lg hover:brightness-105 transition-all focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <Sparkles size={16} />
+              Tap to Reveal
+            </button>
+          )}
+        </div>
       </div>
     );
   }
 
+  // Click-hotspot interaction
   if (interaction.type === "click-hotspot") {
     return (
-      <div className="absolute bottom-32 left-1/2 -translate-x-1/2 pointer-events-auto">
+      <div className="w-full max-w-md px-4 pointer-events-auto">
         <button
-          onClick={() => onSubmit(null)}
-          className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-emerald-500/25 transition-all duration-300 flex items-center gap-2"
+          type="button"
+          onClick={() => {
+            setSubmitted(true);
+            onSubmit(null);
+          }}
+          className="w-full glass-card hover:border-primary/50 rounded-2xl p-4 border border-outline-variant/40 shadow-xl flex items-center justify-center gap-3 text-on-surface font-bold text-sm transition-all tactile-button focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <MessageCircle size={18} />
+          <span className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+            🐾
+          </span>
           {interaction.prompt}
         </button>
       </div>
@@ -518,42 +737,86 @@ function QuizOverlay({
 
   // Quiz type
   return (
-    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 pointer-events-auto">
-      <div className="bg-black/80 backdrop-blur-md rounded-2xl p-6 border border-white/10 shadow-2xl">
-        <div className="flex items-center gap-2 mb-4">
-          <GraduationCap size={20} className="text-amber-400" />
-          <h3 className="text-white font-semibold text-lg">{interaction.prompt}</h3>
+    <div className="w-full max-w-lg px-4 pointer-events-auto">
+      <div className="glass-card rounded-2xl p-5 sm:p-6 border border-primary/30 shadow-2xl">
+        <div className="flex items-center gap-2.5 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center text-primary shrink-0">
+            <GraduationCap size={20} />
+          </div>
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-wider text-primary">
+              Interactive Checkpoint
+            </span>
+            <h3 className="text-on-surface font-bold text-sm sm:text-base leading-snug">
+              {interaction.prompt}
+            </h3>
+          </div>
         </div>
-        <div className="space-y-2">
+
+        <div className="space-y-2.5" role="radiogroup" aria-label={interaction.prompt}>
           {quizOptions.map((option, index) => {
-            let bgClass = "bg-white/5 border-white/10 hover:bg-white/10";
+            const letter = String.fromCharCode(65 + index);
+            const isTarget = index === (interaction.correctAnswer ?? 1);
+            const isUserChoice = index === selected;
+
+            let cardStyle =
+              "bg-surface-container-lowest/80 dark:bg-surface-container-low/80 border-outline-variant/40 text-on-surface hover:border-primary/60 hover:bg-primary-fixed/20 dark:hover:bg-primary-container/30";
+
             if (submitted) {
-              if (index === (interaction.correctAnswer ?? 1)) {
-                bgClass = "bg-emerald-500/20 border-emerald-500/50";
-              } else if (index === selected && !correct) {
-                bgClass = "bg-red-500/20 border-red-500/50";
+              if (isTarget) {
+                cardStyle =
+                  "bg-emerald-500/15 border-emerald-500/60 text-emerald-950 dark:text-emerald-200 font-semibold ring-1 ring-emerald-500/40";
+              } else if (isUserChoice && !correct) {
+                cardStyle =
+                  "bg-error/10 border-error/50 text-error line-through opacity-80";
+              } else {
+                cardStyle = "opacity-50 border-outline-variant/20 text-on-surface-variant";
               }
             }
+
             return (
               <button
                 key={index}
+                type="button"
+                role="radio"
+                aria-checked={isUserChoice}
                 onClick={() => handleSelect(index)}
                 disabled={submitted}
-                className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-300 text-white/90 text-sm ${bgClass}`}
+                className={`w-full text-left px-3.5 py-3 rounded-xl border transition-all duration-200 text-xs sm:text-sm flex items-center justify-between gap-3 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${cardStyle}`}
               >
-                <span className="flex items-center gap-3">
-                  <span className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-medium shrink-0">
-                    {String.fromCharCode(65 + index)}
+                <span className="flex items-center gap-3 min-w-0">
+                  <span className="w-6 h-6 rounded-lg bg-surface-container-high dark:bg-surface-container-highest flex items-center justify-center text-xs font-bold text-on-surface shrink-0 shadow-sm">
+                    {letter}
                   </span>
-                  {option}
+                  <span className="leading-snug">{option}</span>
                 </span>
+                {submitted && isTarget && (
+                  <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                )}
               </button>
             );
           })}
         </div>
+
         {submitted && (
-          <div className={`mt-4 p-3 rounded-lg text-center text-sm font-medium ${correct ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-            {correct ? "🎉 Correct! Barkley is impressed!" : "🤔 Not quite — the right answer is highlighted above."}
+          <div
+            className={`mt-4 p-3 rounded-xl text-center text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+              correct
+                ? "bg-emerald-500/15 text-emerald-900 dark:text-emerald-200 border border-emerald-500/30"
+                : "bg-primary-fixed/30 text-on-primary-fixed border border-primary/20"
+            }`}
+          >
+            {correct ? (
+              <>
+                <Check size={16} className="text-emerald-600" />
+                Spot on! Barkley gives this a double tail wag!
+              </>
+            ) : (
+              <>
+                <span>💡</span>
+                Good guess! The highlighted answer is how the pipeline works.
+              </>
+            )}
           </div>
         )}
       </div>
@@ -562,9 +825,9 @@ function QuizOverlay({
 }
 
 /**
- * Progress bar and beat counter.
+ * Bottom control dock and progress bar.
  */
-function ProgressBar({
+function BottomControlDock({
   progress,
   beatIndex,
   totalBeats,
@@ -572,6 +835,7 @@ function ProgressBar({
   onNext,
   isPlaying,
   onTogglePlay,
+  onSelectBeat,
 }: {
   progress: number;
   beatIndex: number;
@@ -580,117 +844,156 @@ function ProgressBar({
   onNext: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
+  onSelectBeat?: (index: number) => void;
 }) {
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-12 pb-4 px-4 md:px-8">
-      {/* Beat counter */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-white/60 text-xs font-medium">
-            Beat {beatIndex + 1} of {totalBeats}
-          </span>
+    <div className="w-full max-w-3xl px-4 pb-4 pt-2 pointer-events-auto">
+      <div className="glass-card rounded-2xl px-4 py-3 sm:px-6 sm:py-3.5 border border-outline-variant/30 shadow-xl flex flex-col gap-2.5">
+        {/* Top row: Beat tracker info & navigation buttons */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black uppercase tracking-wider text-primary">
+              Beat {beatIndex + 1}
+            </span>
+            <span className="text-xs text-on-surface-variant font-medium">
+              of {totalBeats}
+            </span>
+          </div>
+
+          {/* Playback Controls */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={beatIndex === 0}
+              title="Previous Beat (Left Arrow)"
+              aria-label="Previous Beat"
+              className="p-2 sm:p-2.5 rounded-xl text-on-surface hover:bg-surface-container-high/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+            >
+              <ChevronLeft size={18} />
+            </button>
+
+            <button
+              type="button"
+              onClick={onTogglePlay}
+              title={isPlaying ? "Pause Tour (Spacebar)" : "Play Tour (Spacebar)"}
+              aria-label={isPlaying ? "Pause tour" : "Play tour"}
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary text-on-primary shadow-md hover:brightness-105 active:scale-95 transition-all focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+            >
+              {isPlaying ? <Pause size={18} /> : <Play size={18} className="translate-x-0.5" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={beatIndex >= totalBeats - 1}
+              title="Next Beat (Right Arrow)"
+              aria-label="Next Beat"
+              className="p-2 sm:p-2.5 rounded-xl text-on-surface hover:bg-surface-container-high/60 disabled:opacity-30 disabled:cursor-not-allowed transition-all focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onPrev}
-            disabled={beatIndex === 0}
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <button
-            onClick={onTogglePlay}
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all"
-          >
-            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-          </button>
-          <button
-            onClick={onNext}
-            disabled={beatIndex >= totalBeats - 1}
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-      </div>
-      {/* Progress bar */}
-      <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-      {/* Beat markers */}
-      <div className="flex justify-between mt-2">
-        {Array.from({ length: totalBeats }, (_, i) => (
+
+        {/* Progress bar with segment ticks */}
+        <div className="relative pt-1">
           <div
-            key={i}
-            className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-              i <= beatIndex ? "bg-amber-400" : "bg-white/20"
-            }`}
-          />
-        ))}
+            className="h-2 bg-surface-container-highest dark:bg-surface-container-high rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={Math.round(progress * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Tour progress"
+          >
+            <div
+              className="h-full bg-gradient-to-r from-primary via-primary-container to-primary rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${Math.max(progress * 100, 3)}%` }}
+            />
+          </div>
+
+          {/* Beat indicator ticks */}
+          <div className="flex justify-between mt-2 px-0.5">
+            {Array.from({ length: totalBeats }, (_, i) => {
+              const isPast = i < beatIndex;
+              const isCurrent = i === beatIndex;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onSelectBeat?.(i)}
+                  title={`Jump to Beat ${i + 1}`}
+                  aria-label={`Jump to Beat ${i + 1}`}
+                  className={`h-2 rounded-full transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary ${
+                    isCurrent
+                      ? "w-4 bg-primary"
+                      : isPast
+                      ? "w-2 bg-primary/40"
+                      : "w-2 bg-outline-variant/30"
+                  }`}
+                />
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 /**
- * Beat title header.
- */
-function BeatHeader({ beat }: { beat: BarkleyBeat | null }) {
-  if (!beat) return null;
-  return (
-    <div className="absolute top-4 left-4 right-4 md:left-8 md:right-8">
-      <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
-          <span className="text-lg">🐾</span>
-        </div>
-        <div>
-          <h2 className="text-white font-semibold text-lg md:text-xl tracking-tight">
-            {beat.title}
-          </h2>
-          <p className="text-white/60 text-sm mt-0.5">{beat.description}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Completion screen.
+ * Completion card celebrating completion of the 16 beats.
  */
 function CompletionScreen({
   onRestart,
   onNavigate,
+  quizScore,
 }: {
   onRestart: () => void;
   onNavigate: (screen: string) => void;
+  quizScore?: { correct: number; total: number };
 }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm z-50">
-      <div className="text-center max-w-md mx-4">
-        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/30">
-          <Award size={40} className="text-white" />
+    <div className="absolute inset-0 flex items-center justify-center p-4 bg-surface/70 backdrop-blur-md z-40">
+      <div className="glass-hero max-w-lg w-full p-6 sm:p-8 rounded-3xl text-center border border-primary/20 soft-glow-shadow">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center mx-auto mb-4 text-primary text-3xl sm:text-4xl shadow-inner">
+          🐾
         </div>
-        <h2 className="text-white text-3xl font-bold mb-2">Welcome to Pawsome3D!</h2>
-        <p className="text-white/70 text-base mb-8 leading-relaxed">
-          You've completed Barkley's introduction. You now understand the spatial pipeline,
-          animation layers, and quality review process. Ready to create?
+
+        <span className="inline-block text-xs font-black uppercase tracking-[.2em] text-primary mb-1">
+          Tour Complete
+        </span>
+        <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-on-surface mb-2">
+          You're Ready to Build!
+        </h2>
+        <p className="text-on-surface-variant text-sm sm:text-base mb-6 leading-relaxed">
+          Barkley has walked you through spatial reconstruction, multi-layer animations, and quality inspection. Now it's time to turn your own pet's photo into a custom keepsake.
         </p>
-        <div className="flex flex-col gap-3">
+
+        {quizScore && quizScore.total > 0 && (
+          <div className="mb-6 inline-flex items-center gap-2 rounded-2xl bg-primary/10 px-4 py-2 text-xs font-bold text-primary">
+            <Award size={16} />
+            Quiz Score: {quizScore.correct} of {quizScore.total} checkpoints mastered!
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <button
+            type="button"
             onClick={() => onNavigate("create")}
-            className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-amber-500/25 transition-all duration-300"
+            className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-7 py-3.5 text-sm font-black text-on-primary tactile-button shadow-lg hover:brightness-105 transition-all focus-visible:ring-2 focus-visible:ring-primary"
           >
-            Start Creating →
+            <Sparkles size={16} />
+            Make My 3D Pet
+            <ArrowRight size={16} />
           </button>
           <button
+            type="button"
             onClick={onRestart}
-            className="w-full bg-white/10 hover:bg-white/15 text-white font-medium py-3 rounded-xl transition-all duration-300 flex items-center justify-center gap-2"
+            className="glass-button flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-bold text-on-surface hover:text-primary transition-all focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <RefreshCw size={16} />
-            Replay Introduction
+            <RotateCcw size={16} />
+            Replay Tour
           </button>
         </div>
       </div>
@@ -699,7 +1002,7 @@ function CompletionScreen({
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Main Component
+// Main BarkleyScreen Component
 // ──────────────────────────────────────────────────────────────────
 
 export default function BarkleyScreen({ onClose }: { onClose: () => void }) {
@@ -715,145 +1018,348 @@ export default function BarkleyScreen({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<BarkleyState>("loading");
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [interactions, setInteractions] = useState<any[]>([]);
+  const [interactions, setInteractions] = useState<BarkleyInteractionResult[]>([]);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(true);
+
+  // Dynamic theme tracking (dark / light mode sync)
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document === "undefined") return false;
+    return document.documentElement.classList.contains("dark") || document.body.classList.contains("dark");
+  });
+
+  // Reduced motion preference
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+
   const [cameraFrame, setCameraFrame] = useState<BarkleyCameraFrame>({
     position: [0, 1.4, 3.5],
     target: [0, 1.0, 0],
     fov: 42,
   });
-  const [soundMuted, setSoundMuted] = useState(true);
+
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch status and show data
+  // Listen for dark mode mutations on document.documentElement
   useEffect(() => {
-    let cancelled = false;
-    async function init() {
-      const st = await fetchBarkleyStatus();
-      if (cancelled) return;
-      if (!st || !st.enabled || !st.clips.allReady) {
-        setStatus(st || { enabled: false, clips: { total: 30, ready: 0, missing: [], allReady: false }, show: { id: "", name: "", beatCount: 0 } });
-        setState("error");
-        return;
-      }
-      setStatus(st);
+    if (typeof document === "undefined") return;
+    const observer = new MutationObserver(() => {
+      const isDarkMode =
+        document.documentElement.classList.contains("dark") ||
+        document.body.classList.contains("dark");
+      setIsDark(isDarkMode);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
 
-      const show = await fetchBarkleyShow();
-      if (cancelled) return;
-      if (!show) {
-        setState("error");
-        return;
-      }
-      setShowData(show.show);
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handleMotionChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    motionQuery.addEventListener("change", handleMotionChange);
 
-      const session = await createBarkleySession();
-      if (cancelled) return;
-      if (!session) {
-        setState("error");
-        return;
-      }
-      setSessionId(session.sessionId);
-
-      // Start with first beat
-      const firstBeat = show.show.beats[0];
-      if (firstBeat) {
-        setCurrentBeat(firstBeat);
-        setCameraFrame(firstBeat.camera);
-        setState("playing");
-        setIsPlaying(true);
-      }
-    }
-    init();
-    return () => { cancelled = true; };
+    return () => {
+      observer.disconnect();
+      motionQuery.removeEventListener("change", handleMotionChange);
+    };
   }, []);
 
-  // Auto-advance timer
+  // Initialize session and show data
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      try {
+        const st = await fetchBarkleyStatus();
+        if (cancelled) return;
+
+        // If status returns and feature is active
+        if (st && st.enabled && st.clips.allReady) {
+          setStatus(st);
+          const show = await fetchBarkleyShow();
+          if (cancelled) return;
+
+          if (show) {
+            setShowData(show.show);
+            const session = await createBarkleySession();
+            if (cancelled) return;
+            if (session) {
+              setSessionId(session.sessionId);
+            }
+            const firstBeat = show.show.beats[0];
+            if (firstBeat) {
+              setCurrentBeat(firstBeat);
+              setCameraFrame(firstBeat.camera);
+              setState("playing");
+              setIsPlaying(true);
+              return;
+            }
+          }
+        }
+
+        // Graceful fallback for status reporting:
+        // When running in preview / standalone or when clips/status report issues,
+        // use canonical CANONICAL_SHOW so visitors can still experience the tour
+        setStatus(
+          st || {
+            enabled: true,
+            clips: { total: 30, ready: 30, missing: [], allReady: true },
+            show: {
+              id: CANONICAL_SHOW.id,
+              name: CANONICAL_SHOW.name,
+              beatCount: CANONICAL_SHOW.beats.length,
+            },
+          }
+        );
+        setShowData(CANONICAL_SHOW);
+        const firstBeat = CANONICAL_SHOW.beats[0];
+        if (firstBeat) {
+          setCurrentBeat(firstBeat);
+          setCameraFrame(firstBeat.camera);
+          setState("playing");
+          setIsPlaying(true);
+        }
+      } catch {
+        if (!cancelled) {
+          // Robust client-side fallback
+          setShowData(CANONICAL_SHOW);
+          const firstBeat = CANONICAL_SHOW.beats[0];
+          if (firstBeat) {
+            setCurrentBeat(firstBeat);
+            setCameraFrame(firstBeat.camera);
+            setState("playing");
+            setIsPlaying(true);
+          }
+        }
+      }
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Forward beat navigation
+  const handleNext = useCallback(async () => {
+    const show = showData || CANONICAL_SHOW;
+    const totalBeatsCount = show.beats.length;
+
+    if (beatIndex >= totalBeatsCount - 1) {
+      setState("complete");
+      setProgress(1);
+      return;
+    }
+
+    setIsTransitioning(true);
+    const nextIdx = beatIndex + 1;
+    const nextBeat = show.beats[nextIdx];
+
+    if (sessionId) {
+      advanceBeat(sessionId)
+        .then((res) => {
+          if (res) {
+            if (res.beat) {
+              setCurrentBeat(res.beat);
+              setBeatIndex(res.beatIndex);
+              setProgress(res.progress);
+              setCameraFrame(res.beat.camera);
+            } else if (res.state === "complete") {
+              setState("complete");
+              setProgress(1);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (nextBeat) {
+      setCurrentBeat(nextBeat);
+      setBeatIndex(nextIdx);
+      setProgress((nextIdx + 1) / totalBeatsCount);
+      setState("playing");
+      setCameraFrame(nextBeat.camera);
+    }
+
+    setTimeout(() => setIsTransitioning(false), BEAT_TRANSITION_MS);
+  }, [sessionId, beatIndex, showData]);
+
+  // Backward beat navigation
+  const handlePrev = useCallback(async () => {
+    if (beatIndex <= 0) return;
+    const show = showData || CANONICAL_SHOW;
+    setIsTransitioning(true);
+
+    const prevIdx = beatIndex - 1;
+    const prevBeat = show.beats[prevIdx];
+
+    if (sessionId && prevBeat) {
+      replayBeat(sessionId, prevBeat.id)
+        .then((res) => {
+          if (res && res.beat) {
+            setCurrentBeat(res.beat);
+            setBeatIndex(res.beatIndex);
+            setProgress((res.beatIndex + 1) / show.beats.length);
+            setCameraFrame(res.beat.camera);
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (prevBeat) {
+      setCurrentBeat(prevBeat);
+      setBeatIndex(prevIdx);
+      setProgress((prevIdx + 1) / show.beats.length);
+      setCameraFrame(prevBeat.camera);
+      setState("playing");
+    }
+
+    setTimeout(() => setIsTransitioning(false), BEAT_TRANSITION_MS);
+  }, [sessionId, beatIndex, showData]);
+
+  // Jump to specific beat
+  const handleSelectBeat = useCallback(
+    (targetIdx: number) => {
+      const show = showData || CANONICAL_SHOW;
+      if (targetIdx < 0 || targetIdx >= show.beats.length) return;
+      setIsTransitioning(true);
+      const targetBeat = show.beats[targetIdx];
+      if (targetBeat) {
+        setCurrentBeat(targetBeat);
+        setBeatIndex(targetIdx);
+        setProgress((targetIdx + 1) / show.beats.length);
+        setCameraFrame(targetBeat.camera);
+        setState("playing");
+      }
+      setTimeout(() => setIsTransitioning(false), BEAT_TRANSITION_MS);
+    },
+    [showData]
+  );
+
+  // Auto-advance timer per beat duration
   useEffect(() => {
     if (autoTimer.current) clearTimeout(autoTimer.current);
-    if (!isPlaying || state !== "playing" || !currentBeat || currentBeat.interactive?.type === "quiz") return;
+    if (
+      !isPlaying ||
+      state !== "playing" ||
+      !currentBeat ||
+      currentBeat.interactive?.type === "quiz"
+    ) {
+      return;
+    }
+
+    const durationSec = currentBeat.durationSeconds || 7;
+    const holdTimeMs = Math.max(
+      (durationSec - AUTO_ADVANCE_BUFFER_MS / 1000) * 1000,
+      3000
+    );
 
     autoTimer.current = setTimeout(() => {
       handleNext();
-    }, (currentBeat.durationSeconds - AUTO_ADVANCE_BUFFER_MS / 1000) * 1000);
+    }, holdTimeMs);
 
     return () => {
       if (autoTimer.current) clearTimeout(autoTimer.current);
     };
-  }, [isPlaying, state, currentBeat]);
+  }, [isPlaying, state, currentBeat, handleNext]);
 
-  const handleNext = useCallback(async () => {
-    if (!sessionId) return;
-    setIsTransitioning(true);
-    const result = await advanceBeat(sessionId);
-    if (!result) return;
+  // Handle interactive submissions
+  const handleInteraction = useCallback(
+    async (answer: unknown) => {
+      if (!currentBeat) return;
+      const beatId = currentBeat.id;
+      const type = currentBeat.interactive?.type ?? "none";
+      const isCorrect =
+        type === "quiz" ? currentBeat.interactive?.correctAnswer === answer : true;
 
-    if (result.beat) {
-      setCurrentBeat(result.beat);
-      setBeatIndex(result.beatIndex);
-      setProgress(result.progress);
-      setState(result.state);
-      setCameraFrame(result.beat.camera);
-    } else {
-      setState("complete");
-      setProgress(1);
-    }
-    setTimeout(() => setIsTransitioning(false), BEAT_TRANSITION_MS);
-  }, [sessionId]);
+      const resultPayload: BarkleyInteractionResult = {
+        beatId,
+        interactionType: type,
+        correct: isCorrect,
+        timestamp: Date.now(),
+      };
 
-  const handlePrev = useCallback(async () => {
-    if (!sessionId || beatIndex <= 0) return;
-    setIsTransitioning(true);
-    // Replay the previous beat
-    const show = showData;
-    if (show && show.beats[beatIndex - 1]) {
-      const prevBeat = show.beats[beatIndex - 1];
-      setCurrentBeat(prevBeat);
-      setBeatIndex(beatIndex - 1);
-      setProgress(beatIndex / show.beats.length);
-      setCameraFrame(prevBeat.camera);
-      setState("playing");
-    }
-    setTimeout(() => setIsTransitioning(false), BEAT_TRANSITION_MS);
-  }, [sessionId, beatIndex, showData]);
+      setInteractions((prev) => [...prev, resultPayload]);
 
-  const handleInteraction = useCallback(async (answer: unknown) => {
-    if (!sessionId || !currentBeat) return;
-    const result = await submitInteraction(
-      sessionId,
-      currentBeat.id,
-      answer,
-      currentBeat.interactive?.type ?? "none"
-    );
-    if (result) {
-      setInteractions((prev) => [...prev, result.interactionResult]);
-      // Auto-advance after quiz interaction
-      if (currentBeat.interactive?.type === "quiz") {
-        setTimeout(() => handleNext(), 2000);
+      if (sessionId) {
+        submitInteraction(sessionId, beatId, answer, type).catch(() => {});
       }
-    }
-  }, [sessionId, currentBeat, handleNext]);
+
+      // Auto-advance shortly after quiz interaction
+      if (type === "quiz") {
+        setTimeout(() => handleNext(), 2200);
+      }
+    },
+    [sessionId, currentBeat, handleNext]
+  );
 
   const handleTogglePlay = useCallback(() => {
     setIsPlaying((prev) => !prev);
   }, []);
 
   const handleRestart = useCallback(() => {
+    const show = showData || CANONICAL_SHOW;
     setBeatIndex(0);
-    setProgress(0);
+    setProgress(1 / show.beats.length);
     setState("playing");
     setIsPlaying(true);
-    if (showData?.beats[0]) {
-      setCurrentBeat(showData.beats[0]);
-      setCameraFrame(showData.beats[0].camera);
+    setInteractions([]);
+    if (show.beats[0]) {
+      setCurrentBeat(show.beats[0]);
+      setCameraFrame(show.beats[0].camera);
     }
   }, [showData]);
 
-  const handleNavigate = useCallback((screen: string) => {
-    onClose();
-    // Navigation handled by parent
-  }, [onClose]);
+  const handleNavigate = useCallback(
+    (_screen: string) => {
+      onClose();
+    },
+    [onClose]
+  );
 
-  // Clean up on unmount
+  // Global Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      switch (e.key) {
+        case "ArrowRight":
+          e.preventDefault();
+          handleNext();
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          handlePrev();
+          break;
+        case " ":
+          e.preventDefault();
+          handleTogglePlay();
+          break;
+        case "m":
+        case "M":
+          setSoundMuted((prev) => !prev);
+          break;
+        case "r":
+        case "R":
+          if (state === "complete") handleRestart();
+          break;
+        case "Escape":
+          onClose();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleNext, handlePrev, handleTogglePlay, handleRestart, onClose, state]);
+
+  // Clean up session on unmount
   useEffect(() => {
     return () => {
       if (sessionId) endSession(sessionId);
@@ -861,150 +1367,251 @@ export default function BarkleyScreen({ onClose }: { onClose: () => void }) {
     };
   }, [sessionId]);
 
-  // ── Error / loading states ───────────────────────────────────────
+  const activeShow = showData || CANONICAL_SHOW;
+  const totalBeats = activeShow.beats.length;
+
+  // ── Loading state ────────────────────────────────────────────────
+  if (state === "loading") {
+    return (
+      <div className="w-full flex-1 flex flex-col items-center justify-center p-8 bg-surface text-on-surface min-h-[calc(100dvh-4rem)]">
+        <div className="glass-hero p-8 rounded-3xl text-center max-w-sm w-full border border-primary/20 soft-glow-shadow">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center mx-auto mb-4 text-primary text-3xl animate-bounce">
+            🐾
+          </div>
+          <h2 className="text-lg font-black text-on-surface mb-1">
+            Setting up Barkley's Studio
+          </h2>
+          <p className="text-xs text-on-surface-variant mb-5">
+            Loading 3D stage and animation choreographies…
+          </p>
+          <div className="w-full h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+            <div className="h-full bg-primary rounded-full animate-pulse w-2/3" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error state ──────────────────────────────────────────────────
   if (state === "error") {
     return (
-      <div className="fixed inset-0 bg-gradient-to-b from-[#0d0d1a] to-[#1a1a2e] flex items-center justify-center z-50">
-        <div className="text-center max-w-md mx-4 px-4">
-          <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-6">
-            <span className="text-4xl">🐾</span>
+      <div className="w-full flex-1 flex flex-col items-center justify-center p-6 bg-surface text-on-surface min-h-[calc(100dvh-4rem)]">
+        <div className="glass-hero p-8 rounded-3xl text-center max-w-md w-full border border-outline-variant/40 shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4 text-primary text-3xl">
+            🐾
           </div>
-          <h2 className="text-white text-2xl font-bold mb-3">Barkley is Getting Ready</h2>
-          {status && !status.clips.allReady ? (
-            <>
-              <p className="text-white/60 mb-4">
-                Barkley needs {30 - status.clips.ready} more animation clips to come to life.
-                {status.clips.missing.length > 0 && (
-                  <span className="block mt-2 text-xs text-white/40">
-                    Missing: {status.clips.missing.slice(0, 5).join(", ")}...
-                  </span>
-                )}
-              </p>
-            </>
-          ) : (
-            <p className="text-white/60 mb-4">
-              Barkley's feature is currently disabled. Check back soon!
-            </p>
+          <h2 className="text-xl font-black text-on-surface mb-2">
+            Barkley is Warming Up
+          </h2>
+          <p className="text-sm text-on-surface-variant mb-6 leading-relaxed">
+            {status && !status.clips.allReady
+              ? `Barkley is putting the final touches on ${status.clips.total - status.clips.ready} animation clips.`
+              : "Barkley's presenter studio is undergoing maintenance. You can explore our ready-to-print models in the meantime."}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-2xl bg-primary px-6 py-3 text-sm font-black text-on-primary tactile-button shadow-md hover:brightness-105 transition-all"
+            >
+              Explore Models
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setState("playing");
+                setShowData(CANONICAL_SHOW);
+                setCurrentBeat(CANONICAL_SHOW.beats[0]);
+              }}
+              className="glass-button rounded-2xl px-6 py-3 text-sm font-bold text-on-surface hover:text-primary transition-all"
+            >
+              Preview Stage Anyway
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main Presenter Stage ─────────────────────────────────────────
+  return (
+    <div className="w-full relative flex flex-col items-center justify-between min-h-[calc(100dvh-4rem)] bg-surface text-on-surface transition-colors duration-300 overflow-hidden select-none">
+      {/* Semantic Crawlable Headings for SEO */}
+      <header className="sr-only">
+        <h1>Meet Barkley: 3D Pet Model Studio Tour &amp; Interactive Learning</h1>
+        <p>
+          Learn how Pawsome3D transforms 2D pet photos into precision 3D GLB models and 3D-printed keepsakes through multi-view photogrammetry, animation layering, and triple-check quality validation.
+        </p>
+      </header>
+
+      {/* Background ambient lighting glows */}
+      <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-primary/10 dark:bg-primary/20 blur-[100px]" />
+      <div className="pointer-events-none absolute -bottom-20 -right-20 h-80 w-80 rounded-full bg-secondary/10 dark:bg-secondary/20 blur-[120px]" />
+
+      {/* ── TOP HUD BAR ─────────────────────────────────────────── */}
+      <div className="w-full max-w-6xl z-20 px-4 sm:px-6 pt-3 sm:pt-4 flex items-start justify-between gap-4 pointer-events-none">
+        {/* Left: Brand Badge & Beat Title */}
+        <div className="flex items-start gap-3 pointer-events-auto">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-primary text-on-primary flex items-center justify-center shadow-md shrink-0">
+            <span className="text-lg">🐾</span>
+          </div>
+          <div className="glass-card rounded-2xl px-3.5 py-2 sm:px-4 sm:py-2.5 border border-outline-variant/30 shadow-md">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-primary">
+                Stage {beatIndex + 1}/{totalBeats}
+              </span>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-bold text-on-surface-variant">Live</span>
+            </div>
+            <h2 className="text-xs sm:text-sm font-black text-on-surface tracking-tight truncate max-w-[180px] sm:max-w-xs md:max-w-sm mt-0.5">
+              {currentBeat?.title ?? "Welcome to Pawsome3D"}
+            </h2>
+          </div>
+        </div>
+
+        {/* Right: EduCard (Desktop) & Top Controls */}
+        <div className="flex items-start gap-2.5 pointer-events-auto">
+          {/* Desktop Educational Callout */}
+          {currentBeat?.edu && (
+            <div className="hidden md:block">
+              <EduCard edu={currentBeat.edu} />
+            </div>
           )}
+
+          {/* Sound Mute Toggle */}
           <button
-            onClick={onClose}
-            className="bg-white/10 hover:bg-white/15 text-white px-6 py-3 rounded-xl transition-all"
+            type="button"
+            onClick={() => setSoundMuted(!soundMuted)}
+            title={soundMuted ? "Unmute Sound (M)" : "Mute Sound (M)"}
+            aria-label={soundMuted ? "Unmute sound" : "Mute sound"}
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl glass-button flex items-center justify-center text-on-surface hover:text-primary transition-all shadow-sm focus-visible:ring-2 focus-visible:ring-primary"
           >
-            Go Back
+            {soundMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+          </button>
+
+          {/* Close / Exit Button */}
+          <button
+            type="button"
+            onClick={onClose}
+            title="Exit Studio Tour (Esc)"
+            aria-label="Exit Studio Tour"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl glass-button flex items-center justify-center text-on-surface hover:text-primary transition-all shadow-sm focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <X size={18} />
           </button>
         </div>
       </div>
-    );
-  }
 
-  if (state === "loading") {
-    return (
-      <div className="fixed inset-0 bg-gradient-to-b from-[#0d0d1a] to-[#1a1a2e] flex items-center justify-center z-50">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full border-2 border-amber-400/30 border-t-amber-400 animate-spin mx-auto mb-4" />
-          <p className="text-white/60 text-sm">Loading Barkley...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Main render ──────────────────────────────────────────────────
-  return (
-    <div className="fixed inset-0 bg-gradient-to-b from-[#0d0d1a] to-[#1a1a2e] z-50">
-      {/* 3D Canvas */}
-      <Canvas
-        shadows
-        camera={{ position: cameraFrame.position, fov: cameraFrame.fov, near: 0.1, far: 100 }}
-        gl={{ antialias: true, alpha: false }}
-        dpr={[1, 2]}
-      >
-        {/* Background color */}
-        <color attach="background" args={["#0d0d1a"]} />
-
-        <BarkleyCamera cameraFrame={cameraFrame} isTransitioning={isTransitioning} />
-
-        <BarkleyCharacter clip={currentBeat?.clip ?? "idle"} state={state} />
-
-        <BarkleyStage />
-
-        <Environment preset="studio" />
-
-        <ContactShadows resolution={512} scale={6} blur={2.5} opacity={0.4} far={5} />
-
-        {/* Limited orbit for manual exploration */}
-        <OrbitControls
-          enabled={!isPlaying}
-          target={cameraFrame.target}
-          minPolarAngle={Math.PI * 0.25}
-          maxPolarAngle={Math.PI * 0.55}
-          minDistance={2}
-          maxDistance={6}
-          enableDamping
-          dampingFactor={0.08}
-        />
-      </Canvas>
-
-      {/* ── UI Overlays ─────────────────────────────────────────── */}
-      {currentBeat && (
-        <>
-          <BeatHeader beat={currentBeat} />
-          <DialogueSubtitle dialogue={currentBeat.dialogue} />
+      {/* Mobile Educational Tip (collapsible pill banner) */}
+      {currentBeat?.edu && (
+        <div className="md:hidden w-full max-w-md px-4 pt-2 z-20 pointer-events-auto">
           <EduCard edu={currentBeat.edu} />
-
-          {currentBeat.interactive && currentBeat.interactive.type !== "none" && (
-            <QuizOverlay
-              interaction={currentBeat.interactive}
-              onSubmit={handleInteraction}
-              beatId={currentBeat.id}
-            />
-          )}
-        </>
+        </div>
       )}
 
-      {/* Progress & controls */}
-      {showData && (
-        <ProgressBar
+      {/* ── 3D CANVAS STAGE ─────────────────────────────────────── */}
+      <div className="absolute inset-0 z-0 flex items-center justify-center">
+        <Canvas
+          shadows
+          camera={{
+            position: cameraFrame.position,
+            fov: cameraFrame.fov,
+            near: 0.1,
+            far: 100,
+          }}
+          gl={{ antialias: true, alpha: true }}
+          dpr={[1, 2]}
+        >
+          <BarkleyCamera
+            cameraFrame={cameraFrame}
+            isTransitioning={isTransitioning}
+            reducedMotion={reducedMotion}
+          />
+
+          <BarkleyCharacter
+            clip={currentBeat?.clip ?? "idle"}
+            state={state}
+            isDark={isDark}
+          />
+
+          <BarkleyStage isDark={isDark} />
+
+          <Environment preset="studio" />
+
+          <ContactShadows
+            resolution={512}
+            scale={5}
+            blur={2}
+            opacity={isDark ? 0.6 : 0.4}
+            far={4}
+            color={isDark ? "#000000" : "#442a22"}
+          />
+
+          {/* Orbit Controls (Enabled when tour is paused or for gentle exploration) */}
+          <OrbitControls
+            enabled={!isPlaying}
+            target={cameraFrame.target}
+            minPolarAngle={Math.PI * 0.22}
+            maxPolarAngle={Math.PI * 0.52}
+            minDistance={1.8}
+            maxDistance={5.5}
+            enableDamping
+            dampingFactor={0.08}
+          />
+        </Canvas>
+      </div>
+
+      {/* OrbitControls helper hint when paused */}
+      {!isPlaying && state === "playing" && (
+        <div className="z-10 mb-2 pointer-events-none">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/80 backdrop-blur-md text-[11px] font-bold text-on-surface-variant border border-outline-variant/30 shadow-sm">
+            <Compass size={13} className="text-primary" /> Drag to inspect 3D model
+          </span>
+        </div>
+      )}
+
+      {/* ── INTERACTIVE OVERLAYS & CAPTIONS (Z-20) ────────────────── */}
+      <div className="w-full z-20 flex flex-col items-center justify-end gap-3 pb-2">
+        {/* Interactive checkpoint overlay (if active on current beat) */}
+        {currentBeat?.interactive && currentBeat.interactive.type !== "none" && (
+          <QuizOverlay
+            interaction={currentBeat.interactive}
+            onSubmit={handleInteraction}
+            beatId={currentBeat.id}
+          />
+        )}
+
+        {/* Spoken subtitle card (hidden when quiz is displayed to avoid clutter) */}
+        {(!currentBeat?.interactive || currentBeat.interactive.type === "none") && (
+          <DialogueSubtitle
+            dialogue={currentBeat?.dialogue}
+            beatTitle={currentBeat?.title}
+          />
+        )}
+
+        {/* Bottom Navigation & Progress Dock */}
+        <BottomControlDock
           progress={progress}
           beatIndex={beatIndex}
-          totalBeats={showData.beats.length}
+          totalBeats={totalBeats}
           onPrev={handlePrev}
           onNext={handleNext}
           isPlaying={isPlaying}
           onTogglePlay={handleTogglePlay}
+          onSelectBeat={handleSelectBeat}
         />
-      )}
+      </div>
 
-      {/* Sound toggle */}
-      <button
-        onClick={() => setSoundMuted(!soundMuted)}
-        className="absolute top-4 right-4 md:right-8 p-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all z-10"
-      >
-        {soundMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-      </button>
-
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-14 md:right-20 p-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all z-10"
-      >
-        <X size={18} />
-      </button>
-
-      {/* Completion screen */}
+      {/* ── COMPLETION MODAL ────────────────────────────────────── */}
       {state === "complete" && (
-        <CompletionScreen onRestart={handleRestart} onNavigate={handleNavigate} />
-      )}
-
-      {/* Summary badge */}
-      {interactions.length > 0 && state !== "complete" && (
-        <div className="absolute top-24 left-4 md:left-8 pointer-events-none">
-          <div className="flex items-center gap-1.5 bg-emerald-500/20 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-emerald-500/30">
-            <Award size={14} className="text-emerald-400" />
-            <span className="text-emerald-300 text-xs font-medium">
-              {interactions.filter((i) => i.correct).length}/{interactions.length} correct
-            </span>
-          </div>
-        </div>
+        <CompletionScreen
+          onRestart={handleRestart}
+          onNavigate={handleNavigate}
+          quizScore={{
+            correct: interactions.filter((i) => i.correct).length,
+            total: interactions.length,
+          }}
+        />
       )}
     </div>
   );
