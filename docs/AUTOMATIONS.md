@@ -91,6 +91,51 @@ Every routine gets one entry here when it's created or changed.
 - **Write boundary:** read-only. It does not modify Shopify, create products,
   commit to `main`, or open checkout paths.
 
+## Pawsome3D X Post (planned — not yet live)
+
+- **Trigger ID:** _not created yet_
+- **Schedule:** once daily, time TBD. The service enforces its own cadence
+  floor (`X_POST_MIN_INTERVAL_MS`, default 6h) against the last posted row, so
+  a mis-set cron or an overlapping run cannot produce a burst.
+- **Host:** `x-dm-service` on `x.pawsome3d.com` — **not deployed yet**.
+- **Runtime credential:** `X_POST_SCHEDULER_SECRET`
+- **What it does:**
+  - Sends `POST /admin/post` with
+    `Authorization: Bearer $X_POST_SCHEDULER_SECRET`.
+  - The service picks the next unposted variant for the campaign (default
+    `barkley`), appends the target URL, and publishes through the X API v2
+    using the bot account's OAuth 2.0 token.
+  - Every outcome is recorded in `x_posts` with a reason, including skips.
+  - It only publishes. It does not follow, like, reply to strangers, or
+    scrape — those are the behaviours X's automation rules treat as platform
+    manipulation.
+- **Idempotence:** each post carries a dedupe key derived from campaign, body
+  and URL. A restart, retry or overlapping run re-sends the same key and is a
+  no-op, so a duplicate cannot reach a public timeline.
+- **Retry policy:** the endpoint answers **200 for a skipped or failed post**,
+  not a 5xx. A scheduler that sees a non-2xx retries, and retrying a cadence
+  hold is exactly the burst the hold prevents. Only an unhandled server error
+  returns 500.
+- **Verification:** `GET /admin/post/status` with the same bearer returns
+  whether posting is enabled, the known campaigns, and the ten most recent
+  rows from `x_posts`.
+- **Human-in-the-loop stage:** post copy lives in `x-dm-service/src/campaigns.ts`
+  and changes through code review, not configuration. What the account says is
+  never edited from a panel.
+
+### Before it can run
+
+1. Deploy `x-dm-service` to `x.pawsome3d.com` and let TLS provision — X
+   requires HTTPS on the OAuth callback.
+2. Set the environment (see the service README): the four `X_*` credentials,
+   the `DB_*` set, `X_POSTING_ENABLED=true`, and `X_POST_SCHEDULER_SECRET`.
+3. Visit `/oauth` on that host and authorise **@stelarbabyOS**. This is the
+   step that mints a token holding `tweet.write`; a token issued before
+   2026-08-21 does not have it, and every post returns 403.
+4. Confirm with `GET /admin/post/status`, then create the trigger.
+
+---
+
 ## Deploy
 
 Deploys are never automatic from any of the above. Build + verify happens
