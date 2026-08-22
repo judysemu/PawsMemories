@@ -107,6 +107,9 @@ export function createOAuthRouter(): Router {
         tokenResponse.access_token,
         tokenResponse.refresh_token ?? '',
         cfg.X_BOT_USER_ID,
+        // X returns what it actually granted, which can be narrower than what
+        // was requested if the account declined part of the consent screen.
+        tokenResponse.scope,
       );
 
       // Clear pending state

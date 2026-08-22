@@ -82,7 +82,8 @@ export function loadConfig(): Config {
   const X_ACCESS_TOKEN = env.X_ACCESS_TOKEN ?? '';
   const X_ACCESS_TOKEN_SECRET = env.X_ACCESS_TOKEN_SECRET ?? '';
 
-  // Validate required strings
+  // Required to boot at all: without X credentials or a database there is no
+  // service, whatever it is asked to do.
   const required: [string, string | undefined][] = [
     ['X_CLIENT_ID', X_CLIENT_ID],
     ['X_CLIENT_SECRET', X_CLIENT_SECRET],
@@ -92,6 +93,18 @@ export function loadConfig(): Config {
     ['DB_NAME', DB_NAME],
     ['DB_USER', DB_USER],
     ['DB_PASSWORD', DB_PASSWORD],
+  ];
+
+  // Needed only by DM refinement — turning a conversation into a model means
+  // Blender, an LLM and somewhere to put the render. A deployment that only
+  // posts scheduled links uses none of them.
+  //
+  // These were boot-required, which meant a posting-only deployment could not
+  // start without credentials for a feature it never invokes, and running a
+  // migration meant supplying an LLM key. Failing closed is right at the point
+  // of use; failing closed at boot for an unrelated feature is just a service
+  // that will not start.
+  const dmRefinementVars: [string, string | undefined][] = [
     ['BLENDER_WORKER_URL', BLENDER_WORKER_URL],
     ['WORKER_SHARED_SECRET', WORKER_SHARED_SECRET],
     ['LLM_API_KEY', LLM_API_KEY],
@@ -101,6 +114,15 @@ export function loadConfig(): Config {
     ['MEDIA_BUCKET_KEY', MEDIA_BUCKET_KEY],
     ['MEDIA_BUCKET_SECRET', MEDIA_BUCKET_SECRET],
   ];
+  const missingDmRefinement = dmRefinementVars
+    .filter(([, val]) => !val || val.trim() === '')
+    .map(([name]) => name);
+  if (missingDmRefinement.length) {
+    console.warn(
+      `[Config] DM refinement is unavailable — missing: ${missingDmRefinement.join(', ')}. ` +
+      `Webhooks, OAuth and scheduled posting are unaffected.`,
+    );
+  }
 
   for (const [name, val] of required) {
     if (!val || val.trim() === '') {

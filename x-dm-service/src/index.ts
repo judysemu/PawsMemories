@@ -17,6 +17,7 @@ import express from 'express';
 import { getConfig } from './config.js';
 import { createWebhookRouter } from './routes/webhooks.js';
 import { createOAuthRouter } from './routes/oauth.js';
+import { createSchedulerRouter } from './routes/scheduler.js';
 import { ensureWebhookRegistered } from './webhookManager.js';
 import { ensureSubscriptions } from './subscriptions.js';
 import { startPoller } from './poller.js';
@@ -56,6 +57,12 @@ app.use(express.json());
 // ---------------------------------------------------------------------------
 
 app.use('/oauth', createOAuthRouter());
+
+// ---------------------------------------------------------------------------
+// Scheduled posting — bearer-authenticated, mirrors the catalog-sync pattern
+// ---------------------------------------------------------------------------
+
+app.use('/admin', createSchedulerRouter());
 
 // ---------------------------------------------------------------------------
 // Health check

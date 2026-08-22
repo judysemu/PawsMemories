@@ -78,15 +78,40 @@ export async function persistTokens(
   accessToken: string,
   refreshToken: string,
   userId?: string,
+  grantedScope?: string,
 ): Promise<void> {
   const pool = getPool();
+  // grantedScope is recorded because X fixes scopes at issue time: without it
+  // there is no way to tell a token that cannot publish from one that can, and
+  // the failure only shows up as a 403 at the moment you needed it to work.
   await pool.execute(
-    `INSERT INTO x_oauth_tokens (id, user_id, access_token, refresh_token)
-     VALUES (1, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE access_token = VALUES(access_token), refresh_token = VALUES(refresh_token)`,
-    [userId ?? getConfig().X_BOT_USER_ID, accessToken, refreshToken],
+    `INSERT INTO x_oauth_tokens (id, user_id, access_token, refresh_token, granted_scope)
+     VALUES (1, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE access_token = VALUES(access_token),
+                             refresh_token = VALUES(refresh_token),
+                             granted_scope = COALESCE(VALUES(granted_scope), granted_scope)`,
+    [userId ?? getConfig().X_BOT_USER_ID, accessToken, refreshToken, grantedScope ?? null],
   );
-  console.log('[BotTokenStore] Tokens persisted to DB');
+  console.log(`[BotTokenStore] Tokens persisted to DB${grantedScope ? ` (scope: ${grantedScope})` : ''}`);
+}
+
+/**
+ * The scope recorded for the stored token, or null if none was recorded.
+ *
+ * Null is "unknown", not "denied" — a token issued before the column existed
+ * may well be able to post.
+ */
+export async function getGrantedScope(): Promise<string | null> {
+  try {
+    const [rows]: any = await getPool().query(
+      'SELECT granted_scope FROM x_oauth_tokens WHERE id = 1 LIMIT 1',
+    );
+    const arr = rows as any[];
+    return arr.length ? (arr[0].granted_scope ?? null) : null;
+  } catch (err: any) {
+    console.warn(`[BotTokenStore] could not read granted scope: ${err?.message || err}`);
+    return null;
+  }
 }
 
 /**
@@ -121,7 +146,10 @@ export async function refreshAndPersist(): Promise<string> {
   const newAccess = resp.access_token;
   const newRefresh = resp.refresh_token ?? currentRefresh;
 
-  await persistTokens(newAccess, newRefresh, cfg.X_BOT_USER_ID);
+  // A refresh carries the original grant forward. Passing the response scope
+  // when present keeps the record accurate; COALESCE in persistTokens means a
+  // refresh that omits it does not erase what we already knew.
+  await persistTokens(newAccess, newRefresh, cfg.X_BOT_USER_ID, resp.scope);
   console.log('[BotTokenStore] Token refreshed and persisted');
 
   return newAccess;

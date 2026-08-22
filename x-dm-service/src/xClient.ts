@@ -41,14 +41,40 @@ export type XApiResult<T> =
 // Scopes
 // ---------------------------------------------------------------------------
 
+/**
+ * Scopes requested when the bot account authorises.
+ *
+ * `tweet.write` was absent until 2026-08-21, so a token minted before then can
+ * read timelines but cannot publish — every post returns 403. Scopes are fixed
+ * at issue time, so adding one here does nothing to a token already stored:
+ * the bot must walk the /oauth flow again and consent to the new scope.
+ */
 export const DM_SCOPES = [
   'dm.read',
   'dm.write',
   'tweet.read',
+  // Publishing the scheduled traffic posts. Read alone is not enough.
+  'tweet.write',
   'users.read',
   'media.write',
   'offline.access',
 ].join(' ');
+
+/** Scopes a token must hold to publish. */
+export const POSTING_SCOPES = ['tweet.write'] as const;
+
+/**
+ * Whether a stored scope string permits publishing.
+ *
+ * Returns null when the scope was never recorded — that is not the same as
+ * "cannot post", and reporting it as such would send someone re-authorising a
+ * token that was fine.
+ */
+export function canPost(grantedScope: string | null | undefined): boolean | null {
+  if (grantedScope == null || grantedScope.trim() === '') return null;
+  const granted = new Set(grantedScope.trim().split(/\s+/));
+  return POSTING_SCOPES.every((s) => granted.has(s));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
