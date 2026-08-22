@@ -28,4 +28,9 @@
   <url><loc>https://pawsome3d.com/legal/privacy</loc></url>
   <url><loc>https://pawsome3d.com/legal/terms</loc></url>
   <url><loc>https://pawsome3d.com/legal/sms</loc></url>
+  <url>
+    <loc>https://pawsome3d.com/barkley</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
 </urlset>

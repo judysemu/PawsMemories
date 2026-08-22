@@ -85,6 +85,12 @@ export const PAGE_META: Record<string, PageMeta> = {
     description:
       "Honor a beloved companion with a personalized memorial model designed for physical printing.",
   },
+  "/barkley": {
+    title: "Meet Barkley: A Guided Tour of Pawsome3D",
+    description:
+      "Take an interactive 3D tour with Barkley and see how a single pet photo becomes a textured, rigged model you can print, animate, or place in AR.",
+    image: "/MAIN.jpg",
+  },
   "/how-it-works": {
     title: "How Custom 3D Pet Models Work | Pawsome3D",
     description:
@@ -200,6 +206,37 @@ export function injectMeta(html: string, pathname: string): string {
   const orgScript = `<script type="application/ld+json" id="schema-org">${JSON.stringify(orgJsonLd)}</script>`;
   if (!out.includes('id="schema-org"')) {
     out = out.replace("</head>", `${orgScript}\n</head>`);
+  }
+
+  // Barkley is a guided, interactive explainer rather than a video or a
+  // product. Declaring it a VideoObject would earn a rich result it cannot
+  // honour -- there is no video file to play -- and Google drops structured
+  // data that does not match the page. LearningResource describes what it
+  // actually is, and the HowTo step list mirrors the real beats.
+  if (normalized === "/barkley") {
+    const barkleyJsonLd = {
+      "@context": "https://schema.org",
+      "@type": "LearningResource",
+      "name": "Meet Barkley: A Guided Tour of Pawsome3D",
+      "url": url,
+      "description":
+        "An interactive 3D walkthrough of how Pawsome3D turns a pet photo into a textured, rigged model for printing, animation and augmented reality.",
+      "learningResourceType": "Interactive tour",
+      "interactivityType": "active",
+      "isAccessibleForFree": true,
+      "inLanguage": "en-US",
+      "teaches": [
+        "How a single pet photo becomes a 3D model",
+        "What a GLB file is and where it can be used",
+        "How texturing and rigging work",
+        "How to view a pet model in augmented reality",
+      ],
+      "provider": { "@type": "Organization", "name": "Pawsome3D", "url": ORIGIN },
+    };
+    const barkleyScript = `<script type="application/ld+json" id="schema-barkley">${JSON.stringify(barkleyJsonLd)}</script>`;
+    if (!out.includes('id="schema-barkley"')) {
+      out = out.replace("</head>", `${barkleyScript}\n</head>`);
+    }
   }
 
   // Product Structured Data for Product pages

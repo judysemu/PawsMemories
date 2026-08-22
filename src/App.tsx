@@ -24,6 +24,8 @@ import ShareMemory from "./components/ShareMemory";
 // runtime. Loading them on demand keeps three.js OUT of the initial bundle so the
 // landing/dashboard don't download the whole 3D stack.
 const RandyChat = lazy(() => import("./components/RandyChat"));
+// Heavy: pulls three.js and a 4MB GLB. Lazy so no other route pays for it.
+const BarkleyScreen = lazy(() => import("./components/BarkleyScreen"));
 import AlbumView from "./components/AlbumView";
 import AlbumsPage from "./components/AlbumsPage";
 import { fetchMe, fetchCreations, fetchAlbums, createAlbum, clearToken, claimAchievement, claimDailyStreak, confirmCreditsSession, acceptCurrentTerms } from "./api";
@@ -89,6 +91,7 @@ const SCREEN_PATHS: Partial<Record<Screen, string>> = {
   [Screen.LANDING_DENVER]: "/denver",
   [Screen.LANDING_PHILADELPHIA]: "/philadelphia",
   [Screen.GUIDES_HUB]: "/guides",
+  [Screen.BARKLEY]: "/barkley",
   [Screen.PRODUCT_VIEW]: "/product",
   [Screen.LANDING_MEMORIALS]: "/pet-memorial-models",
   [Screen.HOW_IT_WORKS]: "/how-it-works",
@@ -132,6 +135,7 @@ const PUBLIC_SCREENS = new Set<Screen>([
   Screen.LANDING_DENVER,
   Screen.LANDING_PHILADELPHIA,
   Screen.GUIDES_HUB,
+  Screen.BARKLEY,
   Screen.PRODUCT_VIEW,
   Screen.LANDING_MEMORIALS,
   Screen.HOW_IT_WORKS,
@@ -819,6 +823,12 @@ export default function App() {
             onOpenFurball={() => setCurrentScreen(Screen.CREATE)}
             onOpenFidos={() => setCurrentScreen(Screen.PAWLISHER)}
           />
+        )}
+
+        {currentScreen === Screen.BARKLEY && (
+          <Suspense fallback={<div className="p-12 text-center text-on-surface-variant">Loading the studio tour…</div>}>
+            <BarkleyScreen onClose={() => setCurrentScreen(Screen.DASHBOARD)} />
+          </Suspense>
         )}
 
         {currentScreen === Screen.LANDING_DOGS && (
