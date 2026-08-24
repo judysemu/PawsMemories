@@ -269,7 +269,7 @@ export default function PetModelStudio() {
   const [product, setProduct] = useState<Product | null>(null);
   const [view, setView] = useState<OrderView | null>(null);
   const [recentOrders, setRecentOrders] = useState<OrderView[]>([]);
-  const [meshProfile, setMeshProfile] = useState<MeshProfile>("smart_mesh");
+  const [meshProfile, setMeshProfile] = useState<MeshProfile>("hd");
   const [subjectProfile, setSubjectProfile] = useState<SubjectProfile>("pet");
   const [includeTexture, setIncludeTexture] = useState(false);
   const [includeRig, setIncludeRig] = useState(false);

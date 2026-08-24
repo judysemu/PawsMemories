@@ -255,7 +255,7 @@ test("model studio accepts one photo, supports Tripo view remakes, and requires 
   assert.match(studio, /Choose one pet photo/);
   assert.match(studio, /retryReferenceAttempt/);
   assert.match(studio, /Remake these views/);
-  assert.match(studio, /useState<MeshProfile>\("smart_mesh"\)/);
+  assert.match(studio, /useState<MeshProfile>\("hd"\)/);
   assert.match(studio, /approveCustomerStage/);
   assert.match(studio, /stages\/\$\{stage\.stage\}\/approve/);
   assert.doesNotMatch(studio, /Check stage progress|Load secure 3D preview|Back to model builds/);
