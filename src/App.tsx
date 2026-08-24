@@ -23,6 +23,8 @@ import ShareMemory from "./components/ShareMemory";
 // Lazy-loaded: these are the only screens/widgets that pull the three.js + R3F
 // runtime. Loading them on demand keeps three.js OUT of the initial bundle so the
 // landing/dashboard don't download the whole 3D stack.
+import { trackPageView } from "./analytics";
+
 const RandyChat = lazy(() => import("./components/RandyChat"));
 // Heavy: pulls three.js and a 4MB GLB. Lazy so no other route pays for it.
 const BarkleyScreen = lazy(() => import("./components/BarkleyScreen"));
@@ -314,6 +316,15 @@ export default function App() {
     const path = SCREEN_PATHS[currentScreen];
     if (path && window.location.pathname !== path) window.history.pushState({ screen: currentScreen }, "", path);
   }, [authChecked, isAuthed, currentScreen]);
+
+  // Record the view after navigation has settled. The server sees one HTML
+  // request for the whole app, so without this every route looks like "/".
+  // Gated on authChecked so a redirect away from a protected screen is not
+  // counted as a visit to it.
+  React.useEffect(() => {
+    if (!authChecked) return;
+    trackPageView(SCREEN_PATHS[currentScreen] ?? window.location.pathname);
+  }, [authChecked, currentScreen]);
 
   React.useEffect(() => {
     const onPopState = () => {

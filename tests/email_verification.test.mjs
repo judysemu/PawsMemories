@@ -163,7 +163,15 @@ test("the verify-email page is reachable without a session", () => {
   assert.match(app, /window\.location\.pathname === "\/verify-email"/);
   assert.match(app, /<VerifyEmail \/>/);
   // It must be rendered before the auth gate, like the reset page.
-  assert.ok(app.indexOf('"/verify-email"') < app.indexOf("if (!authChecked)"));
+  //
+  // Match the gate itself -- `if (!authChecked) {` opening a render branch --
+  // rather than any occurrence of the condition. Effects legitimately guard on
+  // authChecked with an early `return`, and matching those instead would fail
+  // this test for a change that never touched the gate, while a real
+  // regression moving verify-email below it would still slip through.
+  const authGate = app.indexOf("if (!authChecked) {");
+  assert.ok(authGate > 0, "the auth render gate should be findable");
+  assert.ok(app.indexOf('"/verify-email"') < authGate);
 });
 
 test("token-bearing links are never indexable", () => {

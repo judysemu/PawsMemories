@@ -2590,6 +2590,42 @@ export const MIGRATIONS: Migration[] = [
         WHERE stage = 'base' AND base_model_task_handle IS NULL`,
     ],
   },
+  {
+    version: 57,
+    name: "page_views",
+    statements: [
+      // First-party, cookieless traffic record.
+      //
+      // Built rather than bought for three reasons this codebase already
+      // enforces: the CSP would need script-src and connect-src widened for a
+      // third-party tag, Hostinger exposes no access-log API to analyse after
+      // the fact, and an SPA serves one HTML shell so server access logs cannot
+      // see a route change at all.
+      //
+      // What is deliberately NOT stored: no IP address, no cookie, no device
+      // fingerprint, no user id, and only the referrer's HOST rather than the
+      // full URL -- a referring URL can carry a search query or a private path,
+      // and the host alone answers "where did they come from".
+      //
+      // That makes rows non-identifying by construction rather than by policy,
+      // which is what keeps this outside consent-banner territory.
+      `CREATE TABLE IF NOT EXISTS page_views (
+        id            BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        path          VARCHAR(255) NOT NULL,
+        referrer_host VARCHAR(191) NULL,
+        utm_source    VARCHAR(64) NULL,
+        utm_medium    VARCHAR(64) NULL,
+        utm_campaign  VARCHAR(64) NULL,
+        -- Coarse enough to be useful for layout decisions, too coarse to
+        -- identify anyone.
+        device        ENUM('mobile','tablet','desktop','unknown') NOT NULL DEFAULT 'unknown',
+        created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_path_created (path, created_at),
+        INDEX idx_created (created_at),
+        INDEX idx_utm_source (utm_source)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
 ];
 
 export async function ensureMigrationTable(conn: mysql.PoolConnection | mysql.Pool): Promise<void> {

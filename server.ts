@@ -146,6 +146,7 @@ import { WARDROBE_CATALOG, WARDROBE_ITEM_IDS, WAGS_EXCLUSIVE_ITEM_IDS } from "./
 import { buildReferencePrompt, turnaroundViewsForType, paletteLockClause, extractPaletteInstruction, buildTextPrompt, geometryToTripo, type TextPromptFields, type ExtendedSubjectClass, getSubjectClassForSpecies, getBuildProfileForSpecies } from "./avatarPrompts";
 import { createFreeImageRouter } from "./server/free-image/routes";
 import { createByokRouter, isByokPlaygroundEnabled } from "./server/byok/routes";
+import { createAnalyticsRouter } from "./server/analytics/routes";
 import { createPhotoEditRouter } from "./server/photo-edit/routes";
 import { createFalBirefnetProvider } from "./server/photo-edit/falBirefnet";
 import { verifyShopifyConfiguration, verifyShopifyWebhookSignature, extractPawprintOrderReference } from "./server/shopify";
@@ -4446,6 +4447,16 @@ async function startServer() {
   // Background removal. BiRefNet via fal — MIT on code and weights, the only
   // evaluated model with an explicit commercial grant on the weights.
   app.use("/api/photo-edit", paidLimiter, createPhotoEditRouter(getPool, createFalBirefnetProvider()));
+
+  // ── Traffic analytics (first-party, cookieless) ─────────────────────────────
+  // /pageview is public: it records anonymous visitors, most of whom never sign
+  // in. /traffic is admin-only, because aggregate traffic is business
+  // information even when every underlying row is anonymous.
+  app.use("/api/analytics", createAnalyticsRouter({
+    getPool,
+    isAdmin: isUserAdmin,
+    phoneOf: (req) => (req as AuthedRequest).user?.phone || null,
+  }));
 
   app.use("/api/pawprints/purchase", createPawprintPurchaseRouter(getPool));
 

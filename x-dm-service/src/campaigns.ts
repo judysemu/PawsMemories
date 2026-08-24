@@ -29,7 +29,11 @@ export const X_LINK_WEIGHT = 23;
 export const CAMPAIGNS: Record<string, Campaign> = {
   barkley: {
     id: "barkley",
-    targetUrl: "https://pawsome3d.com/barkley",
+    // UTM-tagged so the visit is attributable. Without tags an X click is
+    // indistinguishable from direct traffic once the referrer is stripped,
+    // which many clients do -- and the whole point of the post is knowing
+    // whether anyone arrived.
+    targetUrl: "https://pawsome3d.com/barkley?utm_source=x&utm_medium=social&utm_campaign=barkley",
     variants: [
       "Meet Barkley — he'll walk you through how a single pet photo becomes a 3D model you can print, animate, or stand in your living room.",
       "Ever wondered how a photo of your dog turns into a 3D model? Barkley gives the tour, in 3D, in about two minutes.",
