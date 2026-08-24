@@ -139,3 +139,17 @@ test("per-route injection replaces the noscript heading so pages are not duplica
   assert.equal(headingOf(pricing), expected);
   assert.doesNotMatch(headingOf(pricing), /\| Pawsome3D/);
 });
+
+test("asset directories do not redirect routes that share their name", async () => {
+  const server = await readFile(new URL("../server.ts", import.meta.url), "utf8");
+  const staticBlock = server.slice(
+    server.indexOf("express.static(distPath"),
+    server.indexOf("const ASSET_EXT"),
+  );
+  // public/barkley (GLB clips) shares a name with the /barkley route. With the
+  // default redirect behaviour express.static answered /barkley with a 301 to
+  // /barkley/, whose page then declared canonical=/barkley -- a canonical
+  // pointing at a redirect to itself, which is why Google never indexed it.
+  assert.match(staticBlock, /redirect:\s*false/);
+  assert.match(staticBlock, /index:\s*false/);
+});

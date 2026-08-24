@@ -8024,6 +8024,15 @@ async function startServer() {
       // title/description. Every other route was fine because no file matches
       // them. Turning the directory index off lets "/" fall through.
       index: false,
+      // Directory requests must not be redirected either. public/barkley holds
+      // the presenter's GLB clips, which collides with the /barkley marketing
+      // route: express.static answered it with a 301 to /barkley/, while the
+      // page served there declared its canonical as /barkley -- a canonical
+      // pointing at a redirect back to itself. Google reported the route as
+      // "URL is unknown to Google" for exactly that reason. With index:false a
+      // directory has nothing to serve anyway, so falling through to the SPA is
+      // the only useful behaviour.
+      redirect: false,
       setHeaders(res, filePath) {
         // Vite fingerprints asset filenames, so hashed assets are safe to cache
         // forever. index.html must stay uncached so new deploys are picked up.
