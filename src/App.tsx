@@ -3,6 +3,7 @@ import { Screen, UserProfile, Creation, Album, PublicUser } from "./types";
 import SignUp from "./components/SignUp";
 import ResetPassword from "./components/ResetPassword";
 import VerifyEmail from "./components/VerifyEmail";
+import ClaimPhoto, { PENDING_CLAIM_KEY, readTokenFromPath } from "./components/ClaimPhoto";
 import AnimationStudio from "./components/AnimationStudio";
 import Welcome from "./components/Welcome";
 import Tutorial from "./components/Tutorial";
@@ -317,6 +318,28 @@ export default function App() {
     if (path && window.location.pathname !== path) window.history.pushState({ screen: currentScreen }, "", path);
   }, [authChecked, isAuthed, currentScreen]);
 
+  // Resume an X photo claim that was interrupted by signing in. The link is
+  // opened from a DM, so the browser holding it usually has no session yet;
+  // without this the customer signs in and the photo they were promised is
+  // simply gone. Sending them back to /claim lets the same single-use token be
+  // spent once, now that there is an account to spend it into.
+  React.useEffect(() => {
+    if (!authChecked || !isAuthed) return;
+    let pending: string | null = null;
+    try {
+      pending = sessionStorage.getItem(PENDING_CLAIM_KEY);
+    } catch {
+      return;
+    }
+    if (!pending) return;
+    try {
+      sessionStorage.removeItem(PENDING_CLAIM_KEY);
+    } catch {
+      // A claim we cannot clear would loop, so treat storage loss as done.
+    }
+    window.location.href = `/claim/${pending}`;
+  }, [authChecked, isAuthed]);
+
   // Record the view after navigation has settled. The server sees one HTML
   // request for the whole app, so without this every route looks like "/".
   // Gated on authChecked so a redirect away from a protected screen is not
@@ -606,6 +629,15 @@ export default function App() {
   // different browser than the one holding the session.
   if (typeof window !== "undefined" && window.location.pathname === "/verify-email") {
     return <VerifyEmail />;
+  }
+
+  // Photo-claim landing for the X DM funnel. Rendered before the shell for the
+  // same reason as the two pages above: the link arrives in a DM and is opened
+  // in whatever browser the X app hands it to. The page itself requires a
+  // session before it will spend the token -- being reachable is not the same
+  // as being permitted.
+  if (typeof window !== "undefined" && readTokenFromPath(window.location.pathname)) {
+    return <ClaimPhoto />;
   }
 
   // While we check for an existing session, show a lightweight loader.

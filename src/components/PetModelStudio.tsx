@@ -6,6 +6,7 @@ import {
   startReferenceAttempt,
 } from "../api";
 import PetModelViewer from "./PetModelViewer";
+import { CLAIMED_PHOTO_KEY } from "./ClaimPhoto";
 import CreativeDashboard from "./studio/CreativeDashboard";
 import {
   liveBuildAction,
@@ -285,6 +286,29 @@ export default function PetModelStudio() {
   const [collarReadiness, setCollarReadiness] = useState<CollarReadiness | null>(null);
   const [references, setReferences] = useState<Record<string, string>>({});
   const [referenceSessionUuid, setReferenceSessionUuid] = useState<string | null>(null);
+
+  // A photo claimed from an X DM arrives here already chosen. Filling the front
+  // slot is the whole handoff -- everything after it is the normal flow, so the
+  // finish choice, the PupCoin reservation, and the view approval are all still
+  // ahead of the customer exactly as if they had picked the file themselves.
+  useEffect(() => {
+    let claimed: string | null = null;
+    try {
+      claimed = sessionStorage.getItem(CLAIMED_PHOTO_KEY);
+    } catch {
+      return;
+    }
+    if (!claimed) return;
+    // Read once. A refresh should not silently resurrect a photo the customer
+    // has since removed.
+    try {
+      sessionStorage.removeItem(CLAIMED_PHOTO_KEY);
+    } catch {
+      // Nothing further to do if storage is unavailable.
+    }
+    const photo = claimed;
+    setReferences((current) => (current.frontUrl ? current : { frontUrl: photo }));
+  }, []);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");

@@ -36,6 +36,17 @@ export interface Config {
   HARVEST_MAX_POSTS_PER_RUN: number;
   /** Enables the optional DM lookup fallback. Defaults off to avoid unauthorized retry loops. */
   X_DM_POLLING_ENABLED: boolean;
+  /**
+   * Turns an inbound photo DM into a one-time claim link instead of an echo.
+   * Defaults off: with no main-app base URL or shared secret configured there is
+   * nothing to mint against, and replying with a broken link is worse than not
+   * replying at all.
+   */
+  X_PHOTO_CLAIM_ENABLED: boolean;
+  /** Main app origin that mints claims, e.g. https://pawsome3d.com */
+  PAWSOME_API_BASE: string;
+  /** Shared secret for POST /api/x-claims on the main app. */
+  X_CLAIM_SERVICE_SECRET: string;
   PORT: number;
   /** Portal-issued app-only bearer token (optional). When set, bypasses the OAuth2 client_credentials fetch. */
   X_BEARER_TOKEN: string;
@@ -76,6 +87,15 @@ export function loadConfig(): Config {
   let DM_DAILY_SEND_CAP = env.DM_DAILY_SEND_CAP ? Number(env.DM_DAILY_SEND_CAP) : 400;
   let HARVEST_MAX_POSTS_PER_RUN = env.HARVEST_MAX_POSTS_PER_RUN ? Number(env.HARVEST_MAX_POSTS_PER_RUN) : 300;
   const X_DM_POLLING_ENABLED = parseBoolean(env.X_DM_POLLING_ENABLED, false);
+  const PAWSOME_API_BASE = (env.PAWSOME_API_BASE ?? '').replace(/\/+$/, '');
+  const X_CLAIM_SERVICE_SECRET = env.X_CLAIM_SERVICE_SECRET ?? '';
+  // Fails closed on its own dependencies rather than trusting the flag alone:
+  // an operator who sets the flag but forgets the secret gets the echo path,
+  // not a DM full of links that 401.
+  const X_PHOTO_CLAIM_ENABLED =
+    parseBoolean(env.X_PHOTO_CLAIM_ENABLED, false) &&
+    Boolean(PAWSOME_API_BASE) &&
+    X_CLAIM_SERVICE_SECRET.length >= 32;
   let PORT = env.PORT ? Number(env.PORT) : 3001;
   const X_BEARER_TOKEN = env.X_BEARER_TOKEN ?? '';
   const X_CONSUMER_KEY = env.X_CONSUMER_KEY ?? '';
@@ -177,6 +197,9 @@ export function loadConfig(): Config {
     DM_DAILY_SEND_CAP,
     HARVEST_MAX_POSTS_PER_RUN,
     X_DM_POLLING_ENABLED,
+    X_PHOTO_CLAIM_ENABLED,
+    PAWSOME_API_BASE,
+    X_CLAIM_SERVICE_SECRET,
     PORT,
     X_BEARER_TOKEN,
     X_CONSUMER_KEY,

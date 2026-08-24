@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 57;
+export const CURRENT_SCHEMA_VERSION = 58;
 
 export interface Migration {
   version: number;
@@ -2623,6 +2623,43 @@ export const MIGRATIONS: Migration[] = [
         INDEX idx_path_created (path, created_at),
         INDEX idx_created (created_at),
         INDEX idx_utm_source (utm_source)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 58,
+    name: "x_photo_claims",
+    statements: [
+      // A photo arriving from an off-platform channel (an X DM today) parked
+      // until a signed-in account claims it.
+      //
+      // This table deliberately carries a photo and nothing else. It grants no
+      // credits, starts no generation, and creates no account. Claiming still
+      // requires an authenticated session, the order still reserves PupCoins,
+      // and the customer still approves the generated views -- the claim only
+      // saves someone re-uploading a photo they already sent us.
+      //
+      // Storing the token hashed, single-use, with a SQL-checked expiry is the
+      // same shape as password_resets and email_verifications, so a leaked
+      // database row cannot be replayed into a live link.
+      //
+      // No X user id, handle, or message text is kept. source_ref holds the
+      // conversation id only, which is what support needs to answer "my link
+      // did not arrive" without turning this into a record of who DMed us.
+      `CREATE TABLE IF NOT EXISTS x_photo_claims (
+        id               BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        token_hash       CHAR(64) NOT NULL,
+        source           VARCHAR(32) NOT NULL DEFAULT 'x_dm',
+        source_ref       VARCHAR(191) NULL,
+        image_url        VARCHAR(512) NOT NULL,
+        mime_type        VARCHAR(64) NOT NULL,
+        claimed_by_phone VARCHAR(32) NULL,
+        used_at          TIMESTAMP NULL DEFAULT NULL,
+        expires_at       TIMESTAMP NOT NULL,
+        created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_token_hash (token_hash),
+        INDEX idx_expires (expires_at),
+        INDEX idx_source_ref (source_ref)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },

@@ -297,6 +297,24 @@ export async function verifyEmail(token: string): Promise<{ message: string; use
   return { message: data.message || "Email confirmed.", user: (data.user as PublicUser) || null };
 }
 
+/**
+ * Spend a one-time photo-claim token from an X DM and get the photo back as a
+ * data URL, ready to drop into the studio's reference slot.
+ *
+ * Authenticated on purpose: the claim carries a photo, never an entitlement, so
+ * the account, its PupCoins, and the view-approval step are all still ahead.
+ */
+export async function claimPhoto(token: string): Promise<{ imageDataUrl: string; source: string }> {
+  const res = await authedFetch("/api/x-claims/consume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, "This photo link is no longer available."));
+  const data = await res.json();
+  return { imageDataUrl: String(data.imageDataUrl || ""), source: String(data.source || "x_dm") };
+}
+
 /** Restore the session on app load. Returns null if there is no valid session. */
 export async function fetchMe(): Promise<PublicUser | null> {
   if (!getToken()) return null;

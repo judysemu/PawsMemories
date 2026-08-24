@@ -32,6 +32,7 @@ import { semanticScan as runSemanticScan } from "./server/semanticScan";
 import { animatorRouter } from "./server/animator/routes.ts";
 import { assetsRouter } from "./server/assets/routes";
 import { referenceSessionsRouter } from "./server/reference-sessions/routes";
+import { createClaimMintRouter, createClaimConsumeRouter } from "./server/x-claims/routes";
 import { generateSignedUrlForVersion } from "./server/assets/access";
 import { modelBuildsRouter, modelBuildService } from "./server/model-builds/routes";
 import { spatialGeneratorRouter, startSpatialGeneratorScheduler } from "./server/spatial-generator/routes";
@@ -1112,6 +1113,13 @@ async function startServer() {
   // unless enabled server-side, and never mount it outside the normal JWT gate.
   app.use("/api/assets", requireCanonicalAssetsEnabled, requireAuth, assetsRouter);
   app.use("/api/reference-sessions", requireAuth, referenceSessionsRouter);
+  // Two mounts, one path, different trust. The mint side is called by
+  // x-dm-service with a shared secret and holds no user session, so it sits
+  // outside requireAuth and is kept to a single narrow route. Claiming is a
+  // person with an account, and stays behind the same gate as everything else
+  // that can own a reference session.
+  app.use("/api/x-claims", createClaimMintRouter());
+  app.use("/api/x-claims", requireAuth, createClaimConsumeRouter());
   app.use("/api/model-builds", requireAuth, modelBuildsRouter);
   app.use("/api/spatial-generator", requireAuth, spatialGeneratorRouter);
   app.use("/api/rig-pipeline", requireAuth, createRigPipelineRouter(getPool));

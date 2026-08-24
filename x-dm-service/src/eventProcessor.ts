@@ -17,6 +17,7 @@
 import { getConfig } from './config.js';
 import { insertDmEvent, eventExists, kvSet, KV_KEYS } from './db.js';
 import { sendDm } from './dmSender.js';
+import { claimReplyForPhoto } from './photoClaim.js';
 
 // ---------------------------------------------------------------------------
 // Internal DmEvent type (normalized)
@@ -349,22 +350,38 @@ export async function processEvent(
     await kvSet(KV_KEYS.LAST_WEBHOOK_EVENT_AT, Date.now().toString());
   }
 
-  // 5. M3 echo reply — temporary; TODO(M5): replace with real refinement engine
+  // 5. Reply. A photo becomes a one-time claim link into the studio, where the
+  // account, the PupCoin reservation and the view approval all still apply.
+  // Anything else keeps the M3 echo — TODO(M5): replace with real refinement.
+  //
+  // Deliberately not awaited: a slow mint must not hold the webhook open, since
+  // X retries a delivery that does not return promptly and we would process the
+  // same DM twice.
   if (event.event_type === 'MessageCreate') {
-    // For data.payload shape events, always reply via participantId (sender)
-    // since the derived conversation id may not be accepted by the API.
-    const echoText = event.text
-      ? `Got it! 🐾 (echo: ${event.text.slice(0, 100)})`
-      : 'Got it! 🐾';
-    const dmOpts: { conversationId?: string; participantId?: string; text: string } =
-      event.participant_id
-        ? { participantId: event.participant_id, text: echoText }
-        : event.dm_conversation_id
-          ? { conversationId: event.dm_conversation_id, text: echoText }
-          : { participantId: event.sender_id, text: echoText };
-    sendDm(dmOpts).catch((err) => {
-      console.error(`[EventProcessor] Echo reply failed: ${(err as Error).message}`);
-    });
+    void (async () => {
+      const claimText = await claimReplyForPhoto({
+        mediaKeys: event.media_keys,
+        sourceRef: event.dm_conversation_id || null,
+      }).catch((err) => {
+        console.error(`[EventProcessor] Photo claim failed: ${(err as Error).message}`);
+        return null;
+      });
+
+      // For data.payload shape events, always reply via participantId (sender)
+      // since the derived conversation id may not be accepted by the API.
+      const replyText =
+        claimText ||
+        (event.text ? `Got it! 🐾 (echo: ${event.text.slice(0, 100)})` : 'Got it! 🐾');
+      const dmOpts: { conversationId?: string; participantId?: string; text: string } =
+        event.participant_id
+          ? { participantId: event.participant_id, text: replyText }
+          : event.dm_conversation_id
+            ? { conversationId: event.dm_conversation_id, text: replyText }
+            : { participantId: event.sender_id, text: replyText };
+      await sendDm(dmOpts).catch((err) => {
+        console.error(`[EventProcessor] Reply failed: ${(err as Error).message}`);
+      });
+    })();
   }
 
   return true;

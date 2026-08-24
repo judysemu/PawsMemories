@@ -4104,6 +4104,93 @@ export async function consumeEmailVerification(tokenHash: string): Promise<strin
   }
 }
 
+// ── Off-platform photo claims (X DM funnel) ─────────────────────────────────
+//
+// An inbound photo is parked here and exchanged for a reference session only
+// once a signed-in account claims it. The claim carries a photo and nothing
+// else -- no credits, no generation, no account -- so every existing gate
+// still applies on the other side of the link.
+
+export interface PhotoClaimRecord {
+  id: number;
+  imageUrl: string;
+  mimeType: string;
+  source: string;
+  sourceRef: string | null;
+}
+
+/**
+ * Park a photo behind a single-use token hash. Any earlier unused claim for the
+ * same conversation is retired first: a second photo from the same sender means
+ * they are correcting the first, and leaving both live would hand one sender two
+ * valid links.
+ */
+export async function createPhotoClaim(params: {
+  tokenHash: string;
+  imageUrl: string;
+  mimeType: string;
+  source: string;
+  sourceRef: string | null;
+  expiresAt: Date;
+}): Promise<void> {
+  if (params.sourceRef) {
+    await getPool().query(
+      "UPDATE x_photo_claims SET used_at = NOW() WHERE source_ref = ? AND used_at IS NULL",
+      [params.sourceRef]
+    );
+  }
+  await getPool().query(
+    "INSERT INTO x_photo_claims (token_hash, source, source_ref, image_url, mime_type, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [params.tokenHash, params.source, params.sourceRef, params.imageUrl, params.mimeType, params.expiresAt]
+  );
+}
+
+/**
+ * Claim a parked photo for a signed-in account. Marks the token used inside the
+ * same transaction that reads it, so two tabs racing the same link cannot both
+ * win. Returns null for a token that is unknown, expired, or already spent --
+ * the caller must not distinguish these to the user.
+ */
+export async function consumePhotoClaim(
+  tokenHash: string,
+  userPhone: string,
+): Promise<PhotoClaimRecord | null> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      `SELECT id, image_url, mime_type, source, source_ref
+         FROM x_photo_claims
+        WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW()
+        ORDER BY id DESC LIMIT 1
+        FOR UPDATE`,
+      [tokenHash]
+    ) as any;
+    if (!rows || rows.length === 0) {
+      await conn.rollback();
+      return null;
+    }
+    const row = rows[0];
+    await conn.query(
+      "UPDATE x_photo_claims SET used_at = NOW(), claimed_by_phone = ? WHERE id = ?",
+      [userPhone, row.id]
+    );
+    await conn.commit();
+    return {
+      id: Number(row.id),
+      imageUrl: String(row.image_url),
+      mimeType: String(row.mime_type),
+      source: String(row.source),
+      sourceRef: row.source_ref === null ? null : String(row.source_ref),
+    };
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 /** Store a reset-token hash, invalidating any prior unused tokens for the user. */
 export async function createPasswordReset(userPhone: string, tokenHash: string, expiresAt: Date): Promise<void> {
   await getPool().query(
