@@ -23,6 +23,28 @@ import { claimReplyForPhoto } from './photoClaim.js';
 // Internal DmEvent type (normalized)
 // ---------------------------------------------------------------------------
 
+/**
+ * Replies dispatched but not yet delivered.
+ *
+ * A photo reply has to do network work (download, mint) that must not hold the
+ * webhook response open — X retries a delivery that does not return promptly,
+ * and we would process the same DM twice. But a promise nobody holds is a
+ * promise nobody can wait for: on shutdown the send is lost silently, and a
+ * caller has no way to know the reply is still in flight. Keeping the handles
+ * here makes the deferral observable instead of invisible.
+ */
+const pendingReplies = new Set<Promise<void>>();
+
+/** Resolves once every deferred reply has settled. Safe to call repeatedly. */
+export async function flushPendingReplies(): Promise<void> {
+  await Promise.allSettled([...pendingReplies]);
+}
+
+function deferReply(work: Promise<void>): void {
+  pendingReplies.add(work);
+  void work.finally(() => pendingReplies.delete(work));
+}
+
 export interface DmEvent {
   event_id: string;
   dm_conversation_id: string;
@@ -353,35 +375,41 @@ export async function processEvent(
   // 5. Reply. A photo becomes a one-time claim link into the studio, where the
   // account, the PupCoin reservation and the view approval all still apply.
   // Anything else keeps the M3 echo — TODO(M5): replace with real refinement.
-  //
-  // Deliberately not awaited: a slow mint must not hold the webhook open, since
-  // X retries a delivery that does not return promptly and we would process the
-  // same DM twice.
   if (event.event_type === 'MessageCreate') {
-    void (async () => {
-      const claimText = await claimReplyForPhoto({
-        mediaKeys: event.media_keys,
-        sourceRef: event.dm_conversation_id || null,
-      }).catch((err) => {
-        console.error(`[EventProcessor] Photo claim failed: ${(err as Error).message}`);
-        return null;
-      });
+    // For data.payload shape events, always reply via participantId (sender)
+    // since the derived conversation id may not be accepted by the API.
+    const addressee: { conversationId?: string; participantId?: string } = event.participant_id
+      ? { participantId: event.participant_id }
+      : event.dm_conversation_id
+        ? { conversationId: event.dm_conversation_id }
+        : { participantId: event.sender_id };
+    const echoText = event.text
+      ? `Got it! 🐾 (echo: ${event.text.slice(0, 100)})`
+      : 'Got it! 🐾';
 
-      // For data.payload shape events, always reply via participantId (sender)
-      // since the derived conversation id may not be accepted by the API.
-      const replyText =
-        claimText ||
-        (event.text ? `Got it! 🐾 (echo: ${event.text.slice(0, 100)})` : 'Got it! 🐾');
-      const dmOpts: { conversationId?: string; participantId?: string; text: string } =
-        event.participant_id
-          ? { participantId: event.participant_id, text: replyText }
-          : event.dm_conversation_id
-            ? { conversationId: event.dm_conversation_id, text: replyText }
-            : { participantId: event.sender_id, text: replyText };
-      await sendDm(dmOpts).catch((err) => {
-        console.error(`[EventProcessor] Reply failed: ${(err as Error).message}`);
+    if (!event.media_keys?.length) {
+      // No photo, so no network round trip to wait on: dispatch and move on,
+      // exactly as before.
+      sendDm({ ...addressee, text: echoText }).catch((err) => {
+        console.error(`[EventProcessor] Echo reply failed: ${(err as Error).message}`);
       });
-    })();
+    } else {
+      // Minting a claim means downloading the photo and calling the main app.
+      // Deliberately not awaited: X retries a delivery that does not return
+      // promptly, and a slow mint would have us process the same DM twice.
+      deferReply((async () => {
+        const claimText = await claimReplyForPhoto({
+          mediaKeys: event.media_keys,
+          sourceRef: event.dm_conversation_id || null,
+        }).catch((err) => {
+          console.error(`[EventProcessor] Photo claim failed: ${(err as Error).message}`);
+          return null;
+        });
+        await sendDm({ ...addressee, text: claimText || echoText }).catch((err) => {
+          console.error(`[EventProcessor] Reply failed: ${(err as Error).message}`);
+        });
+      })());
+    }
   }
 
   return true;

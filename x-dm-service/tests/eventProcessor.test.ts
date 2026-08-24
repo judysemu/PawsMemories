@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizePayload, processEvent, type DmEvent } from '../src/eventProcessor.js';
+import { normalizePayload, processEvent, type DmEvent, flushPendingReplies } from '../src/eventProcessor.js';
 
 // Mock the db module
 vi.mock('../src/db.js', () => ({
@@ -619,6 +619,9 @@ describe('processEvent — data.payload production shape', () => {
 
     const events = normalizePayload(dataPayloadRealWithMedia);
     const result = await processEvent(events[0], 'webhook');
+    // A photo reply is dispatched off the webhook response on purpose, so the
+    // send has not necessarily happened by the time processEvent returns.
+    await flushPendingReplies();
 
     expect(result).toBe(true);
     expect(insertDmEvent).toHaveBeenCalledWith(

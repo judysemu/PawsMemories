@@ -28,6 +28,7 @@ import { ensureWebhookRegistered } from './webhookManager.js';
 import { ensureSubscriptions } from './subscriptions.js';
 import { startPoller } from './poller.js';
 import { runMigrations } from './migrate.js';
+import { flushPendingReplies } from './eventProcessor.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -165,6 +166,32 @@ setInterval(async () => {
 }, 3_600_000);
 
 export default app;
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown — a photo reply is dispatched off the webhook response, so
+// on a redeploy there can be a mint or a send still in flight. Exiting without
+// waiting drops it silently, and the sender is left with a photo we accepted
+// and never answered.
+// ---------------------------------------------------------------------------
+
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Shutdown] ${signal} received — draining in-flight replies`);
+  // Bounded: a hung upstream must not stop the process from exiting, or the
+  // host kills it harder and we lose the drain entirely.
+  await Promise.race([
+    flushPendingReplies(),
+    new Promise((resolve) => setTimeout(resolve, 10_000)),
+  ]);
+  console.log('[Shutdown] Done');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
 
 // ---------------------------------------------------------------------------
 // Global error handlers — keep the server alive for DB/network failures
