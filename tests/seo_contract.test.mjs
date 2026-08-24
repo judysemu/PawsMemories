@@ -153,3 +153,28 @@ test("asset directories do not redirect routes that share their name", async () 
   assert.match(staticBlock, /redirect:\s*false/);
   assert.match(staticBlock, /index:\s*false/);
 });
+
+test("every sitemap route is indexable client-side, not just server-side", async () => {
+  // The server sends index,follow, but syncSeoMetadata() runs after mount and
+  // overwrites robots for any Screen missing from PUBLIC_METADATA. Google
+  // renders JS, so that overwrite is what it acts on: /barkley was declared
+  // indexable server-side, shipped without a PUBLIC_METADATA entry, and its
+  // indexing request was rejected with "Excluded by 'noindex' tag".
+  const sitemap = await readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+  const routes = [...sitemap.matchAll(/<loc>https:\/\/pawsome3d\.com([^<]*)<\/loc>/g)]
+    .map((m) => m[1] || "/")
+    // Legal pages are server-rendered outside the SPA; product pages resolve
+    // through PRODUCT_VIEW rather than a route of their own.
+    .filter((r) => !r.startsWith("/legal/") && !r.startsWith("/product/"));
+
+  const screenFor = [...appSource.matchAll(/\[Screen\.([A-Z_]+)\]:\s*"([^"]*)"/g)]
+    .reduce((acc, [, screen, path]) => ({ ...acc, [path || "/"]: screen }), {});
+
+  const missing = [];
+  for (const route of routes) {
+    const screen = screenFor[route];
+    if (!screen) continue; // aliases like /custom-dog-figurines share a Screen
+    if (!seoSource.includes(`[Screen.${screen}]:`)) missing.push(`${route} (Screen.${screen})`);
+  }
+  assert.deepEqual(missing, [], `sitemap routes served noindex by the client: ${missing.join(", ")}`);
+});

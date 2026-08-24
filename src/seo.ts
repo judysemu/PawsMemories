@@ -63,6 +63,16 @@ const PUBLIC_METADATA: Partial<Record<Screen, { title: string; desc: string }>> 
     title: `How Custom 3D Pet Models Work | ${BRAND}`,
     desc: "Upload photos, personalize the model, check printability, and order your physical pet keepsake."
   },
+  // Absent from this map, a screen is treated as a private workspace and gets
+  // noindex,nofollow,noarchive. The server already sends index,follow for
+  // /barkley, but this runs after mount and overwrites it -- and Google renders
+  // JS, so the live test saw the noindex and rejected the indexing request. The
+  // route was added and marked indexable server-side without this entry, so it
+  // was never actually indexable. Keep the copy matching server/seoMeta.ts.
+  [Screen.BARKLEY]: {
+    title: `Meet Barkley: A Guided Tour of Pawsome3D | ${BRAND}`,
+    desc: "Take an interactive 3D tour with Barkley and see how a single pet photo becomes a textured, rigged model you can print, animate, or place in AR."
+  },
   [Screen.CREATE]: {
     title: `Create Your Custom 3D Pet Model | ${BRAND}`,
     desc: "Upload a photo to generate a custom 3D pet model, personalize it, and prepare for printing."
