@@ -44,6 +44,34 @@ warns and carries on without them.
 Optional: `X_POST_MIN_INTERVAL_MS` (cadence floor, default 6h),
 `X_WEBHOOK_URL` (only if registering the DM webhook).
 
+### Photo claims (optional, DM-only)
+
+Answering an inbound pet photo with a one-time studio link needs three more.
+All three are required together — the flag alone is ignored, because a mint
+call with no secret would mean DMing links that 401 on arrival.
+
+| Variable | Notes |
+|---|---|
+| `X_PHOTO_CLAIM_ENABLED` | `true` — exact string |
+| `PAWSOME_API_BASE` | `https://pawsome3d.com` — the main app that mints claims |
+| `X_CLAIM_SERVICE_SECRET` | must be the **same value** as the main app's copy, min 32 chars |
+
+The main app half is set separately, in the `pawsome3d.com` site's own
+environment: `X_CLAIM_SERVICE_SECRET` there, generated with
+`openssl rand -hex 32`. Without it `POST /api/x-claims` answers 404, so the
+main app can be deployed with this feature dark and switched on later.
+
+This path never starts a generation. It parks the photo and replies with a
+link into the studio, where the account, the PupCoin reservation and the view
+approval all still apply.
+
+**It additionally needs DM read access**, which the posting-only deployment
+does not have. Scheduled posting works without it; photo claims do not, because
+the service never sees the DM. Confirm the account's current API tier before
+setting these three, and note the v2 payload carries an opaque media key that
+needs a DM lookup with expansions — only the legacy `media_url_https` shape is
+downloadable as-is today, and anything else falls through to the plain reply.
+
 ## 3. Migrate
 
 ```bash
