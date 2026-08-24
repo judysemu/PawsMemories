@@ -77,3 +77,65 @@ test("the portrait ItemList matches the categories the catalog actually defines"
   assert.equal(list.itemListElement.length, FAMOUS_PORTRAIT_CATEGORIES.length);
   assert.equal(list.numberOfItems, FAMOUS_PORTRAIT_CATEGORIES.length);
 });
+
+test("the served HTML links to the pages the sitemap claims exist", () => {
+  // Navigation is React state, so these anchors are the only crawlable links on
+  // the site. When the block held just Privacy and Terms, those were the only
+  // pages Google crawled well and three sitemap URLs were never fetched at all.
+  const noscript = indexHtml.slice(
+    indexHtml.indexOf("<noscript>"),
+    indexHtml.indexOf("</noscript>"),
+  );
+  const linked = [...noscript.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]);
+
+  for (const route of ["/3d-pet-models", "/dog-3d-models", "/cat-3d-models", "/barkley"]) {
+    assert.ok(linked.includes(route), `${route} must be reachable by a crawlable link`);
+  }
+  assert.ok(linked.length >= 15, `expected a real link set, found ${linked.length}`);
+});
+
+test("every crawlable link points at a URL the sitemap actually declares", async () => {
+  const sitemap = await readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+  const noscript = indexHtml.slice(
+    indexHtml.indexOf("<noscript>"),
+    indexHtml.indexOf("</noscript>"),
+  );
+  // Linking somewhere the sitemap does not list means one of the two is stale,
+  // and a link to a dead route spends crawl budget on a 404.
+  for (const [, route] of noscript.matchAll(/href="(\/[^"]*)"/g)) {
+    assert.ok(
+      sitemap.includes(`<loc>https://pawsome3d.com${route}</loc>`),
+      `${route} is linked but absent from the sitemap`,
+    );
+  }
+});
+
+test("the sitemap carries a lastmod for every URL", async () => {
+  const sitemap = await readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8");
+  const locs = (sitemap.match(/<loc>/g) || []).length;
+  const mods = (sitemap.match(/<lastmod>/g) || []).length;
+  // lastmod is what tells Google which pages are worth recrawling. Without it
+  // the money pages went a month between crawls.
+  assert.equal(mods, locs, "every <loc> needs a <lastmod>");
+});
+
+test("token-bearing claim links are disallowed to crawlers", async () => {
+  const robots = await readFile(new URL("../public/robots.txt", import.meta.url), "utf8");
+  // Same class as /verify-email and /reset-password: an indexed token is a
+  // spent token, and these arrive by DM where they are trivially shared.
+  assert.match(robots, /^Disallow: \/claim\//m);
+});
+
+test("per-route injection replaces the noscript heading so pages are not duplicates", async () => {
+  const { injectMeta, PAGE_META } = await import("../server/seoMeta.ts");
+  const home = injectMeta(indexHtml, "/");
+  const pricing = injectMeta(indexHtml, "/pricing");
+
+  const headingOf = (html) => html.match(/<h1 id="noscript-heading">([\s\S]*?)<\/h1>/)[1];
+  assert.notEqual(headingOf(home), headingOf(pricing));
+  // The heading a crawler reads must agree with the title it is given, minus
+  // the brand suffix, and must arrive HTML-escaped.
+  const expected = PAGE_META["/pricing"].title.split("|")[0].trim().replace(/&/g, "&amp;");
+  assert.equal(headingOf(pricing), expected);
+  assert.doesNotMatch(headingOf(pricing), /\| Pawsome3D/);
+});

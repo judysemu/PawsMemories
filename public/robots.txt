@@ -14,5 +14,8 @@ Disallow: /sign-up
 # Token-bearing links from transactional email. Never indexable.
 Disallow: /verify-email
 Disallow: /reset-password
+# Same class, delivered by DM rather than email: /claim/<token> carries a
+# single-use photo-claim token. An indexed token is a spent token.
+Disallow: /claim/
 
 Sitemap: https://pawsome3d.com/sitemap.xml

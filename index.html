@@ -91,10 +91,41 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- The app navigates by React state, so this block is the only place the
+         served HTML contains real <a href> links. Before it existed the whole
+         site linked to exactly two pages -- Privacy and Terms -- which is why
+         those were the only ones Google crawled well, and why /barkley,
+         /dog-3d-models and /cat-3d-models were reported "URL is unknown to
+         Google" despite sitting in the sitemap.
+
+         The heading and description are rewritten per route by injectMeta();
+         without that every page served this same h1, so to a crawler all 29
+         routes looked like copies of one page whose visible heading contradicted
+         its own title. Keep the ids -- the injection matches on them. -->
     <noscript>
       <main>
-        <h1>Create 3D pet models, videos, and keepsakes with Pawsome3D</h1>
-        <p>Pawsome3D turns pet photos into 3D models, animated videos, custom styles, Pawprints designs, and shareable digital keepsakes.</p>
+        <h1 id="noscript-heading">Create 3D pet models, videos, and keepsakes with Pawsome3D</h1>
+        <p id="noscript-description">Pawsome3D turns pet photos into 3D models, animated videos, custom styles, Pawprints designs, and shareable digital keepsakes.</p>
+        <nav aria-label="Pawsome3D sections">
+          <ul>
+            <li><a href="/3d-pet-models">3D pet models</a></li>
+            <li><a href="/dog-3d-models">Dog 3D models</a></li>
+            <li><a href="/cat-3d-models">Cat 3D models</a></li>
+            <li><a href="/custom-dog-figurines">Custom dog figurines</a></li>
+            <li><a href="/pet-memorial-models">Pet memorial models</a></li>
+            <li><a href="/pet-professionals">For pet professionals</a></li>
+            <li><a href="/glb-pet-models-guide">GLB pet models guide</a></li>
+            <li><a href="/guides">Guides</a></li>
+            <li><a href="/how-it-works">How it works</a></li>
+            <li><a href="/pricing">Pricing</a></li>
+            <li><a href="/store">Shop</a></li>
+            <li><a href="/print-shop">Print shop</a></li>
+            <li><a href="/pawprints">Pawprints</a></li>
+            <li><a href="/barkley">Meet Barkley</a></li>
+            <li><a href="/denver">Denver</a></li>
+            <li><a href="/philadelphia">Philadelphia</a></li>
+          </ul>
+        </nav>
         <p><a href="/legal/privacy">Privacy Policy</a> · <a href="/legal/terms">Terms of Service</a></p>
       </main>
     </noscript>

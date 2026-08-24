@@ -189,6 +189,27 @@ export function injectMeta(html: string, pathname: string): string {
     .replace(/(<link\s+rel="canonical"\s+href=")[^"]*(")/i, `$1${esc(url)}$2`)
     .replace(/(<meta\s+property="og:url"\s+content=")[^"]*(")/i, `$1${esc(url)}$2`);
 
+  // The <noscript> block is the only body content in the served HTML, and it
+  // used to be identical on all 29 routes: every page presented the homepage's
+  // heading while its <title> said something else. Reusing the same PAGE_META
+  // that drives the title keeps the two in agreement by construction, so a
+  // crawler sees one coherent page rather than 29 near-duplicates.
+  if (meta) {
+    // The brand suffix earns its place in a <title>, where it disambiguates the
+    // result in a SERP. In an <h1> it just repeats what the page already says,
+    // so the heading takes the descriptive half only.
+    const heading = meta.title.split("|")[0].trim() || meta.title;
+    out = out
+      .replace(
+        /(<h1 id="noscript-heading">)[\s\S]*?(<\/h1>)/i,
+        `$1${esc(heading)}$2`,
+      )
+      .replace(
+        /(<p id="noscript-description">)[\s\S]*?(<\/p>)/i,
+        `$1${esc(meta.description)}$2`,
+      );
+  }
+
   // Sitewide Organization Structured Data
   const orgJsonLd = {
     "@context": "https://schema.org",
