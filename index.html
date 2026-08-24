@@ -54,6 +54,36 @@
             "url": "https://pawsome3d.com/",
             "description": "A web studio for creating 3D pet models, AI videos, custom styles, and printable keepsakes from photos.",
             "publisher": { "@id": "https://pawsome3d.com/#organization" }
+          },
+          {
+            "@type": "3DModel",
+            "@id": "https://pawsome3d.com/#barkley-presenter",
+            "name": "Barkley, the Pawsome3D presenter",
+            "description": "An animated 3D dog that guides visitors through the studio, rendered live in the browser.",
+            "encoding": {
+              "@type": "MediaObject",
+              "contentUrl": "https://pawsome3d.com/barkley/wave_bye.glb",
+              "encodingFormat": "model/gltf-binary"
+            },
+            "interactivityType": "rotate, zoom, animate",
+            "isPartOf": { "@id": "https://pawsome3d.com/#website" }
+          },
+          {
+            "@type": "ItemList",
+            "@id": "https://pawsome3d.com/#famous-portraits-collection",
+            "name": "Famous Pet Portraits & Themed Keepsakes",
+            "description": "Portrait categories a pet can be styled into, from historic figures to seasonal themes.",
+            "itemListOrder": "https://schema.org/ItemListUnordered",
+            "numberOfItems": 7,
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Historic Women" },
+              { "@type": "ListItem", "position": 2, "name": "Presidents & World Leaders" },
+              { "@type": "ListItem", "position": 3, "name": "Sports Legends" },
+              { "@type": "ListItem", "position": 4, "name": "Myth & Holiday" },
+              { "@type": "ListItem", "position": 5, "name": "Arts & Adventure" },
+              { "@type": "ListItem", "position": 6, "name": "Halloween" },
+              { "@type": "ListItem", "position": 7, "name": "Famous Landmarks" }
+            ]
           }
         ]
       }
