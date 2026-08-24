@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 55;
+export const CURRENT_SCHEMA_VERSION = 57;
 
 export interface Migration {
   version: number;
