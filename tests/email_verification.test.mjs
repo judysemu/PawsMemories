@@ -178,3 +178,25 @@ test("token-bearing links are never indexable", () => {
   assert.match(robots, /Disallow: \/verify-email/);
   assert.match(robots, /Disallow: \/reset-password/);
 });
+
+test("the post-signup screen asks for email verification and promises no credits", () => {
+  const raw = fs.readFileSync("src/components/Tutorial.tsx", "utf8");
+  // Strip block comments: the file documents the removed button on purpose, and
+  // that prose must not read as the promise still being rendered.
+  const tutorial = raw.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // "Finish & Claim 50 Credits" called no API and granted nothing -- there is no
+  // welcome-credit endpoint in the server. Every new account was promised fifty
+  // credits and given none, which is worse than offering nothing at all.
+  assert.doesNotMatch(tutorial, /Claim 50 Credits/i);
+  assert.doesNotMatch(tutorial, /\b50 Credits\b/i);
+
+  // Verification is the gate on the free first image and the only way to reach
+  // someone when a build finishes, so the screen must actually offer to send it.
+  assert.match(tutorial, /sendVerificationEmail/);
+
+  // The screen shipped with onboarding copy from a different product.
+  for (const stale of [/Grand Canyon/i, /dream destination/i, /googleusercontent/i]) {
+    assert.doesNotMatch(tutorial, stale, `stale copy from another product: ${stale}`);
+  }
+});

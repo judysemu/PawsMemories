@@ -1004,7 +1004,13 @@ export default function App() {
                 />
               )}
 
-              {currentScreen === Screen.TUTORIAL && <Tutorial onComplete={handleTutorialComplete} />}
+              {currentScreen === Screen.TUTORIAL && (
+                <Tutorial
+                  onComplete={handleTutorialComplete}
+                  email={userProfile.email}
+                  emailVerified={userProfile.emailVerified}
+                />
+              )}
 
               {currentScreen === Screen.EDIT_MEMORY && userProfile.isAdmin && (
                 <EditMemory
