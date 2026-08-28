@@ -215,7 +215,9 @@ const SHELL_NAV_ICONS: Record<string, React.ComponentType<{ size?: number; strok
   "fur-bin": Archive,
   pawprints: PawPrint,
   bim: Building2,
-  "wags-inbox": Gift,
+  // Shop reuses the retired Wags glyph on both the desktop sidebar and the
+  // mobile bottom bar, per owner request.
+  store: Gift,
 };
 
 export default function App() {

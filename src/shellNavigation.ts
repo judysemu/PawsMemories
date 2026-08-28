@@ -59,9 +59,17 @@ export const SHELL_ICON_NAV: ShellIconNavItem[] = [
 export const SIDEBAR_NAV: ShellNavigationItem[] = [
   { id: "home", label: "Home", screen: Screen.DASHBOARD, materialIcon: "home" },
   { id: "pawprints", label: "Pawprints", screen: Screen.PAWPRINTS, materialIcon: "auto_stories" },
+  // Shop sits directly under Pawprints on desktop: it is where a finished
+  // PawPrint becomes a physical Shopify order, so the two read as one flow.
+  // It inherits the Wags glyph (materialIcon "redeem" / lucide Gift) per owner
+  // request.
+  { id: "store", label: "Shop", screen: Screen.STORE, materialIcon: "redeem" },
   { id: "animate", label: "Fur Reels", screen: Screen.ANIMATOR, materialIcon: "movie_creation", imageSrc: "/brand/fur-reels-icon.png" },
   { id: "fur-bin", label: "Fur Bin©️", screen: Screen.FURBIN, materialIcon: "inventory_2" },
-  { id: "wags-inbox", label: "Wags", screen: Screen.WAGS_INBOX, materialIcon: "redeem" },
+  // 2026-08-28: "Wags" removed from the left panel and bottom bar per owner
+  // request. Screen.WAGS_INBOX, its /wags route and WagsInboxScreen all still
+  // exist, so this is a nav-only removal (same shape as the Scaled BIM removal
+  // below), not a feature deletion.
   // 2026-07-30: "Scaled BIM" removed from the left panel per owner request —
   // BIM modeling has been split into its own project (see memory:
   // pawsome3d-ar-bim-retirement). Screen.BIM route/component still exist so
@@ -92,7 +100,18 @@ export const SIDEBAR_NAV: ShellNavigationItem[] = [
  * the profile overflow menu (it was already listed in SHELL_MENU_ITEMS). A paid
  * module (Fur Reels) outranks a help link for primary navigation, and keeping
  * the bar at five slots preserves label legibility at 390 px.
+ *
+ * 2026-08-28: Shop is pinned to the LAST slot on mobile even though it sits
+ * second on desktop. The owner asked for it at the bottom of the phone bar, and
+ * the two orders can differ because the bottom bar is read right-to-left toward
+ * the thumb rather than top-down like the sidebar.
  */
-export const MOBILE_NAV: ShellNavigationItem[] = SIDEBAR_NAV.filter(
-  (item) => item.screen !== Screen.PROFILE && item.screen !== Screen.VOICE_TEST
-);
+const MOBILE_TRAILING_IDS = new Set(["store"]);
+
+const inMobileBar = (item: ShellNavigationItem) =>
+  item.screen !== Screen.PROFILE && item.screen !== Screen.VOICE_TEST;
+
+export const MOBILE_NAV: ShellNavigationItem[] = [
+  ...SIDEBAR_NAV.filter((item) => inMobileBar(item) && !MOBILE_TRAILING_IDS.has(item.id)),
+  ...SIDEBAR_NAV.filter((item) => inMobileBar(item) && MOBILE_TRAILING_IDS.has(item.id)),
+];
