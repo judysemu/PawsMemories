@@ -13,13 +13,14 @@ test("top panel exposes Create, Voice Test, Pawprints, and the staged 3D Model s
 });
 
 test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () => {
-  // WAGS_INBOX is a content destination (like Fur Bin), not a creation studio.
+  // 2026-08-28: Wags removed from the shell entirely; Shop (Screen.STORE, the
+  // Shopify catalog) takes its glyph and sits directly under Pawprints.
   assert.deepEqual(SIDEBAR_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.PAWPRINTS,
+    Screen.STORE,
     Screen.ANIMATOR,
     Screen.FURBIN,
-    Screen.WAGS_INBOX,
   ]);
   // MOBILE_NAV is NOT "sidebar + Profile". Profile and Voice Test both have a
   // permanent one-tap route in the header (SHELL_ICON_NAV), so repeating them
@@ -27,14 +28,20 @@ test("desktop sidebar exposes the approved Pawprints and Fur Reels studios", () 
   // (ANIMATOR) was restored to the bottom bar by LIVE-1 — it is a paid module
   // with no other mobile entry point. Help was moved to the profile overflow
   // menu so the bar stays at five slots.
+  // Shop is last on mobile even though it is second on desktop — the owner
+  // asked for it at the bottom of the phone bar.
   assert.deepEqual(MOBILE_NAV.map(({ screen }) => screen), [
     Screen.DASHBOARD,
     Screen.PAWPRINTS,
     Screen.ANIMATOR,
     Screen.FURBIN,
-    Screen.WAGS_INBOX,
+    Screen.STORE,
   ]);
   assert.ok(!SIDEBAR_NAV.some(({ screen }) => screen === Screen.MODELS || screen === Screen.PAWLISHER));
+  // Wags is gone from both panels; its route and screen component remain.
+  for (const panel of [SIDEBAR_NAV, MOBILE_NAV]) {
+    assert.ok(!panel.some(({ screen }) => screen === Screen.WAGS_INBOX));
+  }
 });
 
 test("mobile bottom bar only duplicates the requested Pawprints destination", () => {
