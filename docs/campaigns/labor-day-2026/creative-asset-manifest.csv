@@ -1,0 +1,10 @@
+Campaign,Asset type,Required ratio or format,Candidate,Readiness,Action
+3D Models,Landscape image,1200x628 minimum,public/featured-models/shiba-inu.jpg,Local candidate only,Review crop and rights before upload
+3D Models,Square image,1200x1200 minimum,public/featured-models/boston-terrier.jpg,Local candidate only,Review crop and rights before upload
+3D Models,Vertical image,960x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
+3D Models,Video,YouTube-hosted video,Google Drive video,Blocked,Reconnect Drive then approve and publish video to the correct YouTube channel
+PawPrint Shop,Landscape image,1200x628 minimum,public/collections/historic-pawprints/historic-pawprints-20-v1.webp,Local candidate only,Create compliant single-creative crop after approval
+PawPrint Shop,Square image,1200x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
+PawPrint Shop,Vertical image,960x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
+PawPrint Shop,Video,YouTube-hosted video,Google Drive video,Blocked,Reconnect Drive then approve and publish video to the correct YouTube channel
+Shared,Audio,Not used in Search ads,Google Drive sound,Blocked,Reserve for a later video campaign after rights review

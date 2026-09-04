@@ -24,7 +24,7 @@ test("Shop exposes only the public Shopify catalog and completed PawPrint downlo
   assert.doesNotMatch(home, /Explore the 3D Pet Marketplace|Browse Marketplace|MARKETPLACE_CATEGORIES/);
   assert.doesNotMatch(app, /MarketplaceScreen|MarketplaceAdminScreen/);
   assert.match(store, /fetch\("\/api\/store\/products"\)/);
-  assert.match(store, /href=\{product\.productUrl\}/);
+  assert.match(store, /laborDayEligible \? laborDayDiscountUrl\(product\.productUrl\) : product\.productUrl/);
   assert.match(store, /Download clean image/);
   assert.match(store, /Download layout \+ words/);
   assert.ok(fs.existsSync("src/components/PrintRequestForm.tsx"), "legacy source stays preserved outside the route");

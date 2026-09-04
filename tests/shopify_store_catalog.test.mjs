@@ -62,7 +62,7 @@ test("Store is public, links directly to Shopify, and offers both PawPrint downl
   assert.match(app, /PUBLIC_SCREENS[\s\S]*Screen\.STORE/);
   assert.match(app, /\/store\?pawprint=\$\{pawprintId\}/);
   assert.match(store, /fetch\("\/api\/store\/products"\)/);
-  assert.match(store, /href=\{product\.productUrl\}/);
+  assert.match(store, /laborDayEligible \? laborDayDiscountUrl\(product\.productUrl\) : product\.productUrl/);
   assert.match(store, /target="_blank"/);
   assert.match(store, /Download clean image/);
   assert.match(store, /Download layout \+ words/);

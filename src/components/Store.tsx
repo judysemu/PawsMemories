@@ -9,6 +9,36 @@ interface PawprintDownloadSummary {
   composedDownloadUrl: string;
 }
 
+export const LABOR_DAY_SALE = {
+  code: "LABORDAY30",
+  discountPercent: 30,
+  usageLimit: 100,
+  startsAt: "2026-09-04T18:25:04Z",
+  endsAt: "2026-09-14T05:59:59Z",
+  eligibleHandles: new Set([
+    "cute-pillow-cute-linen-pillow-case-20-x-12-one-side-ships-from-usa",
+    "christmas-stocking-christmas-stocking-without-folded-top",
+    "tree-skirt-christmas-tree-skirt",
+    "halloween-spaniel-custom-7cm-round-crystal-glass-ornament-red-gift-box-ships-from-usa",
+    "halloween-shiba-custom-7cm-round-crystal-glass-ornament-red-gift-box-ships-from-usa",
+  ]),
+} as const;
+
+export function isLaborDaySaleActive(now = Date.now()): boolean {
+  return now >= Date.parse(LABOR_DAY_SALE.startsAt) && now <= Date.parse(LABOR_DAY_SALE.endsAt);
+}
+
+export function laborDayDiscountUrl(productUrl: string): string {
+  try {
+    const target = new URL(productUrl);
+    if (!target.hostname.endsWith(".myshopify.com")) return productUrl;
+    const redirect = `${target.pathname}${target.search}`;
+    return `${target.origin}/discount/${LABOR_DAY_SALE.code}?redirect=${encodeURIComponent(redirect)}`;
+  } catch {
+    return productUrl;
+  }
+}
+
 function money(amount: string, currencyCode: string): string {
   const value = Number(amount);
   try {
@@ -23,6 +53,12 @@ function productPrice(product: ShopifyStoreProduct): string {
   return product.minPrice === product.maxPrice ? min : `From ${min}`;
 }
 
+function laborDayPrice(product: ShopifyStoreProduct): string {
+  const multiplier = 1 - LABOR_DAY_SALE.discountPercent / 100;
+  const min = money((Number(product.minPrice) * multiplier).toFixed(2), product.currencyCode);
+  return product.minPrice === product.maxPrice ? min : `From ${min}`;
+}
+
 export default function Store() {
   const [products, setProducts] = useState<ShopifyStoreProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +68,7 @@ export default function Store() {
   const [pawprintLoading, setPawprintLoading] = useState(false);
   const [pawprintError, setPawprintError] = useState("");
   const [downloading, setDownloading] = useState<"clean" | "composed" | null>(null);
+  const laborDaySaleActive = isLaborDaySaleActive();
 
   const requestedPawprintId = useMemo(() => {
     const value = Number(new URLSearchParams(window.location.search).get("pawprint"));
@@ -105,6 +142,22 @@ export default function Store() {
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-on-surface-variant sm:text-base">Browse the latest products from our Shopify store. Products marked for PawPrint personalization open directly on Shopify, where you upload and position your finished image.</p>
       </header>
 
+      {laborDaySaleActive && (
+        <section className="mt-6 rounded-3xl border border-primary/35 bg-primary/10 p-5 sm:p-6" aria-labelledby="labor-day-sale-title">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[.18em] text-primary">Labor Day Week</p>
+              <h2 id="labor-day-sale-title" className="mt-1 text-2xl font-black text-on-surface">30% off select PawPrint-ready gifts</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-on-surface-variant">
+                Use code <strong className="text-on-surface">{LABOR_DAY_SALE.code}</strong> in Shopify. Limited to the first {LABOR_DAY_SALE.usageLimit} redemptions, one per customer, through September 13 at 11:59 PM Mountain Time.
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">New here? Create a free account, then confirm your email to unlock one free pet image.</p>
+            </div>
+            <a href="/sign-up" className="flex min-h-12 shrink-0 items-center justify-center rounded-xl border border-primary/35 bg-surface px-5 text-sm font-black text-primary">Create free account</a>
+          </div>
+        </section>
+      )}
+
       {requestedPawprintId && (
         <section className="mt-6 rounded-3xl border border-emerald-600/30 bg-emerald-600/10 p-5 sm:p-6" aria-live="polite">
           <div className="flex items-start gap-3">
@@ -138,20 +191,25 @@ export default function Store() {
           <div className="rounded-3xl border border-outline-variant/30 bg-surface p-8 text-center"><Sparkles className="mx-auto text-primary" /><h3 className="mt-3 font-black text-on-surface">The catalog is being refreshed</h3><p className="mt-2 text-sm text-on-surface-variant">Please check back after the next Shopify sync.</p></div>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {products.map((product) => (
+            {products.map((product) => {
+              const laborDayEligible = laborDaySaleActive && LABOR_DAY_SALE.eligibleHandles.has(product.handle);
+              return (
               <article key={product.id} className="overflow-hidden rounded-3xl border border-outline-variant/25 bg-surface shadow-lg">
                 <div className="aspect-square bg-surface-container-low">
                   {product.featuredImageUrl ? <img src={product.featuredImageUrl} alt={product.featuredImageAlt || product.title} className="h-full w-full object-cover" loading="lazy" /> : <div className="grid h-full place-items-center text-primary/50"><PawPrint size={52} /></div>}
                 </div>
                 <div className="p-5">
                   {product.pawprintPersonalizable && <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-primary"><PawPrint size={12} /> PawPrint personalizable</span>}
+                  {laborDayEligible && <span className="ml-2 inline-flex items-center rounded-full bg-secondary/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-secondary">30% off</span>}
                   <h3 className="mt-3 text-lg font-black text-on-surface">{product.title}</h3>
                   {product.description && <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-on-surface-variant">{product.description}</p>}
-                  <div className="mt-4 flex items-center justify-between gap-3"><span className="font-black text-on-surface">{productPrice(product)}</span><span className={`text-xs font-bold ${product.availableForSale ? "text-emerald-700 dark:text-emerald-300" : "text-on-surface-variant"}`}>{product.availableForSale ? "Available" : "Unavailable"}</span></div>
-                  <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className={`mt-4 flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-center text-sm font-black ${product.availableForSale ? "bg-primary text-on-primary" : "pointer-events-none bg-outline-variant/30 text-on-surface-variant"}`} aria-disabled={!product.availableForSale}>{product.pawprintPersonalizable ? "Personalize with your PawPrint" : "View on Shopify"}<ExternalLink size={15} /></a>
+                  <div className="mt-4 flex items-center justify-between gap-3"><span className="font-black text-on-surface">{laborDayEligible ? <><span className="mr-2 text-sm font-bold text-on-surface-variant line-through">{productPrice(product)}</span>{laborDayPrice(product)}</> : productPrice(product)}</span><span className={`text-xs font-bold ${product.availableForSale ? "text-emerald-700 dark:text-emerald-300" : "text-on-surface-variant"}`}>{product.availableForSale ? "Available" : "Unavailable"}</span></div>
+                  {laborDayEligible && <p className="mt-2 text-xs font-bold text-secondary">Price with {LABOR_DAY_SALE.code} at Shopify checkout.</p>}
+                  <a href={laborDayEligible ? laborDayDiscountUrl(product.productUrl) : product.productUrl} target="_blank" rel="noopener noreferrer" className={`mt-4 flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-center text-sm font-black ${product.availableForSale ? "bg-primary text-on-primary" : "pointer-events-none bg-outline-variant/30 text-on-surface-variant"}`} aria-disabled={!product.availableForSale}>{laborDayEligible ? `Shop 30% off with ${LABOR_DAY_SALE.code}` : product.pawprintPersonalizable ? "Personalize with your PawPrint" : "View on Shopify"}<ExternalLink size={15} /></a>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
