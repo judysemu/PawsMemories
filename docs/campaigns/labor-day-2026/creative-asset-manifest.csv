@@ -1,10 +1,15 @@
-Campaign,Asset type,Required ratio or format,Candidate,Readiness,Action
-3D Models,Landscape image,1200x628 minimum,public/featured-models/shiba-inu.jpg,Local candidate only,Review crop and rights before upload
-3D Models,Square image,1200x1200 minimum,public/featured-models/boston-terrier.jpg,Local candidate only,Review crop and rights before upload
-3D Models,Vertical image,960x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
-3D Models,Video,YouTube-hosted video,Google Drive video,Blocked,Reconnect Drive then approve and publish video to the correct YouTube channel
-PawPrint Shop,Landscape image,1200x628 minimum,public/collections/historic-pawprints/historic-pawprints-20-v1.webp,Local candidate only,Create compliant single-creative crop after approval
-PawPrint Shop,Square image,1200x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
-PawPrint Shop,Vertical image,960x1200 minimum,Google Drive asset,Blocked,Reconnect Drive and choose approved file
-PawPrint Shop,Video,YouTube-hosted video,Google Drive video,Blocked,Reconnect Drive then approve and publish video to the correct YouTube channel
-Shared,Audio,Not used in Search ads,Google Drive sound,Blocked,Reserve for a later video campaign after rights review
+Campaign,Asset type,Observed dimensions or format,Candidate,Readiness,Action
+Existing PMax,Asset group,11 images plus 1 logo plus 2 videos,Google Ads campaign 24211184790,Enabled eligible UI readback,Inspect all existing media before replacing user additions
+3D Models,Image,800x1000,public/featured-models/shiba-inu.jpg,Reference only,Create appropriate crop and validate upload requirements
+3D Models,Image,800x1000,public/featured-models/boston-terrier.jpg,Reference only,Not a delivered square or landscape asset
+PawPrint Shop,Collage,1254x1254,public/collections/historic-pawprints/historic-pawprints-20-v1.webp,Reference only,Review a single-product creative rather than claiming a finished landscape asset
+3D Models,Input photo,PNG dimensions unverified,https://drive.google.com/file/d/1rzUiee978R_yhmUPCM2cS9EDGKjtznmm/view?usp=drivesdk,Metadata verified,Inspect MM-pawsome-img-shiba.png
+3D Models,Output image,PNG dimensions unverified,https://drive.google.com/file/d/1K_3YXz_gQVTCMl24crSPQ15s5yrkAr55/view?usp=drivesdk,Metadata verified,Inspect MM-pawsome-3d-shiba.png
+PawPrint Shop,Holiday creative,PNG dimensions unverified,https://drive.google.com/file/d/13ueamGmRWefcxHNCXyVNXpF6W6zLQzlG/view?usp=drivesdk,Metadata verified,Inspect PPholiday1.png and match advertised products
+PawPrint Shop,Halloween creative,JPEG dimensions unverified,https://drive.google.com/file/d/1W_z4hb9VA4qReNGejBHArGdxQyan3XYV/view?usp=drivesdk,Metadata verified,Inspect PPhalloween.jpg and match advertised products
+Shared,Logo,PNG dimensions unverified,https://drive.google.com/file/d/1wGr1DeBeY265k257rdwZorgg4w4LPljT/view?usp=drivesdk,Metadata verified,Inspect pawsomelogo1.png
+3D Models,Printing sequence,MP4 duration unverified,https://drive.google.com/file/d/1qfz_UPuwmrCo0m3iwVLMNdSVVgLSx8Lm/view?usp=drivesdk,Metadata verified,Inspect Woman_3D_prints_cat_model_202608220922.mp4
+3D Models,Model creation sequence,MP4 duration unverified,https://drive.google.com/file/d/1hGvMhU3bXtMOzx7HtjS8jjr36iMZi6W1/view?usp=drivesdk,Metadata verified,Inspect Mother_creates_3D_cat_model_202608220922.mp4
+Shared,Branded short,MP4 audio claims unverified,https://drive.google.com/file/d/15OYkTWZP1KyEBj59nDuk8lFmGy_EAGlq/view?usp=drivesdk,Claims review required,Related script promises unverified hand-painted miniatures; do not publish unchanged without checking
+Shared,Dog-walk ambience,WAV duration and rights unverified,https://drive.google.com/file/d/1ApM-Ft0Qt02rFhUh-JR7nc_2WFTz2A9V/view?usp=drivesdk,Metadata verified,Inspect 15dog-walk.wav and commercial rights before video use
+Shared,Dog-park ambience,WAV duration and rights unverified,https://drive.google.com/file/d/19CK0AlPEj7hU8P-OPSh0xsXyo7PxtD5j/view?usp=drivesdk,Metadata verified,Inspect 30dog-park.wav and commercial rights before video use

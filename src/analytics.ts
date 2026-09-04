@@ -12,6 +12,8 @@
  * visitor" here, because building one means identifying people.
  */
 
+import { captureCampaign } from "./campaignAttribution";
+
 const ENDPOINT = "/api/analytics/pageview";
 
 /**
@@ -46,7 +48,8 @@ export function trackPageView(path?: string): void {
   if (typeof window === "undefined") return;
 
   try {
-    readCampaign(window.location.search);
+    const retainedLabels = captureCampaign(window.location.search);
+    readCampaign(retainedLabels.toString());
 
     const body = JSON.stringify({
       path: path ?? window.location.pathname,

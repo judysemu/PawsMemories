@@ -1,3 +1,111 @@
+# Pawsome3D Labor Day campaign handoff
+
+Snapshot: 2026-09-04 17:46 MDT. Update this file only when the user commands an update. This is a factual checkpoint, not a claim that the project is finished. The earlier engineering handoff is preserved below.
+
+## Current request and authority
+
+- Finish two distinct Labor Day campaigns promoting Pawsome3D, PawPrint portraits, 3D models/printing, and Shopify products; use the owner's Drive media, publish the storefront offer, and verify traffic/sales measurement.
+- Google Ads customer ID: `340-191-5907` (an account ID, not an ad ID).
+- **Approved combined average daily budget: $30/day.** The user explicitly reconfirmed this after an ambiguous $50 message. Do not increase it to $50 or assign $30 to each campaign.
+- Publishing is already authorized. Ask only for genuinely missing decisions/access; payment credentials must be entered privately by the user.
+- Promotion flight in the prepared offer: September 4–13, 2026, ending 11:59:59 PM Mountain Time. Recheck actual campaign dates before launch.
+- Actual repository: `/Users/robert/PawsMemories`; remote `https://github.com/judysemu/PawsMemories.git`. The desktop-supplied `/Users/robert/Desktop/claude7126/PawsMemories` path is stale. Set working directories explicitly.
+
+## Verified live state
+
+| Component | Verified state | Remaining work |
+| --- | --- | --- |
+| User-added Google Ads campaign | `24211184790`, **Pawsome3D Labor Day**, Performance Max, Eligible (Learning), $14.80/day | Preserve and inspect full settings, destination, all claims, conversion goals, and dates. Do not duplicate it blindly. |
+| Asset Group 1 | Enabled/Eligible, Average ad strength; 11 images, 1 logo, 2 videos, 15 headlines, 3 long headlines, 5 descriptions | Media contents and complete copy not yet reviewed; counts are UI readback, not creative approval. |
+| Google Ads billing | Banner: **New form of payment required — Your current payment methods can't be charged.** | User must correct billing privately. Campaign eligibility is not evidence of actual delivery. |
+| Second campaign | Prepared Search CSV exists; a second published campaign has not been verified | Inspect all campaigns before creating another. Keep combined authorized budget at $30/day. |
+| Shopify offer | `LABORDAY30` created and read back: 30% off five products, 100 uses total, once per customer | Recheck current usage and checkout behavior; do not exhaust the code to test its limit. |
+| Website sale UI | Implemented and pushed in `5403a368bcac399c1d057d847961c8d7c8a20500` | Hostinger deployment remains incomplete. |
+| Production | Latest `/version` check still reported `2411fbdc60f15dd42209be04e92e1a67cf4e7495`, August 28/schema 58 | Upload/redeploy the verified release, then verify the production version and sale UI. |
+| Conversion measurement | Existing code has aggregate first-party pageviews; no working Google Ads purchase tag/action verified | Implement consent-aware attribution and actual purchase/signup tracking; verify IDs, value/currency, transaction-ID deduplication, and Shopify integration. |
+| Google Drive | Connected; newer marketing/video/audio folders discovered | Inspect actual media and claims before selecting or replacing published assets. |
+
+Live campaign page: https://ads.google.com/aw/assetgroup?campaignId=24211184790&ocid=8437766595
+
+Older Smart wizard reference: campaign `24068028228`. It previously received Pawsome3D/3D/free-image text but was not published by this agent. Its current existence/status is unverified; check for duplicate spend.
+
+## Completed deliverables and evidence
+
+- Campaign package: `docs/campaigns/labor-day-2026/` contains campaign plan, campaign settings CSV, two responsive Search ads, keywords, product margins, and candidate creative manifest. Each RSA has 15 headlines and four descriptions; character limits validated. CSV drafts are paused and are not proof of account import/publication.
+- Store implementation: `src/components/Store.tsx` has date-limited banner, eligible-product sale prices and Shopify discount redirects. `tests/labor_day_sale_store.test.mjs` covers the offer. Earlier focused verification passed 17 tests, TypeScript, and production build. Full suite was not green: three database-dependent tests could not connect to local MySQL.
+- Verified release ZIP: `/Users/robert/PawsMemories/pawsome3d-deploy.zip`, 87,917,360 bytes; SHA-256 `28ccd22b8c03938814ae00d018f11f09f2677a7b7c10b04bc05d3783f76562cc`. Built from `5403a36`; rebuild if source changes before deployment.
+- Dashboard: `/Users/robert/.codex/visualizations/2026/09/04/01a06da6-809f-7863-af01-eb06b69b3b2a/pawsome3d-labor-day-dashboard.html`. Responsive checks passed at 390/768/1280 widths. Launch-status/target annotations need refresh before final delivery.
+- Hostinger deployment is manual, not GitHub auto-deploy: Websites → pawsome3d.com → Deployments → Settings and redeploy → Upload new files → ZIP → redeploy. See repository README and `scripts/build-deploy-zip.sh`. Preserve production environment settings and never include `.env` in an upload.
+- Supported local runtime is Node 24; installed Node 24.18 via nvm. Use the repository-supported version for tests/builds.
+
+## Offer and margin truth
+
+Shopify price rule `1848165662901`; eligible product IDs: `10564768071861`, `10564768137397`, `10564768170165`, `10564768202933`, `10564768235701`. Start `2026-09-04T18:25:04Z`; end `2026-09-14T05:59:59Z`.
+
+| Product | Regular | Unit cost | 30%-off price | Gross profit | Sale gross margin |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linen pillow case 20×12 | $16.49 | $3.99 | $11.54 | $7.55 | 65.4% |
+| Christmas stocking | $44.99 | $9.59 | $31.49 | $21.90 | 69.5% |
+| Christmas tree skirt | $44.99 | $15.99 | $31.49 | $15.50 | 49.2% |
+| Halloween Spaniel crystal ornament | $29.99 | $5.49 | $20.99 | $15.50 | 73.8% |
+| Halloween Shiba crystal ornament | $29.99 | $5.49 | $20.99 | $15.50 | 73.8% |
+
+These are gross margins before payment fees, shipping/fulfillment adjustments, returns, tax and ads. Gross profit is only a pre-other-cost break-even CPA, not a profitable acquisition target. Conservative unvalidated planning caps are $4 pillow case, $10 stocking, $8 skirt/ornaments, subject to complete costs. Tree-skirt break-even ROAS is already 2.032 before other costs, so a 2.0 ROAS target is insufficient.
+
+- Email verification unlocks **one free pet image**, not a free PawPrint product, 3D model, or physical print. Do not expand the entitlement in ads.
+- $39.99 Shopify 3D model is excluded from the sale because unit cost is missing. Digital PawPrint/model prices are credit-based and lack audited per-order costs.
+- Stripe configuration was ready on the site; no real paid purchase was performed. Shopify's actual underlying payment gateway was not independently verified. Do not equate either with Google Ads billing.
+- Do not promise hand-painted miniatures, included pillow inserts, or a live in-house mesh generator without product/fulfillment proof.
+
+## Audit corrections pending at this snapshot
+
+1. RSA `Shop Select Gifts for 30%` is misleading: use `Save 30% On Select Pet Gifts`. Use `PawPrint Pillow Covers`, not an implied pillow with insert.
+2. Correct old $10 pillow CPA/$15 other-product CPA/2.0 ROAS targets as above.
+3. Preserve attribution through signup and Shopify links. Existing UTM capture is memory-only and does not persist across full navigation; do not send click identifiers to the privacy-preserving aggregate pageview endpoint. Advertising identifiers require a consent-aware implementation.
+4. Sale-card price logic only checks dates, not the 100-use exhaustion state; make conditional availability explicit or implement verified availability.
+5. Campaign README/plan still contain stale missing-budget/customer-ID/Drive statements. This snapshot supersedes those statements; refresh the pack before final delivery.
+6. Local image candidates are 800×1000, not the larger square/landscape sizes claimed in the manifest; those variants are not completed deliverables.
+
+An implementation agent was asked to make bounded copy/economics/attribution fixes, but no such changes were present in the latest root git-status read. Recheck the worktree before continuing; do not assume fixes landed or passed tests.
+
+## Owner media additions
+
+- Videos (71 items): https://drive.google.com/drive/folders/1blU8jMtfy5VerFer2HgM06rD-HAH4DVT
+- Marketing material (22): https://drive.google.com/drive/folders/1aww6453JYtGsBtRA3NQ2llCbaU7lkDRb
+- Audio (16 WAVs): https://drive.google.com/drive/folders/13514LtLWMkF3EEO-P5WQUr_7VV3hc2vc
+- Marketing templates (36): https://drive.google.com/drive/folders/17pzzfGpg8RZtDH4jfPiIZBdqflp16LPW
+- Earlier pawsome3D folder (28): https://drive.google.com/drive/folders/1AKnHmo7EOxRGwSzjRYPkO0cuNNhOaxRL
+
+Useful observed candidates: `MM-pawsome-img-shiba.png`, `MM-pawsome-3d-shiba.png`, `PPholiday1.png`, `PPhalloween.jpg`, `bestbudpawprint.webp`, `pawsomelogo1.png`, `Woman_3D_prints_cat_model_202608220922.mp4`, `Mother_creates_3D_cat_model_202608220922.mp4`, `man-dog-laptop-rl-10.mp4`. Metadata only; actual visual/audio suitability was not verified.
+
+`pawsome3d-short-script` promises a hand-painted miniature; inspect related `pawsome3d-short-audio.mp4` before use. Audio filenames do not establish commercial licensing. The August 29 marketing strategy document is general workflow, not a new offer or budget authorization.
+
+Drive raw fetch returned a sediment file reference but no local materializer was available. Use supported authenticated file access or the normal browser download workflow for ad uploads; do not claim the file was visually reviewed from metadata.
+
+## Resume checklist
+
+1. Inspect all current campaigns, budgets, dates, destinations and goals; preserve user media and prevent duplicate campaigns/spend. Campaign settings button press was attempted, but UI readback remained on asset groups: no settings change was verified.
+2. Have the user privately resolve Google Ads billing. Continue independent implementation while access permits; never request payment details in chat.
+3. Complete bounded offer/copy/attribution fixes and tests. Obtain real tag/action IDs from the account; do not invent them. Validate purchase events without duplicate revenue and respect consent.
+4. Deploy the current verified ZIP through Hostinger and check `/version`, `/store`, signup and discount checkout behavior on mobile/desktop.
+5. Complete the distinct PawPrint sales campaign after checking for an existing one; combined average budgets must not exceed $30/day. Standard Google daily budgets can vary daily; do not describe an average as a hard per-day charge cap.
+6. Audit full assets and terms, then verify publication/status and measurement. Update the campaign pack/dashboard to actual state. Report blockers explicitly instead of calling drafts or a pushed commit a live deployment.
+7. Update this handoff only on user command, preserving the historical section and distinguishing observed results from planned work.
+
+## Local safety and tooling
+
+- Preserve user additions: `docs/architecture/pawsome3d-system-architecture.html`, `.visual-check.json`, and `.architecture.json` (full basenames as listed by git). They are untracked internal documentation, not verified production behavior or ready ad artwork. `google-ads-wizard-current.png` is also untracked.
+- No Ads API credentials/developer token were found earlier. Browser accessibility is usable; Chrome JavaScript via Apple Events is disabled. Do not change browser security settings casually.
+- `/private/tmp/pawsome-ads-accessibility.js` supports read/press/fill/readsub. Refresh the UI tree before using paths; select the actual Ads tab and verify every write by readback. `.click()`/AXPress may no-op; focused keyboard actions have sometimes worked. Never rely on stale tab indexes.
+- The generic patch tool did not see the actual host files. Host-native `apply_patch` through an approved escalated command worked; discover its path with `command -v apply_patch` and use an explicit real working directory. Do not use arbitrary shell file-write workarounds.
+- No source commit, campaign settings change, budget change, or Hostinger deployment was made during this latest audit checkpoint.
+
+---
+
+# Historical engineering handoff — preserved unchanged
+
+The following dated material concerns earlier in-house 3D work. It is historical context, not current campaign completion evidence or authority to provision unrelated infrastructure.
+
 # Pawsome3D in-house 3D handoff
 
 Last updated: 2026-08-05 12:43 MDT

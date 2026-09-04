@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Download, ExternalLink, Loader2, PackageOpen, PawPrint, RefreshCw, Sparkles } from "lucide-react";
 import type { ShopifyStoreProduct } from "../../shared/shopifyStoreCatalog";
 import { authedFetch } from "../api";
+import { withCampaignAttribution } from "../campaignAttribution";
 
 interface PawprintDownloadSummary {
   pawprintId: number;
@@ -30,7 +31,7 @@ export function isLaborDaySaleActive(now = Date.now()): boolean {
 
 export function laborDayDiscountUrl(productUrl: string): string {
   try {
-    const target = new URL(productUrl);
+    const target = new URL(withCampaignAttribution(productUrl));
     if (!target.hostname.endsWith(".myshopify.com")) return productUrl;
     const redirect = `${target.pathname}${target.search}`;
     return `${target.origin}/discount/${LABOR_DAY_SALE.code}?redirect=${encodeURIComponent(redirect)}`;
@@ -153,7 +154,7 @@ export default function Store() {
               </p>
               <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">New here? Create a free account, then confirm your email to unlock one free pet image.</p>
             </div>
-            <a href="/sign-up" className="flex min-h-12 shrink-0 items-center justify-center rounded-xl border border-primary/35 bg-surface px-5 text-sm font-black text-primary">Create free account</a>
+            <a href={withCampaignAttribution("/sign-up")} className="flex min-h-12 shrink-0 items-center justify-center rounded-xl border border-primary/35 bg-surface px-5 text-sm font-black text-primary">Create free account</a>
           </div>
         </section>
       )}
@@ -204,8 +205,8 @@ export default function Store() {
                   <h3 className="mt-3 text-lg font-black text-on-surface">{product.title}</h3>
                   {product.description && <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-on-surface-variant">{product.description}</p>}
                   <div className="mt-4 flex items-center justify-between gap-3"><span className="font-black text-on-surface">{laborDayEligible ? <><span className="mr-2 text-sm font-bold text-on-surface-variant line-through">{productPrice(product)}</span>{laborDayPrice(product)}</> : productPrice(product)}</span><span className={`text-xs font-bold ${product.availableForSale ? "text-emerald-700 dark:text-emerald-300" : "text-on-surface-variant"}`}>{product.availableForSale ? "Available" : "Unavailable"}</span></div>
-                  {laborDayEligible && <p className="mt-2 text-xs font-bold text-secondary">Price with {LABOR_DAY_SALE.code} at Shopify checkout.</p>}
-                  <a href={laborDayEligible ? laborDayDiscountUrl(product.productUrl) : product.productUrl} target="_blank" rel="noopener noreferrer" className={`mt-4 flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-center text-sm font-black ${product.availableForSale ? "bg-primary text-on-primary" : "pointer-events-none bg-outline-variant/30 text-on-surface-variant"}`} aria-disabled={!product.availableForSale}>{laborDayEligible ? `Shop 30% off with ${LABOR_DAY_SALE.code}` : product.pawprintPersonalizable ? "Personalize with your PawPrint" : "View on Shopify"}<ExternalLink size={15} /></a>
+                  {laborDayEligible && <p className="mt-2 text-xs font-bold text-secondary">Price with {LABOR_DAY_SALE.code}, while redemptions remain. Eligibility and final price confirmed at Shopify checkout.</p>}
+                  <a href={laborDayEligible ? laborDayDiscountUrl(product.productUrl) : withCampaignAttribution(product.productUrl)} target="_blank" rel="noopener noreferrer" className={`mt-4 flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-center text-sm font-black ${product.availableForSale ? "bg-primary text-on-primary" : "pointer-events-none bg-outline-variant/30 text-on-surface-variant"}`} aria-disabled={!product.availableForSale}>{laborDayEligible ? `Shop 30% off with ${LABOR_DAY_SALE.code}` : product.pawprintPersonalizable ? "Personalize with your PawPrint" : "View on Shopify"}<ExternalLink size={15} /></a>
                 </div>
               </article>
               );
