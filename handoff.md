@@ -1,5 +1,23 @@
 # Pawsome3D Labor Day campaign handoff
 
+## Current checkpoint — September 5, 2026, Mountain Time
+
+Updated on the user's command before the next pass. This checkpoint supersedes the September 4 campaign snapshot below; the historical material is retained, not current launch evidence.
+
+- Latest request: update ad status and this handoff, commit and push, then build the deployment ZIP. No Ads settings or budgets were changed during this status pass.
+- Live Google Ads campaign list for account `340-191-5907`: **Pawsome3D Labor Day**, Performance Max, **Eligible (Limited)**; reason: **Conversion tracking setup is incomplete**. Budget **$14.80/day**; account total shown **$14.80/day**. The current All campaigns view reports **1–1 of 1**, with **0 drafts in progress**. A second published campaign is not verified. Preserve the approved **$30/day combined average budget**.
+- Campaign ID `24211184790` and September 13, 2026 end date were verified September 4; the end date was saved and reopened successfully then. It was not rechecked in this September 5 pass.
+- Conversion Sales Summary (Last 7 days) showed no available data. Individual conversion-action configuration was not audited; no revenue or conversion performance is asserted. The user's open conversion setup dialog was left unchanged.
+- The September 4 payment warning was not visible in the latest view. This does not independently verify that billing can be charged.
+- Hostinger now shows its signed-in Home page. Production `/version` still reports `2411fbdc60f15dd42209be04e92e1a67cf4e7495`, built August 28, schema 58: the new storefront release is **not deployed**.
+- Copy, margin-planning, conditional offer availability, creative metadata and privacy-preserving UTM link fixes listed as pending in the older snapshot were completed and pushed in **`169d3b4e8967a364fa0a40e2be40709b22c0f130`**. UTM propagation is not Google Ads purchase tracking.
+- September 5 verification: **18/18 focused tests passed** (campaign attribution, Labor Day store, Shopify catalog, release UI); `npm run lint` / TypeScript passed on Node 24.18. The full database-dependent suite was not rerun.
+- Previous clean release: `pawsome3d-labor-day-169d3b4.zip`, SHA-256 `bc83832f1c68209d85bae0c63c01c252ac0bb237a12343e4d576d6e5e69c0298`. A new status commit and corresponding ZIP are the next steps for this request; do not mistake a ZIP or push for deployment.
+- Build from a clean release worktree using `scripts/build-deploy-zip.sh`, Node 24, and the real repository `/Users/robert/PawsMemories`. Preserve untracked user architecture files and screenshot. Exclude `.env`, dependencies and Git data from the archive. Require manifest/checksum validation and the packaged server health check before delivery.
+- Next implementation pass: finish verified purchase conversion tracking, audit assets/destinations and billing, deploy and verify the new production version, then complete the distinct second campaign without duplicate spending. These remain unfinished; do not report the overall project complete.
+
+## Historical September 4 campaign snapshot — superseded above
+
 Snapshot: 2026-09-04 17:46 MDT. Update this file only when the user commands an update. This is a factual checkpoint, not a claim that the project is finished. The earlier engineering handoff is preserved below.
 
 ## Current request and authority
