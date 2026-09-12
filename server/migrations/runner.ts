@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type mysql from "mysql2/promise";
 
-export const CURRENT_SCHEMA_VERSION = 58;
+export const CURRENT_SCHEMA_VERSION = 59;
 
 export interface Migration {
   version: number;
@@ -2660,6 +2660,89 @@ export const MIGRATIONS: Migration[] = [
         UNIQUE KEY uniq_token_hash (token_hash),
         INDEX idx_expires (expires_at),
         INDEX idx_source_ref (source_ref)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ],
+  },
+  {
+    version: 59,
+    name: "pawpath_privacy_and_safety",
+    skipWhenTableMissing: "users",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS pawpath_location_settings (
+        user_phone VARCHAR(32) NOT NULL PRIMARY KEY,
+        visibility ENUM('private','friends','community') NOT NULL DEFAULT 'private',
+        share_precise_with_friends TINYINT(1) NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_pawpath_settings_user FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_presence (
+        user_phone VARCHAR(32) NOT NULL PRIMARY KEY,
+        pet_id INT NULL,
+        latitude DECIMAL(10,7) NOT NULL,
+        longitude DECIMAL(10,7) NOT NULL,
+        accuracy_meters DECIMAL(8,2) NULL,
+        expires_at TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pawpath_presence_expiry (expires_at),
+        CONSTRAINT fk_pawpath_presence_user FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
+        CONSTRAINT fk_pawpath_presence_pet FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_friendships (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        requester_phone VARCHAR(32) NOT NULL,
+        addressee_phone VARCHAR(32) NOT NULL,
+        status ENUM('pending','accepted','declined') NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_pawpath_friendship (requester_phone, addressee_phone),
+        INDEX idx_pawpath_friendship_addressee (addressee_phone, status),
+        CONSTRAINT fk_pawpath_friend_requester FOREIGN KEY (requester_phone) REFERENCES users(phone) ON DELETE CASCADE,
+        CONSTRAINT fk_pawpath_friend_addressee FOREIGN KEY (addressee_phone) REFERENCES users(phone) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_blocks (
+        blocker_phone VARCHAR(32) NOT NULL,
+        blocked_phone VARCHAR(32) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (blocker_phone, blocked_phone),
+        CONSTRAINT fk_pawpath_blocker FOREIGN KEY (blocker_phone) REFERENCES users(phone) ON DELETE CASCADE,
+        CONSTRAINT fk_pawpath_blocked FOREIGN KEY (blocked_phone) REFERENCES users(phone) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_user_reports (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        reporter_phone VARCHAR(32) NOT NULL,
+        reported_phone VARCHAR(32) NOT NULL,
+        reason ENUM('unsafe_behavior','harassment','spam','false_information','other') NOT NULL,
+        details VARCHAR(1000) NOT NULL DEFAULT '',
+        status ENUM('open','reviewing','resolved','dismissed') NOT NULL DEFAULT 'open',
+        reviewed_by_phone VARCHAR(32) NULL,
+        reviewed_at TIMESTAMP NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pawpath_reports_status (status, created_at),
+        CONSTRAINT fk_pawpath_reporter FOREIGN KEY (reporter_phone) REFERENCES users(phone) ON DELETE CASCADE,
+        CONSTRAINT fk_pawpath_reported FOREIGN KEY (reported_phone) REFERENCES users(phone) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_hazards (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        reporter_phone VARCHAR(32) NOT NULL,
+        type ENUM('broken_glass','aggressive_dog','hot_pavement','foxtails_burrs','poison_or_trash','path_blocked') NOT NULL,
+        severity ENUM('caution','moderate','severe','critical') NOT NULL,
+        latitude DECIMAL(10,7) NOT NULL,
+        longitude DECIMAL(10,7) NOT NULL,
+        notes VARCHAR(500) NOT NULL DEFAULT '',
+        confirmations INT NOT NULL DEFAULT 0,
+        status ENUM('active','resolved','removed') NOT NULL DEFAULT 'active',
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pawpath_hazards_active (status, expires_at),
+        CONSTRAINT fk_pawpath_hazard_reporter FOREIGN KEY (reporter_phone) REFERENCES users(phone) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE TABLE IF NOT EXISTS pawpath_hazard_confirmations (
+        hazard_id BIGINT NOT NULL,
+        user_phone VARCHAR(32) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (hazard_id, user_phone),
+        CONSTRAINT fk_pawpath_confirmation_hazard FOREIGN KEY (hazard_id) REFERENCES pawpath_hazards(id) ON DELETE CASCADE,
+        CONSTRAINT fk_pawpath_confirmation_user FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ],
   },

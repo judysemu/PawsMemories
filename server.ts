@@ -175,6 +175,7 @@ import { createStationeryV2Router } from "./server/stationery-v2/routes";
 import { isWagsV2Enabled } from "./server/wags-v2/featureFlag";
 import { createWagsV2Production } from "./server/wags-v2/production";
 import { createWagsV2Router } from "./server/wags-v2/routes";
+import { createPawPathRouter } from "./server/pawpath/routes";
 import { triageReferenceImage, triagePasses, correctiveFromTriage, friendlyQualifyError, isClassMismatch, classLabel, type TriageResult } from "./server/imageTriage";
 import { objectBuildProfile, humanRigHints } from "./server/subjectProfiles";
 
@@ -1124,6 +1125,7 @@ async function startServer() {
   app.use("/api/spatial-generator", requireAuth, spatialGeneratorRouter);
   app.use("/api/rig-pipeline", requireAuth, createRigPipelineRouter(getPool));
   app.use("/api/fur-bin", createFurBinRouter(getPool, { isAdmin: isUserAdmin }));
+  app.use("/api/pawpath", createPawPathRouter({ pool: getPool, requireAuth, isAdmin: isUserAdmin }));
 
   // ── Barkley Presenter (BARKLEY_PRESENTER) ──────────────────────────────
   // Feature-gated interactive educational presenter. 503 when disabled or clips missing.
