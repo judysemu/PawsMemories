@@ -23,14 +23,20 @@ This checkpoint records the user-requested implementation of production requirem
 - Focused authentication, PawPath security, and migration tests: **20/20 PASS**.
 - `npm run build`: **PASS**, but the active shell used Node 22.22.3 while the repository requires Node 24.15–24.x; the build script explicitly bypassed its engine check. Rerun the release build on supported Node 24 before packaging or deployment.
 - Tests cover explicit sharing settings, strict coordinate validation, coordinate coarsening, bounded safety enums/text, safe route IDs, migration registration, existing auth gates, and migration-runner integrity.
-- No database-backed migration was applied and no production endpoint was changed. Schema version 59 is source-ready only.
+- At the original implementation checkpoint, no database-backed migration or production endpoint change had occurred; the execution update below supersedes that database statement.
+
+### September 12 execution update
+
+- The configured remote database migration ledger was read at version 58 with no existing `pawpath_%` tables. Migration 59 then applied successfully in 628 ms; readback confirms migration name `pawpath_privacy_and_safety`, a 64-character checksum, seven PawPath tables, and 12 foreign keys. This is database state, not application deployment evidence.
+- PawPath Android commit `01533de` adds Pawsome3D login/signup, Android Keystore AES-GCM bearer-token storage, authenticated `/api/pawpath` requests, sign-out cleanup, and an explicit stay-private versus approximate-community-sharing decision. Community sharing is never enabled silently and presence remains server-expiring.
+- Android `lintDebug` and `assembleDebug` passed. The updated APK still requires physical Pixel launch verification after the matching server is deployed.
 
 ### Required before production use
 
-1. Review and deploy migration 59 against staging MySQL, then verify all seven tables, indexes, foreign keys, rollback/restore procedure, and query plans with realistic map density.
-2. Deploy the matching server build to staging and verify authenticated HTTP contracts, cross-account privacy, block behavior, friend precision, expired presence cleanup, hazard expiry, operator authorization, and rate limits.
-3. Update PawPath Android to log in through `/api/auth/login`, store its bearer token in Android Keystore-backed storage, call `/api/pawpath/bootstrap`, send `Authorization` on every PawPath request, and change the map path from `/v1/map/users` to `/api/pawpath/map/users`.
-4. Add explicit in-app consent controls before `PUT /presence`; send `DELETE /presence` on sharing-off/logout and stop refresh when the app loses authorization. Do not silently enable community visibility.
+1. Verify migration 59 readback: all seven tables, indexes, foreign keys, and migration checksum. Exercise query plans with realistic map density and confirm backup/restore operations independently.
+2. Deploy the matching server build and verify authenticated HTTP contracts, cross-account privacy, block behavior, friend precision, expired presence cleanup, hazard expiry, operator authorization, and rate limits.
+3. Complete Android account profile setup/email-verification UX and server-side refresh-token/revocation support. Current logout securely clears the device token but the existing Pawsome3D JWT remains valid until expiry.
+4. Send `DELETE /presence` before logout when a network connection is available and add sharing controls to settings after the first-run decision. Server expiry remains the fail-safe.
 5. Build block/report/moderation UI, user safety copy, account deletion/export coverage for the new tables, and a documented retention policy. Decide whether reports retain pseudonymous evidence after account deletion before production migration.
 6. Add DB-backed integration/concurrency/load tests. Current verification is source/type/pure-contract coverage, not live MySQL or physical Android evidence.
 7. Perform a security/privacy review and update Terms, Privacy Policy, Google Play Data Safety, incident response, abuse escalation, monitoring, and alerting before collecting location data.
