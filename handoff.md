@@ -1,3 +1,43 @@
+# Pawsome3D / PawPath production handoff
+
+## PawPath backend checkpoint — September 12, 2026, Mountain Time
+
+This checkpoint records the user-requested implementation of production requirements 1 (authentication), 2 (location privacy), and 6 (safety/moderation). It does not claim deployment or end-to-end Android integration. The Labor Day and historical engineering handoffs remain preserved below.
+
+### Implemented in source
+
+- PawPath reuses Pawsome3D email/password accounts, JWT bearer authentication, email verification, password reset, user profiles, and owned pets. Every `/api/pawpath/*` route is behind the existing `requireAuth` boundary.
+- `GET /api/pawpath/bootstrap` returns the authenticated public account subset, owned pets, and location-sharing settings. It does not expose the internal user key, password hash, or email.
+- Schema migration **59** adds location settings, expiring presence, friendships, blocks, user reports, hazards, and hazard confirmations with ownership foreign keys and deletion behavior.
+- Location sharing defaults to `private`. Private mode deletes published presence. Active presence expires after 15 minutes and must be refreshed by the client.
+- Visibility supports `private`, `friends`, and `community`. Exact coordinates are returned only to accepted friends when the sharing user explicitly enables friend precision. Community coordinates are coarsened to an approximately 220-meter grid.
+- Nearby-map queries enforce a maximum 5 km requested radius, a 200-user response cap, expiry, visibility, accepted friendship rules, and bidirectional blocks.
+- Friendship request/list/accept/decline endpoints are implemented. Blocking removes an existing friendship and excludes both parties from one another's map results.
+- Authenticated hazard creation/listing/confirmation uses closed type/severity enums, bounded notes, server-assigned expiry, distance filtering, and one confirmation per account.
+- Authenticated abuse reports use closed reasons and bounded details. Only existing operators can read the queue or update review status.
+- PawPath requests have an authenticated per-client rate limit. Async route failures are passed to the shared server error boundary instead of becoming unhandled promise rejections.
+
+### Verification completed locally
+
+- `npm run lint`: **PASS** (TypeScript, no errors).
+- Focused authentication, PawPath security, and migration tests: **20/20 PASS**.
+- `npm run build`: **PASS**, but the active shell used Node 22.22.3 while the repository requires Node 24.15–24.x; the build script explicitly bypassed its engine check. Rerun the release build on supported Node 24 before packaging or deployment.
+- Tests cover explicit sharing settings, strict coordinate validation, coordinate coarsening, bounded safety enums/text, safe route IDs, migration registration, existing auth gates, and migration-runner integrity.
+- No database-backed migration was applied and no production endpoint was changed. Schema version 59 is source-ready only.
+
+### Required before production use
+
+1. Review and deploy migration 59 against staging MySQL, then verify all seven tables, indexes, foreign keys, rollback/restore procedure, and query plans with realistic map density.
+2. Deploy the matching server build to staging and verify authenticated HTTP contracts, cross-account privacy, block behavior, friend precision, expired presence cleanup, hazard expiry, operator authorization, and rate limits.
+3. Update PawPath Android to log in through `/api/auth/login`, store its bearer token in Android Keystore-backed storage, call `/api/pawpath/bootstrap`, send `Authorization` on every PawPath request, and change the map path from `/v1/map/users` to `/api/pawpath/map/users`.
+4. Add explicit in-app consent controls before `PUT /presence`; send `DELETE /presence` on sharing-off/logout and stop refresh when the app loses authorization. Do not silently enable community visibility.
+5. Build block/report/moderation UI, user safety copy, account deletion/export coverage for the new tables, and a documented retention policy. Decide whether reports retain pseudonymous evidence after account deletion before production migration.
+6. Add DB-backed integration/concurrency/load tests. Current verification is source/type/pure-contract coverage, not live MySQL or physical Android evidence.
+7. Perform a security/privacy review and update Terms, Privacy Policy, Google Play Data Safety, incident response, abuse escalation, monitoring, and alerting before collecting location data.
+8. Production remains on the previously observed deployment until independently verified. A commit or release ZIP is not a deployment.
+
+---
+
 # Pawsome3D Labor Day campaign handoff
 
 ## Current checkpoint — September 5, 2026, Mountain Time
