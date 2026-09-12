@@ -2,7 +2,7 @@
 
 ## PawPath backend checkpoint — September 12, 2026, Mountain Time
 
-This checkpoint records the user-requested implementation of production requirements 1 (authentication), 2 (location privacy), and 6 (safety/moderation). It does not claim deployment or end-to-end Android integration. The Labor Day and historical engineering handoffs remain preserved below.
+This checkpoint records the user-requested implementation of production requirements 1 (authentication), 2 (location privacy), and 6 (safety/moderation), the production database migration and server deployment, and the first physical Android launch. Authenticated multi-account behavior remains to be accepted end to end. The Labor Day and historical engineering handoffs remain preserved below.
 
 ### Implemented in source
 
@@ -21,7 +21,7 @@ This checkpoint records the user-requested implementation of production requirem
 
 - `npm run lint`: **PASS** (TypeScript, no errors).
 - Focused authentication, PawPath security, and migration tests: **20/20 PASS**.
-- `npm run build`: **PASS**, but the active shell used Node 22.22.3 while the repository requires Node 24.15–24.x; the build script explicitly bypassed its engine check. Rerun the release build on supported Node 24 before packaging or deployment.
+- Initial `npm run build`: **PASS** under Node 22.22.3. The authoritative release was subsequently rebuilt under supported Node 24.18.0, its 177-file manifest was verified, and the packaged server passed `/healthz` boot testing.
 - Tests cover explicit sharing settings, strict coordinate validation, coordinate coarsening, bounded safety enums/text, safe route IDs, migration registration, existing auth gates, and migration-runner integrity.
 - At the original implementation checkpoint, no database-backed migration or production endpoint change had occurred; the execution update below supersedes that database statement.
 
@@ -29,18 +29,21 @@ This checkpoint records the user-requested implementation of production requirem
 
 - The configured remote database migration ledger was read at version 58 with no existing `pawpath_%` tables. Migration 59 then applied successfully in 628 ms; readback confirms migration name `pawpath_privacy_and_safety`, a 64-character checksum, seven PawPath tables, and 12 foreign keys. This is database state, not application deployment evidence.
 - PawPath Android commit `01533de` adds Pawsome3D login/signup, Android Keystore AES-GCM bearer-token storage, authenticated `/api/pawpath` requests, sign-out cleanup, and an explicit stay-private versus approximate-community-sharing decision. Community sharing is never enabled silently and presence remains server-expiring.
-- Android `lintDebug` and `assembleDebug` passed. The updated APK still requires physical Pixel launch verification after the matching server is deployed.
+- Release `pawsome3d-pawpath-f1cd91e.zip` was built from pushed `main` commit `f1cd91effbbddc2eb7d1eda9c76041a10e7c615e` with SHA-256 `205fdbb9ddf767ff7ab03d3e7c233f176958c0043b6451e1f9ce623d090c596c`. Hostinger reports that package **Completed** and **Current**.
+- Production `/healthz` is `ok`; `/readyz` reports a healthy database and schema 59; `/version` reports commit `f1cd91effbbddc2eb7d1eda9c76041a10e7c615e`, branch `main`, and schema 59. Unauthenticated PawPath bootstrap and nearby-user requests return HTTP 401, proving the live route and auth boundary are active.
+- Android `lintDebug` and `assembleDebug` passed. The debug APK installed successfully on physical Pixel 9a serial `5A061JEBF20220`, cold-launched into `com.robco.pawpath.debug/com.robco.pawpath.MainActivity`, visibly rendered the Pawsome3D sign-in gate, and produced no matching fatal-exception or ANR entry in the final crash scan.
+- No account credentials were entered during device acceptance. Login/signup, the post-auth full-screen map, consent choice, presence publication, nearby users, and safety workflows therefore remain unverified on the physical device.
 
 ### Required before production use
 
-1. Verify migration 59 readback: all seven tables, indexes, foreign keys, and migration checksum. Exercise query plans with realistic map density and confirm backup/restore operations independently.
-2. Deploy the matching server build and verify authenticated HTTP contracts, cross-account privacy, block behavior, friend precision, expired presence cleanup, hazard expiry, operator authorization, and rate limits.
+1. Exercise migration 59 query plans with realistic map density and confirm backup/restore operations independently; the version/checksum/table/foreign-key readback is complete.
+2. Verify authenticated HTTP contracts with multiple controlled accounts: cross-account privacy, block behavior, friend precision, expired presence cleanup, hazard expiry, operator authorization, and rate limits. The matching server build is deployed.
 3. Complete Android account profile setup/email-verification UX and server-side refresh-token/revocation support. Current logout securely clears the device token but the existing Pawsome3D JWT remains valid until expiry.
 4. Send `DELETE /presence` before logout when a network connection is available and add sharing controls to settings after the first-run decision. Server expiry remains the fail-safe.
 5. Build block/report/moderation UI, user safety copy, account deletion/export coverage for the new tables, and a documented retention policy. Decide whether reports retain pseudonymous evidence after account deletion before production migration.
-6. Add DB-backed integration/concurrency/load tests. Current verification is source/type/pure-contract coverage, not live MySQL or physical Android evidence.
+6. Add DB-backed integration/concurrency/load tests. Current verification includes migration readback and physical sign-in-screen launch, but not authenticated multi-account Android acceptance.
 7. Perform a security/privacy review and update Terms, Privacy Policy, Google Play Data Safety, incident response, abuse escalation, monitoring, and alerting before collecting location data.
-8. Production remains on the previously observed deployment until independently verified. A commit or release ZIP is not a deployment.
+8. Monitor the new production deployment and retain the prior Hostinger release as the rollback point until authenticated acceptance is complete.
 
 ---
 
